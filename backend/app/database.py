@@ -2,11 +2,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import declarative_base
 from dotenv import load_dotenv
+from os import getenv
 
+load_dotenv()
 
-# I am using PostgreSQL for testing now 
-
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = getenv("DATABASE_URL")
 
 engine = create_engine(
     DATABASE_URL, 
