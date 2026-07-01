@@ -14,7 +14,17 @@
         "buildType": "apk"
       },
       "distribution": "internal",
-      "environment": "production"
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_API_URL": "https://travel-allowance-app.onrender.com",
+        "EXPO_PUBLIC_API_TIMEOUT_MS": "30000",
+        "EXPO_PUBLIC_MAPS_PROVIDER": "backend",
+        "EXPO_PUBLIC_ENABLE_MAPS": "true",
+        "EXPO_PUBLIC_ENABLE_PUSH_NOTIFICATIONS": "false",
+        "EXPO_PUBLIC_ENABLE_REPORT_EXPORTS": "true",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "beba1254-9286-4170-995c-a78bcab678c6"
+      }
     },
     "production": {
       "android": {

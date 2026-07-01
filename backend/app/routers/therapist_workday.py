@@ -1,4 +1,3 @@
-from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -11,6 +10,7 @@ from app.schemas.therapist_workday import (
     TodayWorkdayResponse,
 )
 from app.utils.auth import require_role
+from app.utils.timezone import india_now
 
 router = APIRouter(
     prefix="/therapist/workday",
@@ -22,7 +22,7 @@ def get_today_workday(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["therapist"])),
 ):
-    today = date.today()
+    today = india_now().date()
     workday = (
         db.query(TherapistWorkDay)
         .filter(
@@ -57,7 +57,8 @@ def start_day(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["therapist"]))
 ):
-    today = date.today()
+    started_at = india_now()
+    today = started_at.date()
 
     existing = (
         db.query(TherapistWorkDay)
@@ -80,6 +81,7 @@ def start_day(
         start_address=payload.start_address,
         start_latitude=payload.start_latitude,
         start_longitude=payload.start_longitude,
+        started_at=started_at,
         is_active=True
     )
 

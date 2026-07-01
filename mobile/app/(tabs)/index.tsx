@@ -64,6 +64,7 @@ const formatStartedAt = (value: string | null): string => {
   return date.toLocaleTimeString("en-IN", {
     hour: "numeric",
     minute: "2-digit",
+    timeZone: "Asia/Kolkata",
   });
 };
 
@@ -432,7 +433,7 @@ export default function DashboardScreen() {
         </View>
 
         <View style={styles.workdayDetails}>
-          <Text style={styles.detailLabel}>Started At</Text>
+          <Text style={styles.detailLabel}>Started At (IST)</Text>
           <Text style={styles.detailValue}>
             {formatStartedAt(startedAt)}
           </Text>

@@ -1,7 +1,8 @@
 import tempfile
 import unittest
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -178,6 +179,36 @@ class TherapistMobileContractTests(unittest.TestCase):
             active_response.json()["start_address"],
             "Starting address",
         )
+
+    @patch("app.routers.therapist_workday.india_now")
+    def test_start_workday_uses_indian_date_and_timestamp(
+        self,
+        mock_india_now,
+    ):
+        indian_time = datetime(
+            2026,
+            7,
+            2,
+            1,
+            15,
+            tzinfo=timezone(timedelta(hours=5, minutes=30)),
+        )
+        mock_india_now.return_value = indian_time
+
+        response = self.client.post(
+            "/therapist/workday/start",
+            json={
+                "start_address": "Starting address",
+                "start_latitude": 12.1,
+                "start_longitude": 77.1,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        workday = self.db.query(TherapistWorkDay).one()
+        self.assertEqual(workday.work_date, indian_time.date())
+        self.assertEqual(workday.started_at, indian_time.replace(tzinfo=None))
 
     def test_schedule_history_is_scoped_for_therapists_and_global_for_admin(self):
         own_completed = self.create_schedule(self.therapist, "completed")
