@@ -10,3 +10,14 @@ export const getDistance = async ( fromLocation, toLocation, token ) => {
     );
     return response.data;
 };
+
+export const reverseGeocode = async ( latitude, longitude, token ) => {
+    const response = await api.get(
+        "/maps/reverse-geocode",
+        {
+            params: { latitude, longitude },
+            headers: { Authorization: `Bearer ${token}` }
+        }
+    );
+    return response.data;
+};

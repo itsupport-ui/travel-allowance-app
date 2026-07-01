@@ -99,48 +99,6 @@ export const getTodayTravels =
 }
 
 
-export const deleteTravel =
-  async (
-    travelId,
-    token
-  ) => {
-
-    const response =
-      await api.delete(
-        `/travel/${travelId}`,
-        {
-          headers: {
-            Authorization:
-              `Bearer ${token}`
-          }
-        }
-      )
-
-    return response.data
-}
-
-// implement for updateTravel
-
-export const updateTravel =
-    async (
-        travelId,
-        travelData,
-        token
-    ) => {
-        const response =
-            await api.put(
-                `/travel/${travelId}`,
-                travelData,
-                {
-                    headers: {
-                        Authorization: `Bearer ${token}`
-                    }
-                }
-            )
-
-        return response.data
-    }
-
 export const getTravelById =
     async (
         travelId,
@@ -158,3 +116,24 @@ export const getTravelById =
 
         return response.data
     }
+
+export const openTravelInvoice = async (travelId, token) => {
+  const response = await api.get(
+    `/travel/${travelId}/invoice`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      responseType: "blob"
+    }
+  )
+  const invoiceUrl = URL.createObjectURL(response.data)
+  const link = document.createElement("a")
+  link.href = invoiceUrl
+  link.target = "_blank"
+  link.rel = "noopener noreferrer"
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(invoiceUrl), 60_000)
+}

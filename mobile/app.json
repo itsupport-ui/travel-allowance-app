@@ -1,0 +1,80 @@
+{
+  "expo": {
+    "name": "Travel Allowance",
+    "slug": "travel-allowance",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/app-icon-brand.png",
+    "scheme": "travelallowance",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#F8F9FA",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ayurghar.travelallowance.mobile",
+      "buildNumber": "1"
+    },
+    "android": {
+      "package": "com.ayurghar.travelallowance.mobile",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#F8F9FA",
+        "foregroundImage": "./assets/images/adaptive-icon-foreground-brand.png",
+        "monochromeImage": "./assets/images/adaptive-icon-monochrome-brand.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon-brand.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Travel Allowance to use your location to start your workday."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon-brand.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#F8F9FA",
+          "dark": {
+            "backgroundColor": "#F8F9FA"
+          }
+        }
+      ],
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "color": "#1B5E20",
+          "icon": "./assets/images/notification-icon-brand.png",
+          "defaultChannel": "general",
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "beba1254-9286-4170-995c-a78bcab678c6"
+      }
+    }
+  }
+}

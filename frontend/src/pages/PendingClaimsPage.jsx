@@ -1,26 +1,28 @@
 import { useEffect, useState } from "react"
 import AdminLayout from "../layouts/AdminLayout"
-import { getAllClaims } from "../services/claimService"
+import { getPendingClaims } from "../services/claimService"
 import toast from "react-hot-toast"
 import { useNavigate } from "react-router-dom"
+import { exportClaimsListPdf } from "../utils/pdfExport"
+
 
 function PendingClaimsPage() {
   const navigate = useNavigate()
   const [claims, setClaims] = useState([])
 
   useEffect(() => {
+    const fetchClaims = async () => {
+      try {
+        const token = localStorage.getItem("token")
+        const data = await getPendingClaims(token)
+        setClaims(data)
+      } catch {
+        toast.error("Failed to load claims")
+      }
+    }
+
     fetchClaims()
   }, [])
-
-  const fetchClaims = async () => {
-    try {
-      const token = localStorage.getItem("token")
-      const data = await getAllClaims(token)
-      setClaims(data)
-    } catch {
-      toast.error("Failed to load claims")
-    }
-  }
 
   // Helper utility to render a consistent accessible status pill
   const getStatusBadge = (status) => {
@@ -35,10 +37,22 @@ function PendingClaimsPage() {
     <AdminLayout>
       <div className="w-full max-w-7xl mx-auto">
         
-        {/* Responsive Heading */}
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-6">
-          Pending Claims
-        </h1>
+        {/* Responsive Heading + Export */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">
+            Pending Claims
+          </h1>
+          <button
+            onClick={() => exportClaimsListPdf("Pending Claims", claims)}
+            disabled={claims.length === 0}
+            className="inline-flex items-center gap-2 border border-blue-600 text-blue-600 hover:bg-blue-50 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2 rounded-lg text-sm font-semibold transition shadow-sm"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+            Export PDF
+          </button>
+        </div>
 
         {/* ==================== 1. MOBILE & TABLET LAYOUT (Hidden on Desktop) ==================== */}
         <div className="xl:hidden space-y-4">
@@ -73,7 +87,7 @@ function PendingClaimsPage() {
                   </div>
                   <div>
                     <span className="text-xs text-gray-400 block">Per KM Fare</span>
-                    <span className="font-medium text-gray-800">₹{claim.per_km_rate}</span>
+                    <span className="font-medium text-gray-800">₹{claim.per_km_rate ?? 0}</span>
                   </div>
                   <div>
                     <span className="text-xs text-gray-400 block">Base Fare</span>
@@ -131,7 +145,7 @@ function PendingClaimsPage() {
                     <td className="p-4 text-sm font-medium text-gray-800">{claim.therapist_name}</td>
                     <td className="p-4 text-sm text-gray-600">{claim.claim_date}</td>
                     <td className="p-4 text-sm text-gray-600">{claim.total_km}</td>
-                    <td className="p-4 text-sm text-gray-600">₹{claim.per_km_rate}</td>
+                    <td className="p-4 text-sm text-gray-600">₹{claim.per_km_rate ?? 0}</td>
                     <td className="p-4 text-sm text-gray-600">₹{claim.travel_total}</td>
                     <td className="p-4 text-sm text-gray-600">₹{claim.daily_allowance}</td>
                     <td className="p-4 text-sm font-semibold text-gray-900">₹{claim.grand_total}</td>

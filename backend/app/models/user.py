@@ -17,3 +17,9 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     travel_entries = relationship("TravelEntry", back_populates="therapist")
     claims = relationship("Claim", back_populates="therapist")
+    push_tokens = relationship(
+        "PushToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    base_location = Column(String, nullable=True)  # New field for therapist's base location

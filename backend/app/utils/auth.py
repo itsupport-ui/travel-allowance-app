@@ -10,7 +10,7 @@ from app.models.user import User
 
 secret_key = "your_secret_key"
 algorithm = "HS256"
-access_token_expire_minutes = 30
+access_token_expire_minutes = 1440  # 24 hours
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 

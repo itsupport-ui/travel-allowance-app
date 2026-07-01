@@ -1,4 +1,13 @@
-from sqlalchemy import (Column, Integer, String, Float,Boolean, DateTime, ForeignKey)
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -6,6 +15,13 @@ from app.database import Base
 
 class TravelEntry(Base):
     __tablename__ = "travel_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "therapist_id",
+            "schedule_id",
+            name="uq_travel_entries_therapist_schedule",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     therapist_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -24,3 +40,6 @@ class TravelEntry(Base):
     transport_mode = Column(String, nullable=False, default="Vehicle")  
     bill_amount = Column(Float, nullable=True)
     invoice_file = Column(String, nullable=True)
+    schedule_id = Column(Integer, ForeignKey("treatment_schedules.id"), nullable=True)
+    arrival_latitude = Column(Float, nullable=True)
+    arrival_longitude = Column(Float, nullable=True)

@@ -27,6 +27,9 @@ class TravelResponse(BaseModel):
     transport_mode: str # e.g., car, bus, train, etc.
     bill_amount: float | None = None
     invoice_file: str | None = None
+    schedule_id: int | None = None
+    arrival_latitude: float | None = None
+    arrival_longitude: float | None = None
     
     class Config:
         from_attributes = True

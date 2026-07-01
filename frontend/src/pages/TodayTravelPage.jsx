@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import TherapistLayout from "../layouts/TherapistLayout"
-import { getTodayTravels, deleteTravel } from "../services/travelService"
+import { getTodayTravels } from "../services/travelService"
 import { useNavigate } from "react-router-dom"
 import { submitClaim } from "../services/claimService"
 import toast from "react-hot-toast"
@@ -10,30 +10,18 @@ function TodayTravelPage() {
   const [travels, setTravels] = useState([])
 
   useEffect(() => {
+    const fetchTravels = async () => {
+      try {
+        const token = localStorage.getItem("token")
+        const data = await getTodayTravels(token)
+        setTravels(data)
+      } catch {
+        toast.error("Failed to load travel data")
+      }
+    }
+
     fetchTravels()
   }, [])
-
-  const fetchTravels = async () => {
-    try {
-      const token = localStorage.getItem("token")
-      const data = await getTodayTravels(token)
-      setTravels(data)
-    } catch {
-      toast.error("Failed to load travel data")
-    }
-  }
-
-  const handleDelete = async (travelId) => {
-    if (!window.confirm("Are you sure you want to delete this log?")) return
-    try {
-      const token = localStorage.getItem("token")
-      await deleteTravel(travelId, token)
-      toast.success("Travel log removed")
-      fetchTravels()
-    } catch {
-      toast.error("Failed to delete travel")
-    }
-  }
 
   const handleSubmitClaim = async () => {
     try {
@@ -56,7 +44,7 @@ function TodayTravelPage() {
               Today's Travel
             </h1>
             <p className="text-sm text-gray-500">
-              Manage logs and submit your daily travel mileage claims.
+              View your logs and submit your daily travel mileage claims.
             </p>
           </div>
           <button
@@ -122,18 +110,12 @@ function TodayTravelPage() {
                 </div>
 
                 {/* Core Mobile Action Row */}
-                <div className="grid grid-cols-2 gap-3 pt-2">
+                <div className="pt-2">
                   <button
-                    onClick={() => navigate(`/travel/edit/${travel.id}`)}
+                    onClick={() => navigate(`/travel/${travel.id}`)}
                     className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold py-2.5 rounded-lg text-sm transition text-center"
                   >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(travel.id)}
-                    className="w-full bg-red-50 hover:bg-red-100 text-red-600 font-semibold py-2.5 rounded-lg text-sm transition text-center"
-                  >
-                    Delete
+                    View Details
                   </button>
                 </div>
               </div>
@@ -184,16 +166,10 @@ function TodayTravelPage() {
                       </td>
                       <td className="p-4 text-center whitespace-nowrap">
                         <button
-                          onClick={() => navigate(`/travel/edit/${travel.id}`)}
-                          className="text-blue-600 hover:text-blue-800 font-medium text-sm px-3 py-1.5 rounded-md hover:bg-blue-50 transition mr-1"
+                          onClick={() => navigate(`/travel/${travel.id}`)}
+                          className="text-blue-600 hover:text-blue-800 font-medium text-sm px-3 py-1.5 rounded-md hover:bg-blue-50 transition"
                         >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDelete(travel.id)}
-                          className="text-red-600 hover:text-red-800 font-medium text-sm px-3 py-1.5 rounded-md hover:bg-red-50 transition"
-                        >
-                          Delete
+                          View Details
                         </button>
                       </td>
                     </tr>

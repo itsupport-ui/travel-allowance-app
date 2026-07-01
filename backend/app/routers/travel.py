@@ -1,15 +1,17 @@
+from pathlib import Path
+import mimetypes
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.travel import TravelEntry
 from app.models.settings import Settings
 from app.models.user import User
-from app.schemas.travel import TravelCreate, TravelResponse
+from app.schemas.travel import TravelResponse
 from app.utils.auth import get_current_user, require_role
-from datetime import datetime
 from datetime import date
 from sqlalchemy import func
-from app.models.claim import Claim
 from fastapi import ( Form, File, UploadFile )
 import os
 import shutil
@@ -20,6 +22,33 @@ router = APIRouter(
     tags=["Travel"]
 )
 
+UPLOAD_ROOT = Path("uploads").resolve()
+
+
+def resolve_invoice_path(invoice_file: str) -> Path:
+    stored_path = Path(invoice_file)
+    candidate = (
+        stored_path.resolve()
+        if stored_path.is_absolute()
+        else (Path.cwd() / stored_path).resolve()
+    )
+
+    try:
+        candidate.relative_to(UPLOAD_ROOT)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=404,
+            detail="Invoice file not found",
+        ) from error
+
+    if not candidate.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Invoice file not found",
+        )
+
+    return candidate
+
 @router.post(
     "/",
     response_model=
@@ -28,7 +57,7 @@ router = APIRouter(
 def create_travel(
 
     patient_name:
-    str = Form(...),
+    str | None = Form(None),
 
     travel_date:
     date = Form(...),
@@ -126,10 +155,8 @@ def create_travel(
             exist_ok=True
         )
 
-        file_path = (
-            f"uploads/"
-            f"{invoice_file.filename}"
-        )
+        safe_filename = Path(invoice_file.filename or "invoice").name
+        file_path = f"uploads/{safe_filename}"
 
         with open(
             file_path,
@@ -196,51 +223,24 @@ def create_travel(
 @router.put("/{travel_id}", response_model=TravelResponse)
 def update_travel(
     travel_id: int,
-    travel_data: TravelCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["therapist"]))
 ):
-    travel = db.query(TravelEntry).filter(TravelEntry.id == travel_id, TravelEntry.therapist_id == current_user.id).first()
+    travel = (
+        db.query(TravelEntry)
+        .filter(
+            TravelEntry.id == travel_id,
+            TravelEntry.therapist_id == current_user.id,
+        )
+        .first()
+    )
     if not travel:
         raise HTTPException(status_code=404, detail="Travel entry not found")
 
-    if travel.therapist_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to update this travel entry")
-    settings = db.query(Settings).first()
-
-    travel.travel_date = travel_data.travel_date
-    travel.from_address = travel_data.from_address
-    travel.to_address = travel_data.to_address
-    travel.total_km = travel_data.total_km
-    travel.patient_visited = travel_data.patient_visited
-    travel.patient_name = travel_data.patient_name
-    travel.per_km_rate = settings.per_km_rate
-    travel.travel_fare = travel_data.total_km * settings.per_km_rate
-    travel.patient_name = travel_data.patient_name
-    travel.transport_mode = travel_data.transport_mode
-    travel.bill_amount = travel_data.bill_amount
-
-    claim = (
-    db.query(Claim)
-    .filter(
-        Claim.therapist_id
-        ==
-        current_user.id,
-
-        Claim.claim_date
-        ==
-        travel.travel_date
+    raise HTTPException(
+        status_code=403,
+        detail="Travel entries cannot be edited after creation",
     )
-    .first()
-)
-    if claim:
-        claim.status = (
-        "reopened"
-    )
-
-    db.commit()
-    db.refresh(travel)
-    return travel
 
 @router.get(
     "/my",
@@ -305,15 +305,21 @@ def delete_travel(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["therapist"]))
 ):
-    travel = db.query(TravelEntry).filter(TravelEntry.id == travel_id, TravelEntry.therapist_id == current_user.id).first()
+    travel = (
+        db.query(TravelEntry)
+        .filter(
+            TravelEntry.id == travel_id,
+            TravelEntry.therapist_id == current_user.id,
+        )
+        .first()
+    )
     if not travel:
         raise HTTPException(status_code=404, detail="Travel entry not found")
-    if travel.therapist_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this travel entry")
-    
-    db.delete(travel)
-    db.commit()
-    return {"detail": "Travel entry deleted successfully"}
+
+    raise HTTPException(
+        status_code=403,
+        detail="Travel entries cannot be deleted after creation",
+    )
 
 
 # when I try to get today's travel entries, I am not getting any entries, even if I have created travel entries for today. I will check the date comparison logic in the query, and make sure that I am comparing only the date part of the datetime field in the database with today's date. I will use the date() function to extract the date part from the datetime field in the query.
@@ -329,6 +335,46 @@ def get_today_travel(
 
     ).all()
     return travels
+
+
+@router.get("/{travel_id}/invoice")
+def get_travel_invoice(
+    travel_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    travel = (
+        db.query(TravelEntry)
+        .filter(TravelEntry.id == travel_id)
+        .first()
+    )
+
+    if not travel:
+        raise HTTPException(status_code=404, detail="Travel not found")
+
+    if (
+        current_user.role != "admin"
+        and travel.therapist_id != current_user.id
+    ):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if not travel.invoice_file:
+        raise HTTPException(
+            status_code=404,
+            detail="No invoice is attached to this travel entry",
+        )
+
+    invoice_path = resolve_invoice_path(travel.invoice_file)
+    media_type = (
+        mimetypes.guess_type(invoice_path.name)[0]
+        or "application/octet-stream"
+    )
+
+    return FileResponse(
+        path=invoice_path,
+        media_type=media_type,
+        filename=invoice_path.name,
+    )
 
 @router.get(
     "/{travel_id}",

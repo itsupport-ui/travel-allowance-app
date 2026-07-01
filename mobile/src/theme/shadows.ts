@@ -1,0 +1,47 @@
+import { colors } from "./colors";
+
+export const shadows = {
+  color: colors.black,
+  elevation: {
+    none: 0,
+    low: 1,
+    card: 2,
+    raised: 3,
+    overlay: 4,
+    high: 5,
+    modal: 6,
+    floating: 8,
+  },
+  offset: {
+    none: { width: 0, height: 0 },
+    y1: { width: 0, height: 1 },
+    y2: { width: 0, height: 2 },
+    y3: { width: 0, height: 3 },
+    y4: { width: 0, height: 4 },
+    y6: { width: 0, height: 6 },
+    y8: { width: 0, height: 8 },
+  },
+  opacity: {
+    faint: 0.04,
+    subtle: 0.05,
+    soft: 0.06,
+    mediumSoft: 0.07,
+    card: 0.08,
+    medium: 0.1,
+    strong: 0.12,
+    overlay: 0.15,
+    heavy: 0.2,
+  },
+  radius: {
+    xxs: 2,
+    xs: 4,
+    s5: 5,
+    sm: 6,
+    cardSoft: 7,
+    card: 8,
+    md: 10,
+    raised: 12,
+    lg: 16,
+    xl: 20,
+  },
+} as const;

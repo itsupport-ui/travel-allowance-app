@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import toast from "react-hot-toast"
 import AdminLayout from "../layouts/AdminLayout"
 import { getClaimHistory } from "../services/claimService"
+import { exportClaimsListPdf } from "../utils/pdfExport"
 
 function ClaimHistoryPage() {
   const navigate = useNavigate()
@@ -44,9 +45,21 @@ function ClaimHistoryPage() {
       <div className="w-full max-w-7xl mx-auto px-2 sm:px-4">
         
         {/* Title text adjustments for fluid viewports */}
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-6">
-          Claim History
-        </h1>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">
+            Claim History
+          </h1>
+          <button
+            onClick={() => exportClaimsListPdf("Claim History", claims)}
+            disabled={claims.length === 0}
+            className="inline-flex items-center gap-2 border border-blue-600 text-blue-600 hover:bg-blue-50 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2 rounded-lg text-sm font-semibold transition shadow-sm"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+            Export PDF
+          </button>
+        </div>
 
         {/* 1. MOBILE RESPONSIVE CARDS (Displays only on mobile/tablet viewports) */}
         <div className="md:hidden space-y-4">

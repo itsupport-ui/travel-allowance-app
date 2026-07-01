@@ -3,6 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import AdminLayout from "../layouts/AdminLayout";
 import { getClaimDetails, approveClaim, rejectClaim } from "../services/claimService";
+import { openTravelInvoice } from "../services/travelService";
+import { exportClaimDetailPdf } from "../utils/pdfExport";
 
 function AdminClaimDetailsPage() {
   const { claimId } = useParams();
@@ -11,17 +13,26 @@ function AdminClaimDetailsPage() {
   const [travels, setTravels] = useState([]);
 
   useEffect(() => {
-    fetchDetails();
-  }, []);
+    const fetchDetails = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const data = await getClaimDetails(claimId, token);
+        setClaim(data.claim);
+        setTravels(data.travels);
+      } catch {
+        toast.error("Failed to load claim");
+      }
+    };
 
-  const fetchDetails = async () => {
+    void fetchDetails();
+  }, [claimId]);
+
+  const handleInvoice = async (travelId) => {
     try {
       const token = localStorage.getItem("token");
-      const data = await getClaimDetails(claimId, token);
-      setClaim(data.claim);
-      setTravels(data.travels);
+      await openTravelInvoice(travelId, token);
     } catch {
-      toast.error("Failed to load claim");
+      toast.error("Failed to open invoice");
     }
   };
 
@@ -67,9 +78,20 @@ function AdminClaimDetailsPage() {
       <div className="w-full max-w-4xl mx-auto px-1 sm:px-4">
         
         {/* Responsive Page Title Typography */}
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-6">
-          Claim Details
-        </h1>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">
+            Claim Details
+          </h1>
+          <button
+            onClick={() => exportClaimDetailPdf(claim, travels, "admin")}
+            className="inline-flex items-center gap-2 border border-blue-600 text-blue-600 hover:bg-blue-50 active:scale-95 px-4 py-2 rounded-lg text-sm font-semibold transition shadow-sm"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+            Download PDF
+          </button>
+        </div>
 
         {/* Top Overview Summary Block */}
         <div className="bg-white rounded-xl shadow-md border border-gray-100 p-5 sm:p-6 mb-8">
@@ -174,14 +196,13 @@ function AdminClaimDetailsPage() {
                       {travel.invoice_file && (
                         <div className="flex items-center gap-1.5">
                           <strong className="text-gray-500 font-medium">Invoice:</strong>
-                          <a 
-                            href={`http://localhost:8000/${travel.invoice_file}`} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
+                          <button
+                            type="button"
+                            onClick={() => handleInvoice(travel.id)}
                             className="text-blue-600 hover:underline font-medium inline-flex items-center"
                           >
                             View Invoice
-                          </a>
+                          </button>
                         </div>
                       )}
                     </div>

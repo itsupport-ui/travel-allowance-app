@@ -12,7 +12,9 @@ from sqlalchemy.orm import (
 )
 
 from sqlalchemy import (
-    func
+    func,
+    or_,
+    and_
 )
 
 from app.database import (
@@ -21,6 +23,10 @@ from app.database import (
 
 from app.models.travel import (
     TravelEntry
+)
+
+from app.models.treatment_schedule import (
+    TreatmentSchedule
 )
 
 from app.models.claim import (
@@ -136,6 +142,64 @@ def get_dashboard_summary(
         .count()
     )
 
+    today_scheduled = (
+        db.query(TreatmentSchedule)
+        .filter(
+            TreatmentSchedule.therapist_id == current_user.id,
+            TreatmentSchedule.status == "scheduled",
+            or_(
+                and_(
+                    TreatmentSchedule.schedule_type == "one_time",
+                    TreatmentSchedule.treatment_date == today
+                ),
+                and_(
+                    TreatmentSchedule.schedule_type == "recurring",
+                    TreatmentSchedule.start_date <= today,
+                    TreatmentSchedule.end_date >= today
+                )
+            )
+        )
+        .count()
+    )
+
+    completed_today = (
+        db.query(TreatmentSchedule)
+        .filter(
+            TreatmentSchedule.therapist_id == current_user.id,
+            TreatmentSchedule.status == "completed",
+            func.date(TreatmentSchedule.completed_at) == today
+        )
+        .count()
+    )
+
+    missed_today = (
+        db.query(TreatmentSchedule)
+        .filter(
+            TreatmentSchedule.therapist_id == current_user.id,
+            TreatmentSchedule.status == "missed"
+        )
+        .count()
+    )
+
+    upcoming = (
+        db.query(TreatmentSchedule)
+        .filter(
+            TreatmentSchedule.therapist_id == current_user.id,
+            TreatmentSchedule.status == "scheduled",
+            or_(
+                and_(
+                    TreatmentSchedule.schedule_type == "one_time",
+                    TreatmentSchedule.treatment_date > today
+                ),
+                and_(
+                    TreatmentSchedule.schedule_type == "recurring",
+                    TreatmentSchedule.end_date > today
+                )
+            )
+        )
+        .count()
+    )
+
     return {
 
         "today_trips":
@@ -148,5 +212,17 @@ def get_dashboard_summary(
         pending_claims,
 
         "approved_claims":
-        approved_claims
+        approved_claims,
+
+        "today_scheduled":
+        today_scheduled,
+
+        "completed_today":
+        completed_today,
+
+        "missed_today":
+        missed_today,
+
+        "upcoming":
+        upcoming
     }

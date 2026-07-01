@@ -1,24 +1,16 @@
-import os
-import requests
-
 from fastapi import (
     APIRouter,
     HTTPException
 )
-
-from dotenv import (
-    load_dotenv
+from app.services.maps_service import (
+    MapsServiceError,
+    calculate_distance_km,
+    reverse_geocode_address,
 )
-
-load_dotenv()
 
 router = APIRouter(
     prefix="/maps",
     tags=["Maps"]
-)
-
-API_KEY = os.getenv(
-    "GOOGLE_MAPS_API_KEY"
 )
 
 
@@ -30,67 +22,34 @@ def get_distance(
     to_location: str
 ):
 
-    url = (
-        "https://routes.googleapis.com"
-        "/directions/v2:computeRoutes"
-    )
-
-    headers = {
-        "Content-Type":
-            "application/json",
-
-        "X-Goog-Api-Key":
-            API_KEY,
-
-        "X-Goog-FieldMask":
-            "routes.distanceMeters"
-    }
-
-    body = {
-
-        "origin": {
-            "address":
-            from_location
-        },
-
-        "destination": {
-            "address":
-            to_location
-        },
-
-        "travelMode":
-        "DRIVE"
-    }
-
-    response = requests.post(
-        url,
-        headers=headers,
-        json=body
-    )
-
-    data = response.json()
-
-    if "routes" not in data:
-
+    try:
+        distance_km = calculate_distance_km(
+            from_address=from_location,
+            to_address=to_location
+        )
+    except MapsServiceError as error:
         raise HTTPException(
             status_code=400,
-            detail=data
-        )
-
-    distance_meters = (
-        data["routes"][0]
-        ["distanceMeters"]
-    )
-
-    distance_km = (
-        round(
-            distance_meters
-            / 1000,
-            2
-        )
-    )
+            detail=str(error),
+        ) from error
 
     return {
         "distance_km":
         distance_km
     }
+
+
+@router.get("/reverse-geocode")
+def reverse_geocode(
+    latitude: float,
+    longitude: float
+):
+    address = reverse_geocode_address(latitude, longitude)
+
+    if not address:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not resolve address for current location"
+        )
+
+    return {"address": address}

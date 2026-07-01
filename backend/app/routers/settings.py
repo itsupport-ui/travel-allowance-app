@@ -26,7 +26,8 @@ from app.models.user import (
 )
 
 from app.utils.auth import (
-    get_current_user
+    get_current_user,
+    require_role,
 )
 
 router = APIRouter(
@@ -84,7 +85,7 @@ def update_settings(
 
     current_user:
     User = Depends(
-        get_current_user
+        require_role(["admin"])
     )
 ):
 
