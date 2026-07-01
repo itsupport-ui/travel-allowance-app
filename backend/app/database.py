@@ -1,16 +1,23 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm import declarative_base
+import os
 from dotenv import load_dotenv
-from os import getenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 load_dotenv()
 
-DATABASE_URL = getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not configured")
+
+# Render/Postgres URLs sometimes may start with postgres://
+# SQLAlchemy prefers postgresql://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(
-    DATABASE_URL, 
-    connect_args={"pool_pre_ping": True} 
+    DATABASE_URL,
+    pool_pre_ping=True
 )
 
 SessionLocal = sessionmaker(
@@ -20,6 +27,7 @@ SessionLocal = sessionmaker(
 )
 
 Base = declarative_base()
+
 
 def get_db():
     db = SessionLocal()
