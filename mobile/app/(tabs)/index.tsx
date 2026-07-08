@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { router, type Href } from "expo-router";
+import { router, type ErrorBoundaryProps, type Href } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -18,12 +18,12 @@ import {
   View,
 } from "react-native";
 
-import { DashboardSkeleton } from "../../src/components/skeletons/ScreenSkeletons";
 import { queryKeys } from "../../src/query/queryKeys";
 import { getTherapistDashboardSummary } from "../../src/services/dashboardService";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
 import { reverseGeocode } from "../../src/services/mapsService";
 import { getCurrentUser } from "../../src/services/userService";
+import type { TherapistDashboardSummary } from "../../src/types/dashboard";
 import {
   getTodayWorkday,
   startWorkday,
@@ -34,6 +34,7 @@ import {
   requestLocationPermission,
 } from "../../src/utils/location";
 import {
+  clearAuthSession,
   getWorkdayState,
   removeWorkdayState,
   saveWorkdayState,
@@ -67,6 +68,67 @@ const formatStartedAt = (value: string | null): string => {
     timeZone: "Asia/Kolkata",
   });
 };
+
+const toMetricNumber = (value: unknown): number => {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value)
+        : 0;
+
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalizeSummary = (
+  summary: TherapistDashboardSummary | null | undefined
+): TherapistDashboardSummary | null => {
+  if (!summary) {
+    return null;
+  }
+
+  return {
+    approved_claims: toMetricNumber(summary.approved_claims),
+    completed_today: toMetricNumber(summary.completed_today),
+    missed_today: toMetricNumber(summary.missed_today),
+    pending_claims: toMetricNumber(summary.pending_claims),
+    today_km: toMetricNumber(summary.today_km),
+    today_scheduled: toMetricNumber(summary.today_scheduled),
+    today_trips: toMetricNumber(summary.today_trips),
+    upcoming: toMetricNumber(summary.upcoming),
+  };
+};
+
+export function ErrorBoundary({
+  error,
+  retry,
+}: ErrorBoundaryProps) {
+  return (
+    <View style={styles.fullScreenState}>
+      <View style={styles.fullScreenIcon}>
+        <Ionicons
+          color={colors.danger}
+          name="alert-circle-outline"
+          size={24}
+        />
+      </View>
+      <Text style={styles.fullScreenTitle}>
+        Therapist dashboard unavailable
+      </Text>
+      <Text style={styles.fullScreenText}>
+        {error.message ||
+          "The dashboard could not be displayed. Please try again."}
+      </Text>
+      <TouchableOpacity
+        accessibilityRole="button"
+        style={styles.primaryButton}
+        onPress={() => void retry()}
+      >
+        <Text style={styles.primaryButtonText}>Try Again</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 const toStoredWorkday = (
   workday: TodayWorkdayResponse
@@ -262,14 +324,62 @@ export default function DashboardScreen() {
     }
   };
 
+  const handleLoginAgain = async () => {
+    await clearAuthSession();
+    queryClient.clear();
+    router.replace("/(auth)/login");
+  };
+
+  if (userQuery.error && !userQuery.data) {
+    return (
+      <View style={styles.fullScreenState}>
+        <View style={styles.fullScreenIcon}>
+          <Ionicons
+            color={colors.danger}
+            name="alert-circle-outline"
+            size={24}
+          />
+        </View>
+        <Text style={styles.fullScreenTitle}>
+          Therapist dashboard unavailable
+        </Text>
+        <Text style={styles.fullScreenText}>
+          {getApiErrorMessage(
+            userQuery.error,
+            "Unable to verify your therapist account. Please try again."
+          )}
+        </Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          style={styles.primaryButton}
+          onPress={() => void handleRefresh()}
+        >
+          <Text style={styles.primaryButtonText}>Try Again</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          style={styles.secondaryButton}
+          onPress={() => void handleLoginAgain()}
+        >
+          <Text style={styles.secondaryButtonText}>Login again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   if (
     (userQuery.isPending && !userQuery.data) ||
     (summaryQuery.isPending && !summaryQuery.data)
   ) {
-    return <DashboardSkeleton />;
+    return (
+      <View style={styles.fullScreenState}>
+        <ActivityIndicator color={PRIMARY} size="large" />
+        <Text style={styles.loadingText}>Loading dashboard...</Text>
+      </View>
+    );
   }
 
-  const summary = summaryQuery.data;
+  const summary = normalizeSummary(summaryQuery.data);
   const workdayStarted =
     workdayQuery.data?.started ?? cachedWorkday !== null;
   const startedAt =
@@ -282,9 +392,9 @@ export default function DashboardScreen() {
           icon: "calendar-outline",
           label: "Today's Schedule",
           route: {
-            pathname: "/(tabs)/schedules",
+            pathname: "/therapist/schedules",
             params: { view: "today" },
-          },
+          } as Href,
           tone: "primary",
           value: String(summary.today_scheduled),
         },
@@ -304,9 +414,9 @@ export default function DashboardScreen() {
           icon: "time-outline",
           label: "Upcoming",
           route: {
-            pathname: "/(tabs)/schedules",
+            pathname: "/therapist/schedules",
             params: { view: "upcoming" },
-          },
+          } as Href,
           tone: "warning",
           value: String(summary.upcoming),
         },
@@ -317,7 +427,7 @@ export default function DashboardScreen() {
         {
           icon: "navigate-outline",
           label: "Today's Trips",
-          route: "/(tabs)/travel",
+          route: "/therapist/travel" as Href,
           tone: "primary",
           value: String(summary.today_trips),
         },
@@ -330,14 +440,14 @@ export default function DashboardScreen() {
         {
           icon: "time-outline",
           label: "Pending Claims",
-          route: "/(tabs)/claims",
+          route: "/therapist/claims" as Href,
           tone: "warning",
           value: String(summary.pending_claims),
         },
         {
           icon: "checkmark-done-outline",
           label: "Approved Claims",
-          route: "/(tabs)/claims",
+          route: "/therapist/claims" as Href,
           tone: "success",
           value: String(summary.approved_claims),
         },
@@ -490,6 +600,67 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.xl,
     paddingBottom: spacing.sectionLg,
+  },
+  fullScreenState: {
+    flex: 1,
+    alignItems: "center",
+    backgroundColor: colors.background,
+    justifyContent: "center",
+    padding: spacing.xl,
+  },
+  fullScreenIcon: {
+    alignItems: "center",
+    backgroundColor: colors.dangerSurface,
+    borderRadius: radius.pill,
+    height: 48,
+    justifyContent: "center",
+    marginBottom: spacing.lg,
+    width: 48,
+  },
+  fullScreenTitle: {
+    color: colors.textStrong,
+    fontSize: typography.size.titleSmall,
+    fontWeight: typography.weight.extrabold,
+    textAlign: "center",
+  },
+  fullScreenText: {
+    color: colors.textMuted,
+    fontSize: typography.size.bodySmall,
+    lineHeight: typography.lineHeight.bodyRelaxed,
+    marginTop: spacing.xs,
+    textAlign: "center",
+  },
+  loadingText: {
+    color: colors.textMuted,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.semibold,
+    marginTop: spacing.lg,
+  },
+  primaryButton: {
+    alignItems: "center",
+    backgroundColor: PRIMARY,
+    borderRadius: radius.control,
+    justifyContent: "center",
+    marginTop: spacing.xl,
+    minHeight: 46,
+    minWidth: 128,
+    paddingHorizontal: spacing.xl,
+  },
+  primaryButtonText: {
+    color: colors.surface,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  secondaryButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: spacing.md,
+    minHeight: 44,
+  },
+  secondaryButtonText: {
+    color: PRIMARY,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
   },
   greeting: {
     color: colors.textMuted,

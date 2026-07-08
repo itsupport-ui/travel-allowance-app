@@ -1,5 +1,5 @@
 # crete tablename : users, columns, id, name, email, password_hash, role, is_active, created_at, updated_at
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -23,3 +23,11 @@ class User(Base):
         cascade="all, delete-orphan",
     )
     base_location = Column(String, nullable=True)  # New field for therapist's base location
+    created_visits = relationship("DoctorVisit", back_populates="creator")  # Relationship to DoctorVisit
+    __table_args__ = (
+        Index(
+            "uq_users_username_lower",
+            func.lower(username),
+            unique=True,
+        ),
+    )

@@ -33,4 +33,47 @@ export const queryKeys = {
     detail: (claimId: number) =>
       ["claims", "detail", claimId] as const,
   },
+  doctor: {
+    dashboard: {
+      summary: ["doctor", "dashboard", "summary"] as const,
+    },
+    consultations: {
+      all: ["doctor", "consultations"] as const,
+      detail: (consultationId: number) =>
+        ["doctor", "consultations", "detail", consultationId] as const,
+    },
+    visits: {
+      all: ["doctor", "visits"] as const,
+      dashboard: ["doctor", "visits", "dashboard"] as const,
+      detail: (visitId: number) =>
+        ["doctor", "visits", "detail", visitId] as const,
+    },
+    treatmentPlans: {
+      all: ["doctor", "treatment-plans"] as const,
+      detail: (planId: number) =>
+        ["doctor", "treatment-plans", "detail", planId] as const,
+      visits: ["doctor", "treatment-plans", "visits"] as const,
+    },
+    expenses: {
+      all: ["doctor", "expenses"] as const,
+      mine: ["doctor", "expenses", "mine"] as const,
+      today: ["doctor", "expenses", "today"] as const,
+    },
+    claims: {
+      all: ["doctor", "claims"] as const,
+      mine: ["doctor", "claims", "mine"] as const,
+      detail: (claimId: number) =>
+        ["doctor", "claims", "detail", claimId] as const,
+    },
+  },
+  adminDoctorWorkflow: {
+    consultations: ["admin", "doctor-workflow", "consultations"] as const,
+    doctors: ["admin", "doctor-workflow", "doctors"] as const,
+    claims: ["admin", "doctor-workflow", "claims"] as const,
+    claimDetail: (claimId: number) =>
+      ["admin", "doctor-workflow", "claims", "detail", claimId] as const,
+    pendingClaims: ["admin", "doctor-workflow", "claims", "pending"] as const,
+    treatmentPlans: ["admin", "doctor-workflow", "treatment-plans"] as const,
+    therapists: ["admin", "doctor-workflow", "therapists"] as const,
+  },
 } as const;

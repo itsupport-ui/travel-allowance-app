@@ -1,27 +1,65 @@
 import { colors, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
-import { router, Tabs } from "expo-router";
+import { router, Tabs, type ErrorBoundaryProps } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   StyleSheet,
+  Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { getHomeRoute } from "../../src/utils/authNavigation";
+import { getCurrentUser } from "../../src/services/userService";
 import {
   clearAuthSession,
   getStoredRole,
   getToken,
+  saveUserSession,
 } from "../../src/utils/storage";
 
 const PRIMARY = colors.primary;
 // Slightly shrinking the icon size can drastically open up breathing room on 5-tab layouts
 const TAB_ICON_SIZE = 20; 
 
+export function ErrorBoundary({
+  error,
+  retry,
+}: ErrorBoundaryProps) {
+  return (
+    <View style={styles.loading}>
+      <Text style={styles.errorTitle}>Therapist workspace unavailable</Text>
+      <Text style={styles.errorText}>
+        {error.message ||
+          "The therapist workspace could not be displayed. Please try again."}
+      </Text>
+      <TouchableOpacity
+        accessibilityRole="button"
+        style={styles.retryButton}
+        onPress={() => void retry()}
+      >
+        <Text style={styles.retryText}>Retry</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        accessibilityRole="button"
+        style={styles.loginButton}
+        onPress={async () => {
+          await clearAuthSession();
+          router.replace("/(auth)/login");
+        }}
+      >
+        <Text style={styles.loginText}>Login again</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 export default function TabLayout() {
   const [authorized, setAuthorized] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [retryAttempt, setRetryAttempt] = useState(0);
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -29,6 +67,7 @@ export default function TabLayout() {
 
     const verifyRole = async () => {
       try {
+        setAuthError(null);
         const [role, token] = await Promise.all([
           getStoredRole(),
           getToken(),
@@ -39,16 +78,29 @@ export default function TabLayout() {
         if (!token) {
           await clearAuthSession();
           router.replace("/(auth)/login");
-        } else if (role === "therapist") {
+          return;
+        }
+
+        let resolvedRole = role;
+
+        if (resolvedRole === null) {
+          const user = await getCurrentUser();
+          await saveUserSession(user);
+          resolvedRole = user.role;
+        }
+
+        if (!active) return;
+
+        if (resolvedRole === "therapist") {
           setAuthorized(true);
-        } else if (role === "admin") {
-          router.replace(getHomeRoute(role));
         } else {
-          router.replace("/");
+          router.replace(getHomeRoute(resolvedRole));
         }
       } catch {
         if (active) {
-          router.replace("/");
+          setAuthError(
+            "Unable to open therapist workspace. Check your connection and try again."
+          );
         }
       }
     };
@@ -58,7 +110,45 @@ export default function TabLayout() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [retryAttempt]);
+
+  if (authError) {
+    return (
+      <View
+        style={[
+          styles.loading,
+          {
+            paddingBottom: insets.bottom,
+            paddingTop: insets.top,
+          },
+        ]}
+      >
+        <Text style={styles.errorTitle}>Therapist workspace unavailable</Text>
+        <Text style={styles.errorText}>{authError}</Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          style={styles.retryButton}
+          onPress={() => {
+            setAuthError(null);
+            setAuthorized(false);
+            setRetryAttempt((attempt) => attempt + 1);
+          }}
+        >
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          style={styles.loginButton}
+          onPress={async () => {
+            await clearAuthSession();
+            router.replace("/(auth)/login");
+          }}
+        >
+          <Text style={styles.loginText}>Login again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   if (!authorized) {
     return (
@@ -72,6 +162,9 @@ export default function TabLayout() {
         ]}
       >
         <ActivityIndicator color={PRIMARY} size="large" />
+        <Text style={styles.loadingText}>
+          Opening therapist workspace...
+        </Text>
       </View>
     );
   }
@@ -197,5 +290,50 @@ const styles = StyleSheet.create({
     fontSize: typography.size.caption - 1, // Shrink by 1px if your default caption is large
     fontWeight: "500", // "500" (Medium) or "400" (Regular) is much cleaner than Bold for tiny labels
     marginTop: 2,
+  },
+  loadingText: {
+    color: colors.textMuted,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.semibold,
+    marginTop: 14,
+  },
+  errorTitle: {
+    color: colors.textStrong,
+    fontSize: typography.size.titleSmall,
+    fontWeight: typography.weight.extrabold,
+    textAlign: "center",
+  },
+  errorText: {
+    color: colors.textMuted,
+    fontSize: typography.size.bodySmall,
+    lineHeight: typography.lineHeight.bodyRelaxed,
+    marginTop: 8,
+    paddingHorizontal: 28,
+    textAlign: "center",
+  },
+  retryButton: {
+    alignItems: "center",
+    backgroundColor: PRIMARY,
+    borderRadius: 12,
+    justifyContent: "center",
+    marginTop: 20,
+    minHeight: 44,
+    minWidth: 120,
+  },
+  retryText: {
+    color: colors.surface,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  loginButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 10,
+    minHeight: 44,
+  },
+  loginText: {
+    color: PRIMARY,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
   },
 });

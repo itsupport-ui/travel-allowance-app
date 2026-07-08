@@ -39,6 +39,8 @@ class TreatmentScheduleResponse(BaseModel):
 
     id: int
 
+    treatment_plan_id: int | None = None
+
     patient_name: str    
 
     doctor_name: str | None = None

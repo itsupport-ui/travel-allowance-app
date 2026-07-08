@@ -25,6 +25,15 @@ import AdminCompletedSchedulesPage from "./pages/AdminCompletedSchedulesPage"
 import AdminMissedSchedulesPage from "./pages/AdminMissedSchedulesPage"
 import TherapistMissedSchedulesPage from "./pages/TherapistMissedSchedulesPage"
 import TherapistCompletedSchedulesPage from "./pages/TherapistCompletedSchedulesPage"
+import AdminDoctorConsultationsPage from "./pages/AdminDoctorConsultationsPage"
+import AdminTreatmentPlansPage from "./pages/AdminTreatmentPlansPage"
+import DoctorDashboard from "./pages/DoctorDashboard"
+import DoctorConsultationsPage from "./pages/DoctorConsultationsPage"
+import DoctorVisitsPage from "./pages/DoctorVisitsPage"
+import DoctorTreatmentPlansPage from "./pages/DoctorTreatmentPlansPage"
+import DoctorExpensesPage from "./pages/DoctorExpensesPage"
+import DoctorClaimsPage from "./pages/DoctorClaimsPage"
+import AdminDoctorClaimsPage from "./pages/AdminDoctorClaimsPage"
 
 
 function App() {
@@ -34,22 +43,31 @@ function App() {
       <Routes>
 
         <Route path="/" element={<LoginPage />} />
-        <Route path="/admin" element={<ProtectedRoute allowedRole="admin"><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/admin" element={<ProtectedRoute allowedPermission="dashboards.view"><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/admin/doctor-consultations" element={<ProtectedRoute allowedPermission="consultations.manage"><AdminDoctorConsultationsPage /></ProtectedRoute>} />
+        <Route path="/admin/treatment-plans" element={<ProtectedRoute allowedPermission="treatment_plans.approve"><AdminTreatmentPlansPage /></ProtectedRoute>} />
+        <Route path="/admin/doctor-claims" element={<ProtectedRoute allowedPermissions={["claims.view", "claims.approved.view"]}><AdminDoctorClaimsPage /></ProtectedRoute>} />
+        <Route path="/doctor" element={<ProtectedRoute allowedRole="doctor"><DoctorDashboard /></ProtectedRoute>} />
+        <Route path="/doctor/consultations" element={<ProtectedRoute allowedPermission="consultations.own"><DoctorConsultationsPage /></ProtectedRoute>} />
+        <Route path="/doctor/visits" element={<ProtectedRoute allowedPermission="doctor_visits.own"><DoctorVisitsPage /></ProtectedRoute>} />
+        <Route path="/doctor/treatment-plans" element={<ProtectedRoute allowedPermission="treatment_plans.create"><DoctorTreatmentPlansPage /></ProtectedRoute>} />
+        <Route path="/doctor/expenses" element={<ProtectedRoute allowedPermission="doctor_expenses.manage"><DoctorExpensesPage /></ProtectedRoute>} />
+        <Route path="/doctor/claims" element={<ProtectedRoute allowedPermission="doctor_claims.submit"><DoctorClaimsPage /></ProtectedRoute>} />
         <Route path="/therapist" element={<ProtectedRoute allowedRole="therapist"><TherapistDashboard /></ProtectedRoute>} />
         <Route path="/travel/add" element={<ProtectedRoute allowedRole="therapist"><AddTravelPage /></ProtectedRoute>} />
         <Route path="/travel/today" element={<ProtectedRoute allowedRole="therapist"><TodayTravelPage /></ProtectedRoute>} />
         <Route path="/travel/:id" element={<ProtectedRoute allowedRole="therapist"><TravelDetailsPage /></ProtectedRoute>} />
         <Route path="/claims" element={<ProtectedRoute allowedRole="therapist"><MyClaimsPage /></ProtectedRoute>} />
-        <Route path="/admin/pending-claims" element={<ProtectedRoute allowedRole="admin"><PendingClaimsPage /></ProtectedRoute>} />
+        <Route path="/admin/pending-claims" element={<ProtectedRoute allowedPermission="claims.view"><PendingClaimsPage /></ProtectedRoute>} />
         <Route path="/admin/settings" element={<ProtectedRoute allowedRole="admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="/admin/register" element={<ProtectedRoute allowedRole="admin"><RegisterUserPage /></ProtectedRoute>} />
-        <Route path="/admin/history" element={<ProtectedRoute allowedRole="admin"><ClaimHistoryPage /></ProtectedRoute>} />
-        <Route path="/admin/claim/:claimId" element={<ProtectedRoute allowedRole="admin"><AdminClaimDetailsPage /></ProtectedRoute>} />
+        <Route path="/admin/history" element={<ProtectedRoute allowedPermission="claims.view"><ClaimHistoryPage /></ProtectedRoute>} />
+        <Route path="/admin/claim/:claimId" element={<ProtectedRoute allowedPermissions={["claims.view", "claims.approved.view"]}><AdminClaimDetailsPage /></ProtectedRoute>} />
         <Route path="/therapist/claim/:claimId" element={<ProtectedRoute allowedRole="therapist"><TherapistClaimDetailsPage /></ProtectedRoute>} />
         <Route path="/today-schedule" element={<ProtectedRoute allowedRole="therapist"><TodaysSchedulePage /></ProtectedRoute>} />
         <Route path="/upcoming-schedule" element={<ProtectedRoute allowedRole="therapist"><UpcomingSchedulePage /></ProtectedRoute>} />
         <Route path="/admin/schedule/today" element={<ProtectedRoute allowedRole="admin"><AdminTodaySchedulePage /></ProtectedRoute>} />
-        <Route path="/admin/schedule/create" element={<ProtectedRoute allowedRole="admin"><AdminCreateSchedulePage /></ProtectedRoute>} />
+        <Route path="/admin/schedule/create" element={<ProtectedRoute allowedPermission="schedules.create"><AdminCreateSchedulePage /></ProtectedRoute>} />
         <Route path="/admin/schedule/:id" element={<ProtectedRoute allowedRole="admin"><AdminScheduleDetailsPage /></ProtectedRoute>} />
         <Route path="/admin/schedule/edit/:id" element={<ProtectedRoute allowedRole="admin"><AdminEditSchedulePage /></ProtectedRoute>} />
         <Route path="/admin/schedule/pending" element={<ProtectedRoute allowedRole="admin"><AdminPendingSchedulesPage /></ProtectedRoute>} />

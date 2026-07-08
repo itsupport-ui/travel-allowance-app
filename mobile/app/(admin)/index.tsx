@@ -236,6 +236,7 @@ export default function AdminDashboardScreen() {
             </Text>
           </View>
         )}
+
       </ScrollView>
     </SafeAreaView>
   );

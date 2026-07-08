@@ -1,14 +1,30 @@
 # We need to create a Claim model to represent the travel allowance claims in our application. This model will include fields such as id, employee_id, amount, status, and created_at.
-from sqlalchemy import Column, Integer, Float, String, Boolean, Date, DateTime, ForeignKey
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.database import Base
-from sqlalchemy import Boolean
 
 class Claim(Base):
     __tablename__ = "claims"
+    __table_args__ = (
+        UniqueConstraint(
+            "therapist_id",
+            "claim_date",
+            name="uq_claims_therapist_date",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     therapist_id = Column(Integer, ForeignKey("users.id"), nullable=False)

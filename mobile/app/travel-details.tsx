@@ -2,7 +2,7 @@ import { colors, radius, shadows, spacing, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Sharing from "expo-sharing";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, type Href } from "expo-router";
 import { useMemo } from "react";
 import {
   ActivityIndicator,
@@ -171,7 +171,7 @@ export default function TravelDetailsScreen() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.replace("/(tabs)/travel");
+      router.replace("/therapist/travel" as Href);
     }
   };
 

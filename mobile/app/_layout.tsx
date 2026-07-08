@@ -131,6 +131,12 @@ export default function RootLayout() {
               queryKey: queryKeys.claims.all,
             });
             void queryClient.invalidateQueries({
+              queryKey: queryKeys.doctor.claims.all,
+            });
+            void queryClient.invalidateQueries({
+              queryKey: queryKeys.doctor.expenses.all,
+            });
+            void queryClient.invalidateQueries({
               queryKey: queryKeys.dashboard.summary,
             });
 
@@ -197,6 +203,8 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)/login" />
           <Stack.Screen name="(admin)" />
+          <Stack.Screen name="(doctor)" />
+          <Stack.Screen name="therapist" />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="schedule-details" />
           <Stack.Screen name="travel-details" />

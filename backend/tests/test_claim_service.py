@@ -21,6 +21,7 @@ from app.models.travel import TravelEntry
 from app.models.user import User
 from app.services import claim_service
 from app.services.claim_service import create_auto_travel_entry
+from app.utils import uploads
 
 
 class AutoTravelEntryTests(unittest.TestCase):
@@ -77,11 +78,11 @@ class AutoTravelEntryTests(unittest.TestCase):
         self.db.commit()
 
         self.temporary_uploads = tempfile.TemporaryDirectory()
-        self.original_upload_root = claim_service.UPLOAD_ROOT
-        claim_service.UPLOAD_ROOT = Path(self.temporary_uploads.name)
+        self.original_upload_root = uploads.UPLOAD_ROOT
+        uploads.UPLOAD_ROOT = Path(self.temporary_uploads.name).resolve()
 
     def tearDown(self):
-        claim_service.UPLOAD_ROOT = self.original_upload_root
+        uploads.UPLOAD_ROOT = self.original_upload_root
         self.temporary_uploads.cleanup()
         self.db.close()
         self.engine.dispose()
@@ -183,7 +184,8 @@ class AutoTravelEntryTests(unittest.TestCase):
     def test_invoice_is_removed_when_flush_fails(self, calculate_distance):
         invoice = SimpleNamespace(
             filename="invoice.pdf",
-            file=io.BytesIO(b"invoice"),
+            content_type="application/pdf",
+            file=io.BytesIO(b"%PDF-1.4\ninvoice"),
         )
 
         with patch.object(

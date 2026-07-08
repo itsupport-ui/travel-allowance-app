@@ -1,6 +1,8 @@
 from datetime import date
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from app.utils.uploads import public_upload_name
 
 
 
@@ -47,6 +49,11 @@ class ClaimTravelEntryResponse(BaseModel):
     travel_fare: float
     patient_visited: bool
     status: str
+
+    @field_validator("invoice_file", mode="before")
+    @classmethod
+    def serialize_invoice_name(cls, value) -> str | None:
+        return public_upload_name(value, "invoice")
 
 
 class ClaimDetailsResponse(BaseModel):

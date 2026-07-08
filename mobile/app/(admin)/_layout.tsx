@@ -92,6 +92,16 @@ export default function AdminLayout() {
       />
 
       <Tabs.Screen
+        name="doctor-workflow"
+        options={{
+          title: "Doctor",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons color={color} name={focused ? "medical" : "medical-outline"} size={TAB_ICON_SIZE} />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
         name="schedules"
         options={{
           title: "Schedules",
@@ -121,11 +131,14 @@ export default function AdminLayout() {
         }}
       />
 
-      {/* --- HIDDEN ROUTES (Hiding doctors & utilities out of the tab bar) --- */}
+      {/* --- HIDDEN ROUTES (Hiding utilities out of the tab bar) --- */}
       <Tabs.Screen name="doctors" options={{ href: null }} />
       <Tabs.Screen name="settings" options={{ href: null }} />
       <Tabs.Screen name="doctor-create" options={{ href: null }} />
       <Tabs.Screen name="doctor-edit" options={{ href: null }} />
+      <Tabs.Screen name="doctor-workflow-claims" options={{ href: null }} />
+      <Tabs.Screen name="doctor-workflow-consultations" options={{ href: null }} />
+      <Tabs.Screen name="doctor-workflow-treatment-plans" options={{ href: null }} />
       <Tabs.Screen name="schedule-create" options={{ href: null }} />
       <Tabs.Screen name="schedule-edit" options={{ href: null }} />
       <Tabs.Screen name="therapist-create" options={{ href: null }} />

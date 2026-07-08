@@ -1,13 +1,8 @@
-import os
 import math
 import logging
 import requests
-from dotenv import load_dotenv
-from app.config import GOOGLE_MAPS_API_KEY as CONFIG_GOOGLE_MAPS_API_KEY
+from app.config import GOOGLE_MAPS_API_KEY
 
-load_dotenv()
-
-GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", CONFIG_GOOGLE_MAPS_API_KEY)
 logger = logging.getLogger(__name__)
 
 

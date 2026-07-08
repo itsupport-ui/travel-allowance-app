@@ -1,5 +1,6 @@
 from fastapi import (
     APIRouter,
+    Depends,
     HTTPException
 )
 from app.services.maps_service import (
@@ -7,10 +8,12 @@ from app.services.maps_service import (
     calculate_distance_km,
     reverse_geocode_address,
 )
+from app.utils.auth import get_current_user
 
 router = APIRouter(
     prefix="/maps",
-    tags=["Maps"]
+    tags=["Maps"],
+    dependencies=[Depends(get_current_user)],
 )
 
 

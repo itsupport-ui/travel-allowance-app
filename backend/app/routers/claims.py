@@ -2,6 +2,7 @@ import logging
 
 from datetime import date
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.claim import Claim
@@ -9,8 +10,18 @@ from app.models.user import User
 from app.models.travel import TravelEntry
 from app.models.settings import Settings
 from app.schemas.claim import ClaimDetailsResponse, ClaimResponse
-from app.utils.auth import get_current_user, require_role
+from app.utils.auth import (
+    get_current_user,
+    require_permission,
+    require_role,
+)
+from app.utils.permissions import role_has_permission
 from app.services.push_notification_service import notify_claim_status
+from app.utils.workflow_transitions import (
+    THERAPIST_CLAIM_STATUS_TRANSITIONS,
+    validate_editable_status,
+    validate_status_transition,
+)
 from sqlalchemy import func
 
 
@@ -37,7 +48,17 @@ def submit_claim(
     )
 
     if existing_claim:
-        raise HTTPException(status_code=400, detail="Claim for today already submitted")
+        validate_editable_status(
+            entity="Therapist claim",
+            current_status=existing_claim.status,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Claim for today already exists "
+                f"with status '{existing_claim.status}'"
+            ),
+        )
 
     # Get today's travel entries for the therapist
     travels = (
@@ -85,6 +106,12 @@ def submit_claim(
             travel.claim_id = claim.id
 
         db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Claim for today already exists",
+        ) from error
     except Exception as error:
         db.rollback()
         logger.exception(
@@ -102,7 +129,9 @@ def submit_claim(
 @router.get("/pending", response_model=list[ClaimResponse])
 def get_pending_claims(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin"]))
+    current_user: User = Depends(
+        require_permission("claims.view")
+    )
 ):
     claims = db.query(Claim).filter(Claim.status == "pending").all()
     result = []
@@ -131,14 +160,20 @@ def approve_claim(
     claim_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin"]))
+    current_user: User = Depends(
+        require_permission("claims.approve")
+    )
 ):
     claim = db.query(Claim).filter(Claim.id == claim_id).first()
     
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
-    if claim.status != "pending":
-        raise HTTPException(status_code=400, detail="Only pending claims can be approved")
+    validate_status_transition(
+        entity="Therapist claim status",
+        current_status=claim.status,
+        next_status="approved",
+        transitions=THERAPIST_CLAIM_STATUS_TRANSITIONS,
+    )
 
     claim.status = "approved"
     db.commit()
@@ -157,14 +192,20 @@ def reject_claim(
     claim_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin"]))
+    current_user: User = Depends(
+        require_permission("claims.reject")
+    )
 ):
     claim = db.query(Claim).filter(Claim.id == claim_id).first()
     
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
-    if claim.status != "pending":
-        raise HTTPException(status_code=400, detail="Only pending claims can be rejected")
+    validate_status_transition(
+        entity="Therapist claim status",
+        current_status=claim.status,
+        next_status="rejected",
+        transitions=THERAPIST_CLAIM_STATUS_TRANSITIONS,
+    )
 
     claim.status = "rejected"
     db.commit()
@@ -218,7 +259,9 @@ def get_my_claims(
 @router.get("/all", response_model=list[ClaimResponse])
 def get_all_claims(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin"]))
+    current_user: User = Depends(
+        require_permission("claims.view")
+    )
 ):
     claims = db.query(Claim).order_by(Claim.claim_date.desc()).all()
 
@@ -258,10 +301,26 @@ def get_claim_details(
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
 
-    if current_user.role == "therapist" and claim.therapist_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    if current_user.role not in {"admin", "therapist"}:
+    owns_claim = (
+        current_user.role == "therapist"
+        and claim.therapist_id == current_user.id
+    )
+    can_view_claims = role_has_permission(
+        current_user.role,
+        "claims.view",
+    )
+    can_view_approved = (
+        claim.status == "approved"
+        and role_has_permission(
+            current_user.role,
+            "claims.approved.view",
+        )
+    )
+    if not (
+        owns_claim
+        or can_view_claims
+        or can_view_approved
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     travels = (db.query(TravelEntry).filter(TravelEntry.claim_id == claim.id).all()
@@ -315,7 +374,7 @@ def get_claim_history(
 
     current_user:
     User = Depends(
-        require_role(["admin"])
+        require_permission("claims.view")
     )
 ):
 

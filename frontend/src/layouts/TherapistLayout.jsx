@@ -18,6 +18,7 @@ import {
 import { startWorkDay } from "../services/workdayService";
 import { reverseGeocode } from "../services/mapsService";
 import toast from "react-hot-toast";
+import { hasPermission } from "../utils/permissions";
 
 function TherapistLayout({ children }) {
   const navigate = useNavigate();
@@ -29,6 +30,7 @@ function TherapistLayout({ children }) {
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
+    localStorage.removeItem("permissions");
     navigate("/");
   };
 
@@ -163,14 +165,14 @@ function TherapistLayout({ children }) {
         <nav className="space-y-1 flex-1 overflow-y-auto pr-1">
           {[
             { path: "/therapist", label: "Dashboard", icon: FaHome },
-            { path: "/travel/add", label: "Add Travel", icon: FaPlusCircle },
-            { path: "/travel/today", label: "Today's Travel", icon: FaCar },
-            { path: "/claims", label: "My Claims", icon: FaFileInvoice },
-            { path: "/today-schedule", label: "Today's Schedule", icon: FaCalendarDay },
-            { path: "/upcoming-schedule", label: "Upcoming Schedule", icon: FaCalendarAlt },
-            { path: "/therapist/schedule/missed", label: "Missed Schedule", icon: FaCalendarTimes },
-            { path: "/therapist/schedule/completed", label: "Completed Schedule", icon: FaCalendarCheck },
-          ].map((item) => {
+            { path: "/travel/add", label: "Add Travel", icon: FaPlusCircle, permission: "travel.manage" },
+            { path: "/travel/today", label: "Today's Travel", icon: FaCar, permission: "travel.manage" },
+            { path: "/claims", label: "My Claims", icon: FaFileInvoice, permission: "therapist_claims.submit" },
+            { path: "/today-schedule", label: "Today's Schedule", icon: FaCalendarDay, permission: "schedules.own" },
+            { path: "/upcoming-schedule", label: "Upcoming Schedule", icon: FaCalendarAlt, permission: "schedules.own" },
+            { path: "/therapist/schedule/missed", label: "Missed Schedule", icon: FaCalendarTimes, permission: "schedules.own" },
+            { path: "/therapist/schedule/completed", label: "Completed Schedule", icon: FaCalendarCheck, permission: "schedules.own" },
+          ].filter((item) => !item.permission || hasPermission(item.permission)).map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
             return (

@@ -14,6 +14,7 @@ class UserResponse(BaseModel):
     email: str
     role: str
     is_active: bool
+    permissions: list[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True

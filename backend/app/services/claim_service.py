@@ -1,7 +1,4 @@
-from datetime import date, datetime
-import os
-from pathlib import Path
-import shutil
+from datetime import date
 
 from sqlalchemy import func
 
@@ -11,28 +8,17 @@ from app.models.treatment_schedule import TreatmentSchedule
 from app.models.travel import TravelEntry
 from app.services.maps_service import calculate_distance_km
 from app.services.schedule_location_service import validate_patient_arrival
+from app.utils.uploads import (
+    delete_stored_upload,
+    store_validated_upload,
+)
 
 
 TRAVEL_ENTRY_EXISTS_MESSAGE = "Travel entry already exists for this schedule."
-UPLOAD_ROOT = Path("uploads")
 
 
 def cleanup_invoice_file(invoice_path: str | None) -> None:
-    if not invoice_path:
-        return
-
-    upload_root = UPLOAD_ROOT.resolve()
-    candidate = Path(invoice_path).resolve()
-
-    try:
-        candidate.relative_to(upload_root)
-    except ValueError:
-        return
-
-    try:
-        candidate.unlink(missing_ok=True)
-    except OSError:
-        pass
+    delete_stored_upload(invoice_path)
 
 
 def create_auto_travel_entry(
@@ -154,13 +140,9 @@ def create_auto_travel_entry(
 
     try:
         if invoice_file:
-            UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-            filename = os.path.basename(invoice_file.filename or "invoice")
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
-            invoice_path = str(UPLOAD_ROOT / f"{timestamp}_{filename}")
-
-            with open(invoice_path, "wb") as buffer:
-                shutil.copyfileobj(invoice_file.file, buffer)
+            invoice_path = str(
+                store_validated_upload(invoice_file)
+            )
 
         travel_entry = TravelEntry(
             therapist_id=therapist.id,

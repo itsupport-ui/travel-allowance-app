@@ -16,7 +16,7 @@ from app.models.user import User
 from app.models.doctor import Doctor
 from app.models.treatment_schedule import TreatmentSchedule
 from app.schemas.treatment_schedule import TreatmentScheduleCreate, TreatmentScheduleResponse, MissedTreatmentRequest, TreatmentScheduleUpdate
-from app.utils.auth import require_role
+from app.utils.auth import require_permission, require_role
 from datetime import date, datetime
 from sqlalchemy import and_, or_, func
 # import get_current_user
@@ -33,6 +33,10 @@ from app.services.schedule_location_service import (
 from app.services.push_notification_service import (
     notify_schedule_assigned,
     notify_schedule_updated,
+)
+from app.utils.workflow_transitions import (
+    TREATMENT_SCHEDULE_STATUS_TRANSITIONS,
+    validate_status_transition,
 )
 
 
@@ -71,8 +75,8 @@ def create_schedule(
 
     current_user:
     User = Depends(
-        require_role(
-            ["admin"]
+        require_permission(
+            "schedules.create"
         )
     )
 ):
@@ -446,11 +450,12 @@ def complete_treatment(
                 detail="Access denied"
             )
 
-        if schedule.status == "completed":
-            raise HTTPException(
-                status_code=400,
-                detail="Treatment is already completed"
-            )
+        validate_status_transition(
+            entity="Treatment schedule status",
+            current_status=schedule.status,
+            next_status="completed",
+            transitions=TREATMENT_SCHEDULE_STATUS_TRANSITIONS,
+        )
 
         selected_transport_mode = (transport_mode or "vehicle").lower()
 
@@ -594,6 +599,13 @@ def mark_treatment_missed(
             detail=
             "Access denied"
         )
+
+    validate_status_transition(
+        entity="Treatment schedule status",
+        current_status=schedule.status,
+        next_status="missed",
+        transitions=TREATMENT_SCHEDULE_STATUS_TRANSITIONS,
+    )
 
     schedule.status = (
         "missed"
@@ -760,6 +772,13 @@ def get_missed_schedules(
                 detail=
                 "Schedule not found"
             )
+
+        validate_status_transition(
+            entity="Treatment schedule status",
+            current_status=schedule.status,
+            next_status="cancelled",
+            transitions=TREATMENT_SCHEDULE_STATUS_TRANSITIONS,
+        )
 
         schedule.status = (
             "cancelled"

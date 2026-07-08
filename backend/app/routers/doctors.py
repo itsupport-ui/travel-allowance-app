@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.doctor import Doctor
@@ -12,6 +13,40 @@ router = APIRouter(
     prefix="/doctors",
     tags=["Doctors"]
 )
+
+
+def validate_doctor_user(
+    db: Session,
+    user_id: int,
+    doctor_id: int | None = None,
+) -> None:
+    user = (
+        db.query(User)
+        .filter(User.id == user_id)
+        .first()
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found",
+        )
+    if user.role != "doctor":
+        raise HTTPException(
+            status_code=400,
+            detail="Only users with role 'doctor' can be linked",
+        )
+
+    duplicate = db.query(Doctor).filter(
+        Doctor.user_id == user_id
+    )
+    if doctor_id is not None:
+        duplicate = duplicate.filter(Doctor.id != doctor_id)
+    if duplicate.first() is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Doctor user is already linked to another profile",
+        )
+
 
 @router.post(
     "/",
@@ -30,7 +65,9 @@ def create_doctor(
     )
     if existing_doctor:
         raise HTTPException(status_code=400, detail="Doctor with this name already exists")
+    validate_doctor_user(db, doctor.user_id)
     new_doctor = Doctor(
+        user_id=doctor.user_id,
         name=normalized_name,
         specialization=(
             doctor.specialization.strip()
@@ -39,10 +76,24 @@ def create_doctor(
         ),
         phone=doctor.phone.strip() if doctor.phone else None,
     )
-    db.add(new_doctor)
-    db.commit()
-    db.refresh(new_doctor)
-    return new_doctor
+    try:
+        db.add(new_doctor)
+        db.flush()
+        db.refresh(new_doctor)
+        db.commit()
+        return new_doctor
+    except IntegrityError as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Doctor user is already linked to another profile",
+        ) from error
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to create doctor profile",
+        ) from error
 
 
 @router.get(
@@ -51,7 +102,9 @@ def create_doctor(
 )
 def get_doctors(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin", "therapist"]))
+    current_user: User = Depends(
+        require_role(["admin", "therapist"])
+    )
 ):
     doctors = db.query(Doctor).filter(Doctor.active.is_(True)).all()
     return doctors
@@ -111,6 +164,9 @@ def update_doctor(
             status_code=400,
             detail="Doctor with this name already exists",
         )
+
+    validate_doctor_user(db, payload.user_id, doctor.id)
+    doctor.user_id = payload.user_id
 
     doctor.name = normalized_name
     doctor.specialization = (

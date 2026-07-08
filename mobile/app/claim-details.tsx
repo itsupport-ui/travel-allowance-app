@@ -1,7 +1,7 @@
 import { colors, radius, shadows, spacing, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, type Href } from "expo-router";
 import { memo, useMemo } from "react";
 import {
   ActivityIndicator,
@@ -222,7 +222,7 @@ export default function ClaimDetailsScreen() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.replace("/(tabs)/claims");
+      router.replace("/therapist/claims" as Href);
     }
   };
 

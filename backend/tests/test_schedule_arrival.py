@@ -23,6 +23,7 @@ from app.routers import treatment_schedule
 from app.services import claim_service
 from app.services.schedule_location_service import GEOCODING_FAILURE_MESSAGE
 from app.utils.auth import get_current_user
+from app.utils import uploads
 from backfill_schedule_coordinates import backfill_schedule_coordinates
 
 
@@ -70,11 +71,11 @@ class ScheduleArrivalApiTests(unittest.TestCase):
         self.app = app
         self.client = TestClient(app)
         self.temporary_uploads = tempfile.TemporaryDirectory()
-        self.original_upload_root = claim_service.UPLOAD_ROOT
-        claim_service.UPLOAD_ROOT = Path(self.temporary_uploads.name)
+        self.original_upload_root = uploads.UPLOAD_ROOT
+        uploads.UPLOAD_ROOT = Path(self.temporary_uploads.name).resolve()
 
     def tearDown(self):
-        claim_service.UPLOAD_ROOT = self.original_upload_root
+        uploads.UPLOAD_ROOT = self.original_upload_root
         self.temporary_uploads.cleanup()
         self.db.close()
         self.engine.dispose()
@@ -288,7 +289,7 @@ class ScheduleArrivalApiTests(unittest.TestCase):
                 files={
                     "invoice_file": (
                         "invoice.pdf",
-                        b"invoice",
+                        b"%PDF-1.4\ninvoice",
                         "application/pdf",
                     )
                 },

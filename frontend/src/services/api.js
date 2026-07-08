@@ -1,7 +1,13 @@
 import axios from 'axios';
 
+export const API_URL = import.meta.env.VITE_API_URL?.replace(/\/+$/, '');
+
+if (!API_URL) {
+  throw new Error('VITE_API_URL is not configured');
+}
+
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: API_URL,
 });
 
 export default api;

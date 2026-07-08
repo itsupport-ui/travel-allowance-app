@@ -1,10 +1,12 @@
-const API_URL =
-  "http://127.0.0.1:8000/schedule"
+import { API_URL as API_BASE_URL } from "./api"
+
+
+const API_URL = `${API_BASE_URL}/schedule`
 
 export const getDoctors = async (token) => {
   const response =
     await fetch(
-      `http://127.0.0.1:8000/doctors`,
+      `${API_BASE_URL}/doctors`,
       {
         headers: {
           Authorization:
@@ -25,7 +27,7 @@ export const getDoctors = async (token) => {
 export const getTherapists = async (token) => {
   const response =
     await fetch(
-      `http://127.0.0.1:8000/therapists`,
+      `${API_BASE_URL}/therapists`,
       {
         headers: {
           Authorization:

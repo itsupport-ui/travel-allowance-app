@@ -6,7 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import * as DocumentPicker from "expo-document-picker";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, type Href } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -263,9 +263,9 @@ export default function ScheduleDetailsScreen() {
             text: "OK",
             onPress: () =>
               router.replace({
-                pathname: "/(tabs)/schedules",
+                pathname: "/therapist/schedules",
                 params: { view: "today" },
-              }),
+              } as Href),
           },
         ]
       );
@@ -318,9 +318,9 @@ export default function ScheduleDetailsScreen() {
             text: "OK",
             onPress: () =>
               router.replace({
-                pathname: "/(tabs)/schedules",
+                pathname: "/therapist/schedules",
                 params: { view: "today" },
-              }),
+              } as Href),
           },
         ]
       );
@@ -427,7 +427,7 @@ export default function ScheduleDetailsScreen() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.replace("/(tabs)/schedules");
+      router.replace("/therapist/schedules" as Href);
     }
   };
 

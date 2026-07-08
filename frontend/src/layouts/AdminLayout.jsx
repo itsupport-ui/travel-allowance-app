@@ -10,17 +10,36 @@ import {
   FaBars,
   FaTimes,
   FaPlus,
-  FaTasks
+  FaTasks,
+  FaPhoneAlt,
+  FaFileMedical,
+  FaFileInvoiceDollar
 } from "react-icons/fa";
+import {
+  hasAnyPermission,
+  hasPermission,
+} from "../utils/permissions";
 
 function AdminLayout({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const role = localStorage.getItem("role");
+  const canManageDoctorWorkflow = hasAnyPermission([
+    "consultations.manage",
+    "treatment_plans.approve",
+    "claims.view",
+    "claims.approved.view",
+  ]);
+  const canViewSchedules =
+    hasPermission("dashboards.view") ||
+    hasPermission("schedules.create");
+  const canManageUsers = role === "admin";
 
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
+    localStorage.removeItem("permissions");
     navigate("/");
   };
 
@@ -84,49 +103,91 @@ function AdminLayout({ children }) {
 
         {/* Scalable Navigation Menu Links Container */}
         <nav className="space-y-1.5 flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-          <Link to="/admin" onClick={closeSidebar} className={getNavLinkClass("/admin")}>
-            <FaHome className="text-base" /> Dashboard
-          </Link>
+          {hasPermission("dashboards.view") && (
+            <Link to="/admin" onClick={closeSidebar} className={getNavLinkClass("/admin")}>
+              <FaHome className="text-base" /> Dashboard
+            </Link>
+          )}
 
-          <Link to="/admin/pending-claims" onClick={closeSidebar} className={getNavLinkClass("/admin/pending-claims")}>
-            <FaClipboardList className="text-base" /> Pending Claims
-          </Link>
+          {hasPermission("claims.view") && (
+            <Link to="/admin/pending-claims" onClick={closeSidebar} className={getNavLinkClass("/admin/pending-claims")}>
+              <FaClipboardList className="text-base" /> Pending Claims
+            </Link>
+          )}
 
-          <Link to="/admin/history" onClick={closeSidebar} className={getNavLinkClass("/admin/history")}>
-            <FaHistory className="text-base" /> History
-          </Link>
+          {hasPermission("claims.view") && (
+            <Link to="/admin/history" onClick={closeSidebar} className={getNavLinkClass("/admin/history")}>
+              <FaHistory className="text-base" /> History
+            </Link>
+          )}
 
-          <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Schedules</div>
+          {canManageDoctorWorkflow && (
+            <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Doctor Workflow</div>
+          )}
 
-          <Link to="/admin/schedule/today" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/today")}>
-            <FaClipboardList className="text-base" /> Today's Schedule
-          </Link>
+          {hasPermission("consultations.manage") && (
+            <Link to="/admin/doctor-consultations" onClick={closeSidebar} className={getNavLinkClass("/admin/doctor-consultations")}>
+              <FaPhoneAlt className="text-base" /> Consultations
+            </Link>
+          )}
 
-          <Link to="/admin/schedule/create" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/create")}>
-            <FaPlus className="text-base" /> Create Schedule
-          </Link>
+          {hasPermission("treatment_plans.approve") && (
+            <Link to="/admin/treatment-plans" onClick={closeSidebar} className={getNavLinkClass("/admin/treatment-plans")}>
+              <FaFileMedical className="text-base" /> Treatment Plans
+            </Link>
+          )}
 
-          <Link to="/admin/schedule/pending" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/pending")}>
-            <FaTasks className="text-base" /> Pending Schedules
-          </Link>
+          {hasAnyPermission(["claims.view", "claims.approved.view"]) && (
+            <Link to="/admin/doctor-claims" onClick={closeSidebar} className={getNavLinkClass("/admin/doctor-claims")}>
+              <FaFileInvoiceDollar className="text-base" /> Doctor Claims
+            </Link>
+          )}
 
-          <Link to="/admin/schedule/completed" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/completed")}>
-            <FaTasks className="text-base" /> Completed Schedules
-          </Link>
+          {canViewSchedules && (
+            <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Schedules</div>
+          )}
 
-          <Link to="/admin/schedule/missed" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/missed")}>
-            <FaTasks className="text-base" /> Missed Schedules
-          </Link>
+          {hasPermission("dashboards.view") && (
+            <Link to="/admin/schedule/today" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/today")}>
+              <FaClipboardList className="text-base" /> Today's Schedule
+            </Link>
+          )}
+
+          {hasPermission("schedules.create") && (
+            <Link to="/admin/schedule/create" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/create")}>
+              <FaPlus className="text-base" /> Create Schedule
+            </Link>
+          )}
+
+          {hasPermission("dashboards.view") && (
+            <>
+              <Link to="/admin/schedule/pending" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/pending")}>
+                <FaTasks className="text-base" /> Pending Schedules
+              </Link>
+
+              <Link to="/admin/schedule/completed" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/completed")}>
+                <FaTasks className="text-base" /> Completed Schedules
+              </Link>
+
+              <Link to="/admin/schedule/missed" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/missed")}>
+                <FaTasks className="text-base" /> Missed Schedules
+              </Link>
+            </>
+          )}
           
-          <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Management</div>
+          {canManageUsers && (
+            <>
+              <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Management</div>
 
-          <Link to="/admin/settings" onClick={closeSidebar} className={getNavLinkClass("/admin/settings")}>
-            <FaCog className="text-base" /> Settings
-          </Link>
+              <Link to="/admin/settings" onClick={closeSidebar} className={getNavLinkClass("/admin/settings")}>
+                <FaCog className="text-base" /> Settings
+              </Link>
 
-          <Link to="/admin/register" onClick={closeSidebar} className={getNavLinkClass("/admin/register")}>
-            <FaUserPlus className="text-base" /> Add User
-          </Link>
+              <Link to="/admin/register" onClick={closeSidebar} className={getNavLinkClass("/admin/register")}>
+                <FaUserPlus className="text-base" /> Add User
+              </Link>
+            </>
+          )}
         </nav>
 
         {/* Bottom Core Execution Logout Trigger Button */}

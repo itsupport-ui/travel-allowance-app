@@ -78,12 +78,16 @@ export const getNotificationDestination = (
       return "/(admin)/schedules";
     }
 
+    if (role === "doctor") {
+      return "/(doctor)/(tabs)";
+    }
+
     return payload.scheduleId
       ? {
           pathname: "/schedule-details",
           params: { id: String(payload.scheduleId) },
         }
-      : "/(tabs)/schedules";
+      : ("/therapist/schedules" as Href);
   }
 
   if (
@@ -94,15 +98,28 @@ export const getNotificationDestination = (
       return "/(admin)/claims";
     }
 
+    if (role === "doctor") {
+      return payload.claimId
+        ? {
+            pathname: "/(doctor)/claim-details",
+            params: { id: String(payload.claimId) },
+          }
+        : "/(doctor)/(tabs)/claims";
+    }
+
     return payload.claimId
       ? {
           pathname: "/claim-details",
           params: { id: String(payload.claimId) },
         }
-      : "/(tabs)/claims";
+      : ("/therapist/claims" as Href);
   }
 
-  return role === "admin" ? "/(admin)" : "/(tabs)";
+  return role === "admin"
+    ? "/(admin)"
+    : role === "doctor"
+      ? "/(doctor)/(tabs)"
+      : ("/therapist" as Href);
 };
 
 export const queueNotificationPayload = async (

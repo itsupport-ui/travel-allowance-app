@@ -9,7 +9,7 @@ from app.models.claim import Claim
 from app.models.treatment_schedule import TreatmentSchedule
 from app.models.user import User
 from app.schemas.dashboard import AdminDashboardSummary
-from app.utils.auth import require_role
+from app.utils.auth import require_permission
 
 router = APIRouter(
     prefix="/admin-dashboard",
@@ -20,7 +20,9 @@ router = APIRouter(
 @router.get("/summary", response_model=AdminDashboardSummary)
 def get_admin_summary(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin"])),
+    current_user: User = Depends(
+        require_permission("dashboards.view")
+    ),
 ):
     today = date.today()
 

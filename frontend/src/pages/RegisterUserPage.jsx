@@ -10,14 +10,13 @@ function RegisterUserPage() {
   const [role, setRole] = useState("therapist");
 
   const handleRegister = async (e) => {
-    // Prevent default form submission reload
     e.preventDefault();
-    
+
     try {
       const token = localStorage.getItem("token");
 
       await registerUser({ username: name, email, password, role }, token);
-      toast.success("User created 🚀");
+      toast.success("User created");
 
       setName("");
       setEmail("");
@@ -30,20 +29,15 @@ function RegisterUserPage() {
 
   return (
     <AdminLayout>
-      {/* mx-auto centers the element, px-2 prevents content from touching mobile screen borders */}
       <div className="w-full max-w-xl mx-auto px-2 sm:px-4">
-        
-        {/* Title scales dynamically down on small devices */}
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-6">
           Register User
         </h1>
 
-        {/* Changed container wrapper into a semantic <form> for native touch-keyboard execution support */}
-        <form 
-          onSubmit={handleRegister} 
+        <form
+          onSubmit={handleRegister}
           className="bg-white rounded-xl shadow-md border border-gray-100 p-5 sm:p-8 space-y-5"
         >
-          {/* Full Name Input */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
               Full Name
@@ -58,7 +52,6 @@ function RegisterUserPage() {
             />
           </div>
 
-          {/* Email Address Input */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
               Email Address
@@ -73,7 +66,6 @@ function RegisterUserPage() {
             />
           </div>
 
-          {/* Password Input */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
               Password
@@ -81,14 +73,13 @@ function RegisterUserPage() {
             <input
               type="password"
               required
-              placeholder="••••••••"
+              placeholder="Minimum 8 characters"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full border border-gray-300 bg-gray-50/30 rounded-xl px-4 py-3 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition duration-150"
             />
           </div>
 
-          {/* User Role Selection Dropdown */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
               Assigned System Role
@@ -103,7 +94,6 @@ function RegisterUserPage() {
             </select>
           </div>
 
-          {/* Action Trigger - Expands to full block layout width automatically on phone screens */}
           <div className="pt-2">
             <button
               type="submit"
@@ -113,7 +103,6 @@ function RegisterUserPage() {
             </button>
           </div>
         </form>
-
       </div>
     </AdminLayout>
   );

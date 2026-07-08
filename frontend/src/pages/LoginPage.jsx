@@ -7,7 +7,7 @@ import toast from "react-hot-toast"
 function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [error, setError] = useState("") // Retained state in case you use it for form validation later
+  const [error] = useState("")
   const navigate = useNavigate()
 
   const handleLogin = async (e) => {
@@ -18,11 +18,17 @@ function LoginPage() {
 
       const user = await getCurrentUser(data.access_token)
       localStorage.setItem("role", user.role)
+      localStorage.setItem(
+        "permissions",
+        JSON.stringify(user.permissions || [])
+      )
 
       if (user.role === "admin") {
         navigate("/admin")
       } else if (user.role === "therapist") {
         navigate("/therapist")
+      } else if (user.role === "doctor") {
+        navigate("/doctor")
       }
 
       toast.success("Login successful 🚀")

@@ -40,3 +40,13 @@ class TreatmentSchedule(Base):
     completed_at = Column(DateTime, nullable=True)
     missed_reason = Column(String, nullable=True)
     transport_mode = Column(String, nullable=False, default="vehicle")
+    treatment_plan_id = Column(
+        Integer,
+        ForeignKey("treatment_plans.id"),
+        nullable=True,
+        index=True,
+    )
+    treatment_plan = relationship(
+        "TreatmentPlan",
+        back_populates="treatment_schedules",
+    )

@@ -21,6 +21,7 @@ from app.models.travel import TravelEntry
 from app.models.user import User
 from app.routers import claims, therapist_workday, treatment_schedule, travel
 from app.utils.auth import get_current_user
+from app.utils import uploads
 
 
 class TherapistMobileContractTests(unittest.TestCase):
@@ -68,11 +69,11 @@ class TherapistMobileContractTests(unittest.TestCase):
         self.client = TestClient(app)
 
         self.temporary_uploads = tempfile.TemporaryDirectory()
-        self.original_upload_root = travel.UPLOAD_ROOT
-        travel.UPLOAD_ROOT = Path(self.temporary_uploads.name).resolve()
+        self.original_upload_root = uploads.UPLOAD_ROOT
+        uploads.UPLOAD_ROOT = Path(self.temporary_uploads.name).resolve()
 
     def tearDown(self):
-        travel.UPLOAD_ROOT = self.original_upload_root
+        uploads.UPLOAD_ROOT = self.original_upload_root
         self.temporary_uploads.cleanup()
         self.db.close()
         self.engine.dispose()

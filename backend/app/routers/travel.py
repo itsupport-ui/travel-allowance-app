@@ -13,41 +13,26 @@ from app.utils.auth import get_current_user, require_role
 from datetime import date
 from sqlalchemy import func
 from fastapi import ( Form, File, UploadFile )
-import os
-import shutil
 
+from app.utils.uploads import (
+    UploadValidationError,
+    resolve_stored_upload,
+    store_validated_upload,
+)
 
 router = APIRouter(
     prefix="/travel",
     tags=["Travel"]
 )
 
-UPLOAD_ROOT = Path("uploads").resolve()
-
-
 def resolve_invoice_path(invoice_file: str) -> Path:
-    stored_path = Path(invoice_file)
-    candidate = (
-        stored_path.resolve()
-        if stored_path.is_absolute()
-        else (Path.cwd() / stored_path).resolve()
-    )
-
     try:
-        candidate.relative_to(UPLOAD_ROOT)
-    except ValueError as error:
+        return resolve_stored_upload(invoice_file)
+    except (OSError, ValueError) as error:
         raise HTTPException(
             status_code=404,
             detail="Invoice file not found",
         ) from error
-
-    if not candidate.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail="Invoice file not found",
-        )
-
-    return candidate
 
 @router.post(
     "/",
@@ -147,26 +132,13 @@ def create_travel(
     file_path = None
 
     if invoice_file:
-
-        upload_dir = "uploads"
-
-        os.makedirs(
-            upload_dir,
-            exist_ok=True
-        )
-
-        safe_filename = Path(invoice_file.filename or "invoice").name
-        file_path = f"uploads/{safe_filename}"
-
-        with open(
-            file_path,
-            "wb"
-        ) as buffer:
-
-            shutil.copyfileobj(
-                invoice_file.file,
-                buffer
-            )
+        try:
+            file_path = str(store_validated_upload(invoice_file))
+        except UploadValidationError as error:
+            raise HTTPException(
+                status_code=400,
+                detail=str(error),
+            ) from error
 
     travel = (
         TravelEntry(
@@ -352,10 +324,11 @@ def get_travel_invoice(
     if not travel:
         raise HTTPException(status_code=404, detail="Travel not found")
 
-    if (
-        current_user.role != "admin"
-        and travel.therapist_id != current_user.id
-    ):
+    owns_invoice = (
+        current_user.role == "therapist"
+        and travel.therapist_id == current_user.id
+    )
+    if current_user.role != "admin" and not owns_invoice:
         raise HTTPException(status_code=403, detail="Not authorized")
 
     if not travel.invoice_file:
@@ -373,7 +346,7 @@ def get_travel_invoice(
     return FileResponse(
         path=invoice_path,
         media_type=media_type,
-        filename=invoice_path.name,
+        filename=f"travel-{travel.id}-invoice{invoice_path.suffix}",
     )
 
 @router.get(
