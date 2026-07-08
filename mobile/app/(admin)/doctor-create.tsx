@@ -23,7 +23,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
-  createDoctor,
+  createDoctorWithLogin,
   DoctorServiceError,
 } from "../../src/services/doctorService";
 import { clearAuthSession } from "../../src/utils/storage";
@@ -31,9 +31,14 @@ import { clearAuthSession } from "../../src/utils/storage";
 const PRIMARY = colors.primary;
 
 interface FormErrors {
+  email?: string;
   name?: string;
+  password?: string;
   phone?: string;
 }
+
+const isValidEmail = (email: string): boolean =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
 const normalizePhone = (value: string): string =>
   value
@@ -47,32 +52,53 @@ const isValidPhone = (value: string): boolean => {
 
 export default function DoctorCreateScreen() {
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [specialization, setSpecialization] = useState("");
   const [phone, setPhone] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const submitInFlight = useRef(false);
   const nameInputRef = useRef<TextInput>(null);
+  const emailInputRef = useRef<TextInput>(null);
+  const passwordInputRef = useRef<TextInput>(null);
   const specializationInputRef = useRef<TextInput>(null);
   const phoneInputRef = useRef<TextInput>(null);
 
   const isDirty = useMemo(
     () =>
       Boolean(
-        name.trim() || specialization.trim() || phone.trim()
+        name.trim() ||
+          email.trim() ||
+          password ||
+          specialization.trim() ||
+          phone.trim()
       ),
-    [name, phone, specialization]
+    [email, name, password, phone, specialization]
   );
 
   const validateForm = useCallback((): boolean => {
     const nextErrors: FormErrors = {};
     const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
     const trimmedPhone = phone.trim();
 
     if (!trimmedName) {
       nextErrors.name = "Doctor name is required.";
     } else if (trimmedName.length < 2) {
       nextErrors.name = "Doctor name must contain at least 2 characters.";
+    }
+
+    if (!trimmedEmail) {
+      nextErrors.email = "Email address is required.";
+    } else if (!isValidEmail(trimmedEmail)) {
+      nextErrors.email = "Enter a valid email address.";
+    }
+
+    if (!password) {
+      nextErrors.password = "Password is required.";
+    } else if (password.length < 8) {
+      nextErrors.password = "Password should be at least 8 characters.";
     }
 
     if (trimmedPhone && !isValidPhone(trimmedPhone)) {
@@ -83,15 +109,19 @@ export default function DoctorCreateScreen() {
 
     if (nextErrors.name) {
       nameInputRef.current?.focus();
+    } else if (nextErrors.email) {
+      emailInputRef.current?.focus();
+    } else if (nextErrors.password) {
+      passwordInputRef.current?.focus();
     } else if (nextErrors.phone) {
       phoneInputRef.current?.focus();
     }
 
     return Object.keys(nextErrors).length === 0;
-  }, [name, phone]);
+  }, [email, name, password, phone]);
 
   const goToDoctorList = useCallback(() => {
-    router.replace("/(admin)/doctors");
+    router.replace("/(admin)/therapists");
   }, []);
 
   const handleSave = useCallback(async (): Promise<void> => {
@@ -108,15 +138,19 @@ export default function DoctorCreateScreen() {
     setSubmitting(true);
 
     try {
-      const doctor = await createDoctor({
-        name: name.trim(),
+      const normalizedName = name.trim();
+      const doctor = await createDoctorWithLogin({
+        email: email.trim().toLowerCase(),
+        name: normalizedName,
+        password,
         specialization: specialization.trim() || null,
         phone: phone.trim() || null,
+        username: normalizedName,
       });
 
       Alert.alert(
         "Doctor Added",
-        `${doctor.name} has been added successfully.`,
+        `${doctor.name} has been added successfully and can now sign in.`,
         [
           {
             onPress: goToDoctorList,
@@ -153,7 +187,7 @@ export default function DoctorCreateScreen() {
       submitInFlight.current = false;
       setSubmitting(false);
     }
-  }, [goToDoctorList, name, phone, specialization, validateForm]);
+  }, [email, goToDoctorList, name, password, phone, specialization, validateForm]);
 
   const cancelForm = useCallback(() => {
   if (submitting) {
@@ -218,7 +252,7 @@ export default function DoctorCreateScreen() {
             <View style={styles.introContent}>
               <Text style={styles.introTitle}>Doctor Information</Text>
               <Text style={styles.introSubtitle}>
-                Add clinical and contact details
+                Add clinical details and login access
               </Text>
             </View>
           </View>
@@ -256,9 +290,7 @@ export default function DoctorCreateScreen() {
                 placeholder="Enter doctor's full name"
                 placeholderTextColor={colors.textSubtle}
                 returnKeyType="next"
-                onSubmitEditing={() =>
-                  specializationInputRef.current?.focus()
-                }
+                onSubmitEditing={() => emailInputRef.current?.focus()}
                 style={styles.input}
                 textContentType="name"
                 value={name}
@@ -272,6 +304,117 @@ export default function DoctorCreateScreen() {
                 {errors.name}
               </Text>
             ) : null}
+
+            <Text style={styles.inputLabel}>
+              Email Address <Text style={styles.required}>*</Text>
+            </Text>
+            <View
+              style={[
+                styles.inputContainer,
+                errors.email ? styles.invalidInput : null,
+              ]}
+            >
+              <Ionicons color={colors.textMuted} name="mail-outline" size={19} />
+              <TextInput
+                ref={emailInputRef}
+                accessibilityHint="Required field"
+                accessibilityLabel="Doctor email address"
+                accessibilityState={{ disabled: submitting }}
+                autoCapitalize="none"
+                autoComplete="email"
+                autoCorrect={false}
+                editable={!submitting}
+                keyboardType="email-address"
+                maxLength={160}
+                onChangeText={(value) => {
+                  setEmail(value);
+                  if (errors.email) {
+                    setErrors((current) => ({
+                      ...current,
+                      email: undefined,
+                    }));
+                  }
+                }}
+                placeholder="name@example.com"
+                placeholderTextColor={colors.textSubtle}
+                returnKeyType="next"
+                onSubmitEditing={() => passwordInputRef.current?.focus()}
+                style={styles.input}
+                textContentType="emailAddress"
+                value={email}
+              />
+            </View>
+            {errors.email ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                style={styles.errorText}
+              >
+                {errors.email}
+              </Text>
+            ) : null}
+
+            <Text style={styles.inputLabel}>
+              Password <Text style={styles.required}>*</Text>
+            </Text>
+            <View
+              style={[
+                styles.inputContainer,
+                errors.password ? styles.invalidInput : null,
+              ]}
+            >
+              <Ionicons color={colors.textMuted} name="lock-closed-outline" size={19} />
+              <TextInput
+                ref={passwordInputRef}
+                accessibilityHint="Required field"
+                accessibilityLabel="Doctor password"
+                accessibilityState={{ disabled: submitting }}
+                autoCapitalize="none"
+                autoComplete="new-password"
+                autoCorrect={false}
+                editable={!submitting}
+                maxLength={128}
+                onChangeText={(value) => {
+                  setPassword(value);
+                  if (errors.password) {
+                    setErrors((current) => ({
+                      ...current,
+                      password: undefined,
+                    }));
+                  }
+                }}
+                placeholder="Minimum 8 characters"
+                placeholderTextColor={colors.textSubtle}
+                returnKeyType="next"
+                secureTextEntry
+                onSubmitEditing={() =>
+                  specializationInputRef.current?.focus()
+                }
+                style={styles.input}
+                textContentType="newPassword"
+                value={password}
+              />
+            </View>
+            {errors.password ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                style={styles.errorText}
+              >
+                {errors.password}
+              </Text>
+            ) : null}
+
+            <Text style={styles.inputLabel}>Assigned System Role</Text>
+            <View style={styles.roleSelector}>
+              <Text style={styles.roleSelectorText}>Doctor</Text>
+              <Ionicons
+                color={colors.textSecondary}
+                name="chevron-down"
+                size={20}
+              />
+            </View>
+            <Text style={styles.helperText}>
+              This account will be created as doctor.
+            </Text>
 
             <Text style={styles.inputLabel}>Specialty</Text>
             <View style={styles.inputContainer}>
@@ -498,6 +641,27 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: colors.danger,
+    fontSize: typography.size.small,
+    marginTop: spacing.sm,
+  },
+  roleSelector: {
+    alignItems: "center",
+    backgroundColor: colors.neutral100,
+    borderColor: colors.border,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 50,
+    paddingHorizontal: spacing.s13,
+  },
+  roleSelectorText: {
+    color: colors.textSecondary,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  helperText: {
+    color: colors.textMuted,
     fontSize: typography.size.small,
     marginTop: spacing.sm,
   },

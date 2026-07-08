@@ -3,9 +3,12 @@ import { AxiosError, type AxiosResponse } from "axios";
 import { api } from "../api/apiClient";
 import type {
   CreateDoctorRequest,
+  CreateDoctorUserRequest,
+  CreateDoctorWithLoginRequest,
   Doctor,
   UpdateDoctorRequest,
 } from "../types/doctor";
+import type { AuthUser } from "../types/auth";
 import { getToken } from "../utils/storage";
 
 interface ApiErrorBody {
@@ -136,6 +139,45 @@ export const createDoctor = async (
       }),
     "Unable to create the doctor."
   );
+
+export const createDoctorUser = async (
+  request: CreateDoctorUserRequest
+): Promise<AuthUser> =>
+  executeRequest(
+    async () =>
+      api.post<AuthUser>("/users/doctors", request, {
+        headers: await getAuthHeaders(),
+      }),
+    "Unable to create the doctor login account."
+  );
+
+export const createDoctorWithLogin = async (
+  request: CreateDoctorWithLoginRequest
+): Promise<Doctor> => {
+  const doctorUser = await createDoctorUser({
+    email: request.email,
+    password: request.password,
+    username: request.username,
+  });
+
+  try {
+    return await createDoctor({
+      name: request.name,
+      phone: request.phone,
+      specialization: request.specialization,
+      user_id: doctorUser.id,
+    });
+  } catch (error) {
+    const serviceError = normalizeError(
+      error,
+      "Unable to create the linked doctor profile."
+    );
+    throw new DoctorServiceError(
+      `Doctor login was created, but the linked profile could not be created. ${serviceError.message}`,
+      serviceError.status
+    );
+  }
+};
 
 export const updateDoctor = async (
   doctorId: number,

@@ -78,13 +78,10 @@ export default function AdminLayout() {
         }}
       />
 
-      {/* This is the magic fix: We use your existing "therapists" route, 
-        but rename the visual title to "Directory" so it represents both Doctors & Therapists.
-      */}
       <Tabs.Screen
         name="therapists"
         options={{
-          title: "Therapists",
+          title: "Staff",
           tabBarIcon: ({ color, focused }) => (
             <Ionicons color={color} name={focused ? "people" : "people-outline"} size={TAB_ICON_SIZE} />
           ),

@@ -1,5 +1,6 @@
 export interface Doctor {
   id: number;
+  user_id: number;
   name: string;
   specialization: string | null;
   phone: string | null;
@@ -9,7 +10,23 @@ export interface Doctor {
   created_at: string;
 }
 
+export interface CreateDoctorUserRequest {
+  username: string;
+  email: string;
+  password: string;
+}
+
 export interface CreateDoctorRequest {
+  user_id: number;
+  name: string;
+  specialization?: string | null;
+  phone?: string | null;
+}
+
+export interface CreateDoctorWithLoginRequest {
+  username: string;
+  email: string;
+  password: string;
   name: string;
   specialization?: string | null;
   phone?: string | null;
