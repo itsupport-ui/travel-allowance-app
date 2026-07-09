@@ -22,28 +22,36 @@ import {
   getDoctorById,
   updateDoctor,
 } from "../../src/services/doctorService";
-import type { Doctor } from "../../src/types/doctor";
+import type { Doctor, UpdateDoctorRequest } from "../../src/types/doctor";
 import { clearAuthSession } from "../../src/utils/storage";
 
 const PRIMARY = colors.primary;
 
 interface DoctorForm {
   active: boolean;
+  email: string;
   name: string;
+  newPassword: string;
   phone: string;
   specialization: string;
+  userId: number | null;
 }
 
 interface FormErrors {
+  email?: string;
   name?: string;
+  newPassword?: string;
   phone?: string;
 }
 
 const EMPTY_FORM: DoctorForm = {
   active: true,
+  email: "",
   name: "",
+  newPassword: "",
   phone: "",
   specialization: "",
+  userId: null,
 };
 
 const readId = (value: string | string[] | undefined): number | null => {
@@ -54,10 +62,16 @@ const readId = (value: string | string[] | undefined): number | null => {
 
 const toForm = (doctor: Doctor): DoctorForm => ({
   active: doctor.active,
+  email: doctor.email ?? "",
   name: doctor.name,
+  newPassword: "",
   phone: doctor.phone ?? "",
   specialization: doctor.specialization ?? "",
+  userId: doctor.user_id,
 });
+
+const isValidEmail = (email: string): boolean =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
 const normalizePhone = (value: string): string =>
   value.replace(/[^\d+() -]/g, "").replace(/(?!^)\+/g, "");
@@ -116,6 +130,9 @@ export default function DoctorEditScreen() {
     () =>
       initialForm !== null &&
       (form.name.trim() !== initialForm.name ||
+        form.email.trim().toLowerCase() !==
+          initialForm.email.trim().toLowerCase() ||
+        form.newPassword.length > 0 ||
         form.specialization.trim() !== initialForm.specialization ||
         form.phone.trim() !== initialForm.phone ||
         form.active !== initialForm.active),
@@ -124,22 +141,26 @@ export default function DoctorEditScreen() {
 
   const validate = useCallback((): boolean => {
     const nextErrors: FormErrors = {};
+    const trimmedEmail = form.email.trim();
     if (form.name.trim().length < 2) {
       nextErrors.name = "Enter at least 2 characters.";
+    }
+    if (trimmedEmail && !isValidEmail(trimmedEmail)) {
+      nextErrors.email = "Enter a valid email address.";
+    }
+    if (form.newPassword && form.newPassword.length < 8) {
+      nextErrors.newPassword = "New password should be at least 8 characters.";
     }
     if (form.phone.trim() && !isValidPhone(form.phone.trim())) {
       nextErrors.phone = "Enter a valid phone number.";
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
-  }, [form.name, form.phone]);
+  }, [form.email, form.name, form.newPassword, form.phone]);
 
   const handleBack = useCallback((): void => {
     if (submitting) return;
-    const leave = () =>
-      router.canGoBack()
-        ? router.back()
-        : router.replace("/(admin)/therapists");
+    const leave = () => router.replace("/(admin)/therapists");
 
     if (!isDirty) {
       leave();
@@ -148,9 +169,9 @@ export default function DoctorEditScreen() {
 
     Alert.alert(
       "Discard Changes?",
-      "The unsaved doctor profile changes will be lost.",
+      "Your unsaved doctor profile changes will be lost.",
       [
-        { style: "cancel", text: "Continue Editing" },
+        { style: "cancel", text: "Keep Editing" },
         { onPress: leave, style: "destructive", text: "Discard" },
       ]
     );
@@ -158,23 +179,49 @@ export default function DoctorEditScreen() {
 
   const handleSave = useCallback(async (): Promise<void> => {
     if (!doctorId || submitInFlight.current || !validate()) return;
+    if (!form.userId) {
+      Alert.alert(
+        "Unable to Update Doctor",
+        "This doctor profile is not linked to a login user."
+      );
+      return;
+    }
 
     submitInFlight.current = true;
     setSubmitting(true);
     try {
-      const doctor = await updateDoctor(doctorId, {
+      const payload: UpdateDoctorRequest = {
         active: form.active,
+        email: form.email.trim()
+          ? form.email.trim().toLowerCase()
+          : undefined,
         name: form.name.trim(),
         phone: form.phone.trim() || null,
+        user_id: form.userId,
         specialization: form.specialization.trim() || null,
-      });
-      const nextForm = toForm(doctor);
+      };
+
+      if (form.newPassword) {
+        payload.password = form.newPassword;
+      }
+
+      const doctor = await updateDoctor(doctorId, payload);
+      const nextForm = {
+        ...toForm(doctor),
+        email: doctor.email ?? payload.email ?? "",
+        newPassword: "",
+      };
       setForm(nextForm);
       setInitialForm(nextForm);
       Alert.alert(
         "Doctor Updated",
         `${doctor.name}'s profile was updated successfully.`,
-        [{ onPress: () => router.back(), text: "OK" }]
+        [
+          {
+            onPress: () => router.replace("/(admin)/therapists"),
+            text: "OK",
+          },
+        ]
       );
     } catch (error) {
       if (error instanceof DoctorServiceError && error.status === 401) {
@@ -265,7 +312,7 @@ export default function DoctorEditScreen() {
             <View style={styles.profileText}>
               <Text style={styles.profileTitle}>Physician Profile</Text>
               <Text style={styles.profileSubtitle}>
-                Update clinical details and directory availability.
+                Update login, clinical details and directory availability.
               </Text>
             </View>
           </View>
@@ -288,6 +335,56 @@ export default function DoctorEditScreen() {
             />
             {errors.name ? (
               <Text style={styles.errorText}>{errors.name}</Text>
+            ) : null}
+
+            <Text style={styles.label}>Email Address</Text>
+            <TextInput
+              accessibilityLabel="Doctor email address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!submitting}
+              keyboardType="email-address"
+              maxLength={160}
+              onChangeText={(email) => {
+                setForm((current) => ({ ...current, email }));
+                setErrors((current) => ({ ...current, email: undefined }));
+              }}
+              placeholder="name@example.com"
+              placeholderTextColor={colors.textSubtle}
+              style={[styles.input, errors.email && styles.inputInvalid]}
+              textContentType="emailAddress"
+              value={form.email}
+            />
+            {errors.email ? (
+              <Text style={styles.errorText}>{errors.email}</Text>
+            ) : null}
+
+            <Text style={styles.label}>New Password</Text>
+            <TextInput
+              accessibilityLabel="Doctor new password"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!submitting}
+              maxLength={128}
+              onChangeText={(newPassword) => {
+                setForm((current) => ({ ...current, newPassword }));
+                setErrors((current) => ({
+                  ...current,
+                  newPassword: undefined,
+                }));
+              }}
+              placeholder="Leave blank to keep current password"
+              placeholderTextColor={colors.textSubtle}
+              secureTextEntry
+              style={[
+                styles.input,
+                errors.newPassword && styles.inputInvalid,
+              ]}
+              textContentType="newPassword"
+              value={form.newPassword}
+            />
+            {errors.newPassword ? (
+              <Text style={styles.errorText}>{errors.newPassword}</Text>
             ) : null}
 
             <Text style={styles.label}>Specialization</Text>

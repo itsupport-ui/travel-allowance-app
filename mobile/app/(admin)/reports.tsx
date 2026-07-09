@@ -47,6 +47,10 @@ import type {
   ReportClaimStatus,
 } from "../../src/types/adminReport";
 import type { ClaimResponse } from "../../src/types/claim";
+import {
+  formatDateForDisplay,
+  formatDateForApi,
+} from "../../src/utils/date";
 import { formatScheduleDate } from "../../src/utils/scheduleForm";
 import { clearAuthSession } from "../../src/utils/storage";
 
@@ -251,7 +255,7 @@ const buildReportCsv = (claims: ClaimResponse[]): string => {
   ].join(",");
   const rows = claims.map((claim) =>
     [
-      escapeCsvText(claim.claim_date),
+      escapeCsvText(formatReportDate(claim.claim_date)),
       escapeCsvText(claim.therapist_name ?? "Not assigned"),
       String(claim.patient_count ?? 0),
       claim.total_km.toFixed(2),
@@ -267,18 +271,14 @@ const buildReportCsv = (claims: ClaimResponse[]): string => {
 
 const getReportFileName = (): string => {
   const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
+  const [year, month, day] = formatDateForApi(today).split("-");
 
   return `reports_${year}_${month}_${day}.csv`;
 };
 
 const getPdfFileName = (): string => {
   const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
+  const [year, month, day] = formatDateForApi(today).split("-");
 
   return `report_${year}_${month}_${day}.pdf`;
 };
@@ -299,37 +299,11 @@ const escapeHtml = (value: string): string =>
 const formatReportDate = (
   value: string | null | undefined
 ): string => {
-  if (typeof value !== "string" || !value.trim()) {
-    return "Date not available";
-  }
-
-  const [year, month, day] = value
-    .split("-")
-    .map((part) => Number(part));
-  const date = new Date(year, month - 1, day);
-
-  if (
-    !year ||
-    !month ||
-    !day ||
-    Number.isNaN(date.getTime())
-  ) {
-    return value;
-  }
-
-  return date.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDateForDisplay(value) || value || "Date not available";
 };
 
 const formatGeneratedDate = (value: Date): string =>
-  `${value.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  })}, ${value.toLocaleTimeString("en-IN", {
+  `${formatDateForDisplay(value)}, ${value.toLocaleTimeString("en-IN", {
     hour: "2-digit",
     hour12: true,
     minute: "2-digit",

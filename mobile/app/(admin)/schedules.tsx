@@ -27,6 +27,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppDatePickerField } from "../../src/components/common/AppDatePickerField";
 import {
   AdminScheduleServiceError,
   getAdminScheduleData,
@@ -37,6 +38,10 @@ import type {
 } from "../../src/types/adminSchedule";
 import type { Schedule } from "../../src/types/schedule";
 import type { TherapistResponse } from "../../src/types/therapist";
+import {
+  formatDateForDisplay,
+  getLocalApiDate,
+} from "../../src/utils/date";
 import { clearAuthSession } from "../../src/utils/storage";
 
 const PRIMARY = colors.primary;
@@ -70,11 +75,7 @@ const parseTherapistId = (
 };
 
 const getLocalDateKey = (): string => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return getLocalApiDate();
 };
 
 const isValidDateKey = (value: string): boolean => {
@@ -95,22 +96,7 @@ const isValidDateKey = (value: string): boolean => {
 const formatDate = (
   value: string | null | undefined
 ): string => {
-  if (!value) {
-    return "Date not set";
-  }
-
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDateForDisplay(value) || value || "Date not set";
 };
 
 const formatTime = (
@@ -423,7 +409,7 @@ export default function AdminSchedulesScreen() {
 
   const dateFilterError =
     dateFilter.length > 0 && !isValidDateKey(dateFilter)
-      ? "Use YYYY-MM-DD format."
+      ? "Select a valid date."
       : null;
 
   const filteredSchedules = useMemo(() => {
@@ -612,39 +598,14 @@ export default function AdminSchedulesScreen() {
         </TouchableOpacity>
       </View>
 
-      <View
-        style={[
-          styles.dateContainer,
-          dateFilterError ? styles.invalidDateContainer : null,
-        ]}
-      >
-        <Ionicons color={colors.textMuted} name="calendar-outline" size={19} />
-        <TextInput
-          accessibilityLabel="Filter by date"
-          keyboardType="numbers-and-punctuation"
-          maxLength={10}
-          onChangeText={(value) =>
-            setDateFilter(value.replace(/[^\d-]/g, ""))
-          }
-          placeholder="Filter date: YYYY-MM-DD"
-          placeholderTextColor={colors.textSubtle}
-          style={styles.dateInput}
-          value={dateFilter}
-        />
-        {dateFilter ? (
-          <TouchableOpacity
-            accessibilityLabel="Clear date filter"
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={() => setDateFilter("")}
-          >
-            <Ionicons color={colors.textMuted} name="close-circle" size={20} />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-      {dateFilterError ? (
-        <Text style={styles.dateError}>{dateFilterError}</Text>
-      ) : null}
+      <AppDatePickerField
+        allowClear
+        error={dateFilterError}
+        label="Filter date"
+        placeholder="Select date"
+        value={dateFilter}
+        onChange={setDateFilter}
+      />
 
       <View style={styles.resultsHeader}>
         <Text style={styles.sectionTitle}>

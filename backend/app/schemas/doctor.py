@@ -36,6 +36,8 @@ class DoctorCreate(BaseModel):
 class DoctorUpdate(BaseModel):
     user_id: int = Field(gt=0)
     name: str = Field(min_length=2, max_length=120)
+    email: EmailStr | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=128)
     specialization: str | None = Field(default=None, max_length=120)
     phone: str | None = Field(default=None, max_length=24)
     active: bool
@@ -52,6 +54,7 @@ class DoctorResponse(BaseModel):
     id: int
     user_id: int
     name: str
+    email: str | None = None
     specialization: str | None = None
     phone: str | None = None
     active: bool

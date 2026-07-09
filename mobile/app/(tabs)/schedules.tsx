@@ -31,6 +31,7 @@ import {
   getUpcomingSchedules,
 } from "../../src/services/scheduleService";
 import type { Schedule } from "../../src/types/schedule";
+import { formatDateForDisplay } from "../../src/utils/date";
 
 const PRIMARY = colors.primary;
 
@@ -93,21 +94,7 @@ const formatDate = (schedule: Schedule): string => {
     schedule.start_date ??
     schedule.end_date;
 
-  if (!value) {
-    return "Date not available";
-  }
-
-  const date = new Date(`${value.slice(0, 10)}T00:00:00`);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDateForDisplay(value) || value || "Date not available";
 };
 
 const formatLabel = (

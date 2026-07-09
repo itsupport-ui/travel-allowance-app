@@ -19,19 +19,19 @@ const workflowActions: {
   {
     description: "Schedule calls, confirm decisions, and create visits.",
     icon: "call-outline",
-    route: "/(admin)/doctor-workflow-consultations" as Href,
+    route: "/doctor-workflow-consultations" as Href,
     title: "Consultations",
   },
   {
     description: "Approve treatment plans and generate therapist schedules.",
     icon: "medkit-outline",
-    route: "/(admin)/doctor-workflow-treatment-plans" as Href,
+    route: "/doctor-workflow-treatment-plans" as Href,
     title: "Treatment Plans",
   },
   {
     description: "Review doctor expense claims and proof files.",
     icon: "receipt-outline",
-    route: "/(admin)/doctor-workflow-claims" as Href,
+    route: "/doctor-workflow-claims" as Href,
     title: "Doctor Claims",
   },
 ];

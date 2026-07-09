@@ -27,6 +27,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { formatDateForDisplay } from "../../utils/date";
+
 const PRIMARY = colors.primary;
 
 interface FormTextFieldProps {
@@ -383,11 +385,7 @@ interface DateTimeFieldProps {
 }
 
 const formatDateValue = (value: Date): string =>
-  value.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  formatDateForDisplay(value);
 
 const formatTimeValue = (value: Date): string =>
   value.toLocaleTimeString("en-IN", {

@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppDatePickerField } from "../../src/components/common/AppDatePickerField";
 import {
   DoctorBackHeader,
   DoctorChoiceChips,
@@ -64,6 +65,11 @@ const transportOptions = [
 const priorityOptions = ["normal", "high"] as const;
 
 const EMPTY_PLANS: TreatmentPlan[] = [];
+const DOCTOR_WORKFLOW_ROUTE = "/doctor-workflow" as const;
+
+const goToDoctorWorkflow = () => {
+  router.replace(DOCTOR_WORKFLOW_ROUTE);
+};
 
 const isIsoDate = (value: string): boolean =>
   /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -308,7 +314,7 @@ export default function AdminTreatmentPlansWorkflowScreen() {
       return;
     }
     if (!isIsoDate(scheduleForm.session_date)) {
-      setFormError("Session date must use YYYY-MM-DD format.");
+      setFormError("Select a valid session date.");
       return;
     }
     if (scheduleForm.session_date < getLocalIsoDate()) {
@@ -345,7 +351,7 @@ export default function AdminTreatmentPlansWorkflowScreen() {
     return (
       <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
         <DoctorBackHeader
-          onBack={() => router.back()}
+          onBack={goToDoctorWorkflow}
           title="Treatment Plans"
         />
         <DoctorErrorState
@@ -369,7 +375,7 @@ export default function AdminTreatmentPlansWorkflowScreen() {
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
       <DoctorBackHeader
-        onBack={() => router.back()}
+        onBack={goToDoctorWorkflow}
         title="Treatment Plans"
       />
       <KeyboardAvoidingView
@@ -431,7 +437,7 @@ export default function AdminTreatmentPlansWorkflowScreen() {
                 destructive
                 error={formError}
                 primaryLabel="Reject"
-                onCancel={() => setPanel(null)}
+                onCancel={goToDoctorWorkflow}
                 onSubmit={submitReject}
               />
             </View>
@@ -491,12 +497,11 @@ export default function AdminTreatmentPlansWorkflowScreen() {
                   scheduleForm.date_mode as "start_date" | "treatment_date"
                 }
               />
-              <DoctorField
+              <AppDatePickerField
                 label="First session date"
-                placeholder="YYYY-MM-DD"
                 required
                 value={scheduleForm.session_date}
-                onChangeText={(value) =>
+                onChange={(value) =>
                   setScheduleForm((current) => ({
                     ...current,
                     session_date: value,
@@ -617,7 +622,7 @@ export default function AdminTreatmentPlansWorkflowScreen() {
                 busy={scheduleMutation.isPending}
                 error={formError}
                 primaryLabel="Generate"
-                onCancel={() => setPanel(null)}
+                onCancel={goToDoctorWorkflow}
                 onSubmit={submitSchedule}
               />
             </View>

@@ -1,3 +1,8 @@
+import {
+  formatDateForApi,
+  formatDateForDisplay,
+} from "./date";
+
 export const parsePositiveId = (
   value: string | string[] | undefined
 ): number | null => {
@@ -14,22 +19,7 @@ export const parsePositiveId = (
 export const formatDoctorDate = (
   value: string | null | undefined
 ): string => {
-  if (!value) {
-    return "Not available";
-  }
-
-  const dateOnly = value.slice(0, 10);
-  const date = new Date(`${dateOnly}T00:00:00`);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDateForDisplay(value) || value || "Not available";
 };
 
 export const formatDoctorDateTime = (
@@ -45,13 +35,10 @@ export const formatDoctorDateTime = (
     return value;
   }
 
-  return date.toLocaleString("en-IN", {
-    day: "2-digit",
+  return `${formatDateForDisplay(date)}, ${date.toLocaleTimeString("en-IN", {
     hour: "2-digit",
     minute: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  })}`;
 };
 
 export const formatDoctorCurrency = (
@@ -78,11 +65,7 @@ export const formatDoctorLabel = (
 };
 
 export const getLocalIsoDate = (): string => {
-  const now = new Date();
-  const localTime = new Date(
-    now.getTime() - now.getTimezoneOffset() * 60_000
-  );
-  return localTime.toISOString().slice(0, 10);
+  return formatDateForApi(new Date());
 };
 
 export const nullableDoctorText = (value: string): string | null =>

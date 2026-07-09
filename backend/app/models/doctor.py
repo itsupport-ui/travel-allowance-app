@@ -22,5 +22,9 @@ class Doctor(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     user = relationship("User", foreign_keys=[user_id])
     visits = relationship("DoctorVisit", back_populates="doctor")
+
+    @property
+    def email(self):
+        return self.user.email if self.user is not None else None
     
     

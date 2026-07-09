@@ -7,6 +7,7 @@ import type {
   ScheduleFormErrors,
   ScheduleFormState,
 } from "../types/scheduleForm";
+import { formatDateForApi, parseApiDate } from "./date";
 
 export const DEFAULT_SCHEDULE_INSTRUCTIONS =
   "Wear face mask and cap during treatment";
@@ -33,10 +34,7 @@ export const startOfDay = (value: Date): Date =>
   new Date(value.getFullYear(), value.getMonth(), value.getDate());
 
 export const formatScheduleDate = (value: Date): string => {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return formatDateForApi(value);
 };
 
 export const formatScheduleTime = (value: Date): string => {
@@ -46,23 +44,7 @@ export const formatScheduleTime = (value: Date): string => {
 };
 
 const parseScheduleDate = (value: string | null): Date | null => {
-  if (!value) {
-    return null;
-  }
-
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-
-  if (!match) {
-    return null;
-  }
-
-  const date = new Date(
-    Number(match[1]),
-    Number(match[2]) - 1,
-    Number(match[3])
-  );
-
-  return Number.isNaN(date.getTime()) ? null : date;
+  return parseApiDate(value);
 };
 
 const parseScheduleTime = (value: string): Date | null => {

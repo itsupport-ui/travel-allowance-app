@@ -4,6 +4,7 @@ import { api } from "../api/apiClient";
 import type { AdminScheduleData } from "../types/adminSchedule";
 import type { Schedule } from "../types/schedule";
 import type { TherapistResponse } from "../types/therapist";
+import { getLocalApiDate } from "../utils/date";
 import { getToken } from "../utils/storage";
 
 interface ApiErrorBody {
@@ -21,11 +22,7 @@ export class AdminScheduleServiceError extends Error {
 }
 
 const getLocalDateKey = (): string => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return getLocalApiDate();
 };
 
 const isFutureSchedule = (

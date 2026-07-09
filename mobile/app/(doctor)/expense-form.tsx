@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppDatePickerField } from "../../src/components/common/AppDatePickerField";
 import {
   DoctorBackHeader,
   DoctorChoiceChips,
@@ -208,7 +209,7 @@ export default function DoctorExpenseFormScreen() {
     }
 
     if (!isValidDate(expenseDate.trim())) {
-      setFormError("Enter a valid expense date in YYYY-MM-DD format.");
+      setFormError("Select a valid expense date.");
       return;
     }
     if (!fromLocation.trim() || !toLocation.trim()) {
@@ -306,18 +307,17 @@ export default function DoctorExpenseFormScreen() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
-          <DoctorField
+          <AppDatePickerField
             error={
               formError ===
-              "Enter a valid expense date in YYYY-MM-DD format."
+              "Select a valid expense date."
                 ? formError
                 : null
             }
-            label="Expense date (YYYY-MM-DD)"
-            maxLength={10}
+            label="Expense date"
             required
             value={expenseDate}
-            onChangeText={(value) => {
+            onChange={(value) => {
               setExpenseDate(value);
               setFormError(null);
             }}

@@ -23,6 +23,7 @@ import {
   downloadTravelInvoice,
   getTravelById,
 } from "../src/services/travelService";
+import { formatDateForDisplay } from "../src/utils/date";
 
 const PRIMARY = colors.primary;
 
@@ -42,21 +43,7 @@ const parseTravelId = (
 const formatDate = (
   value: string | null | undefined
 ): string => {
-  if (typeof value !== "string" || !value.trim()) {
-    return "Date not available";
-  }
-
-  const date = new Date(`${value.slice(0, 10)}T00:00:00`);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
+  return formatDateForDisplay(value) || value || "Date not available";
 };
 
 const formatLabel = (

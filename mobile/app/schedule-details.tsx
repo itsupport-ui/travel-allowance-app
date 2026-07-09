@@ -23,7 +23,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 import { ScheduleListSkeleton } from "../src/components/skeletons/ScreenSkeletons";
 import { queryKeys } from "../src/query/queryKeys";
@@ -161,6 +164,7 @@ function Section({
 }
 
 export default function ScheduleDetailsScreen() {
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     id?: string | string[];
   }>();
@@ -440,6 +444,9 @@ export default function ScheduleDetailsScreen() {
     completionMutation.isPending ||
     missedMutation.isPending ||
     capturingLocation;
+  const actionBarBottomPadding = Math.max(insets.bottom, spacing.lg);
+  const actionContentPadding =
+    52 + spacing.lg + actionBarBottomPadding + spacing.xl;
 
   return (
     <SafeAreaView
@@ -499,8 +506,9 @@ export default function ScheduleDetailsScreen() {
           <ScrollView
             contentContainerStyle={[
               styles.content,
-              schedule.status === "scheduled" &&
-                styles.contentWithActions,
+              schedule.status === "scheduled"
+                ? { paddingBottom: actionContentPadding }
+                : null,
             ]}
             refreshControl={
               <RefreshControl
@@ -602,7 +610,12 @@ export default function ScheduleDetailsScreen() {
           </ScrollView>
 
           {schedule.status === "scheduled" ? (
-            <View style={styles.actionBar}>
+            <View
+              style={[
+                styles.actionBar,
+                { paddingBottom: actionBarBottomPadding },
+              ]}
+            >
               <TouchableOpacity
                 accessibilityRole="button"
                 activeOpacity={0.85}
@@ -879,9 +892,6 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.xl,
     paddingBottom: spacing.sectionLg,
-  },
-  contentWithActions: {
-    paddingBottom: 110,
   },
   statusRow: {
     alignItems: "center",

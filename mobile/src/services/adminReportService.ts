@@ -10,6 +10,7 @@ import type { ClaimResponse } from "../types/claim";
 import type { ScheduleResponse } from "../types/schedule";
 import type { TravelResponse } from "../types/travel";
 import { getToken } from "../utils/storage";
+import { getLocalApiDate } from "../utils/date";
 
 interface ApiErrorBody {
   detail?: unknown;
@@ -89,11 +90,7 @@ const normalizeError = (error: unknown): AdminReportServiceError => {
 };
 
 const getLocalDateKey = (): string => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return getLocalApiDate();
 };
 
 const dateMatchesFilters = (

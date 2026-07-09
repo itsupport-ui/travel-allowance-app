@@ -4,6 +4,7 @@ import * as Sharing from "expo-sharing";
 
 import { appConfig } from "../config/env";
 import type { ClaimDetailsResponse } from "../types/claim";
+import { formatDateForDisplay } from "../utils/date";
 
 export class ClaimPdfError extends Error {
   constructor(message: string) {
@@ -130,7 +131,7 @@ const buildClaimHtml = ({
         <header>
           <h1>Travel Allowance Claim</h1>
           <p class="subtitle">Claim #${claim.id} | ${escapeHtml(
-            claim.claim_date
+            formatDateForDisplay(claim.claim_date) || claim.claim_date
           )}</p>
         </header>
         <section class="summary">
@@ -170,7 +171,11 @@ const buildClaimHtml = ({
           <tbody>${rows}</tbody>
         </table>
         <footer>
-          Generated ${escapeHtml(new Date().toLocaleString("en-IN"))}
+          Generated ${escapeHtml(
+            `${formatDateForDisplay(new Date())}, ${new Date().toLocaleTimeString(
+              "en-IN"
+            )}`
+          )}
         </footer>
       </body>
     </html>

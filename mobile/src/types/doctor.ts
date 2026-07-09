@@ -33,7 +33,10 @@ export interface CreateDoctorWithLoginRequest {
 }
 
 export interface UpdateDoctorRequest {
+  user_id: number;
   name: string;
+  email?: string | null;
+  password?: string;
   specialization?: string | null;
   phone?: string | null;
   active: boolean;

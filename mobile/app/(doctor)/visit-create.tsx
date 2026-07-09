@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppDatePickerField } from "../../src/components/common/AppDatePickerField";
 import {
   DoctorBackHeader,
   DoctorErrorState,
@@ -150,7 +151,7 @@ export default function CreateDoctorVisitScreen() {
     }
 
     if (!isIsoDate(visitDate.trim())) {
-      setFormError("Visit date must use YYYY-MM-DD format.");
+      setFormError("Select a valid visit date.");
       return;
     }
 
@@ -227,12 +228,11 @@ export default function CreateDoctorVisitScreen() {
             value={patientAddress}
             onChangeText={setPatientAddress}
           />
-          <DoctorField
+          <AppDatePickerField
             label="Visit date"
-            placeholder="YYYY-MM-DD"
             required
             value={visitDate}
-            onChangeText={setVisitDate}
+            onChange={setVisitDate}
           />
           <DoctorField
             label="Visit time"

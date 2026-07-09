@@ -5,7 +5,7 @@ from app.database import get_db
 from app.models.doctor import Doctor
 from app.models.user import User
 from app.schemas.doctor import DoctorCreate, DoctorResponse, DoctorUpdate
-from app.utils.auth import require_role
+from app.utils.auth import hash_password, require_role
 from sqlalchemy import func
 
 
@@ -167,6 +167,29 @@ def update_doctor(
 
     validate_doctor_user(db, payload.user_id, doctor.id)
     doctor.user_id = payload.user_id
+    linked_user = db.query(User).filter(User.id == payload.user_id).first()
+    if linked_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if payload.email is not None:
+        normalized_email = str(payload.email).strip().lower()
+        duplicate_email = (
+            db.query(User)
+            .filter(
+                User.id != linked_user.id,
+                func.lower(User.email) == normalized_email,
+            )
+            .first()
+        )
+        if duplicate_email is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Email already registered",
+            )
+        linked_user.email = normalized_email
+
+    if payload.password:
+        linked_user.password_hash = hash_password(payload.password)
 
     doctor.name = normalized_name
     doctor.specialization = (
@@ -180,6 +203,7 @@ def update_doctor(
     try:
         db.commit()
         db.refresh(doctor)
+        db.refresh(linked_user)
     except Exception as error:
         db.rollback()
         raise HTTPException(

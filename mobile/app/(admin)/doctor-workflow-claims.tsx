@@ -18,6 +18,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppDatePickerField } from "../../src/components/common/AppDatePickerField";
 import {
   DoctorBackHeader,
   DoctorChoiceChips,
@@ -67,6 +68,11 @@ const statusFilters = [
 ] as const;
 
 const EMPTY_CLAIMS: AdminDoctorClaim[] = [];
+const DOCTOR_WORKFLOW_ROUTE = "/doctor-workflow" as const;
+
+const goToDoctorWorkflow = () => {
+  router.replace(DOCTOR_WORKFLOW_ROUTE);
+};
 
 const getProofMimeType = (proofName: string): string => {
   const normalized = proofName.toLowerCase();
@@ -231,7 +237,7 @@ export default function AdminDoctorClaimsWorkflowScreen() {
     return (
       <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
         <DoctorBackHeader
-          onBack={() => router.back()}
+          onBack={goToDoctorWorkflow}
           title="Doctor Claims"
         />
         <DoctorErrorState
@@ -249,7 +255,7 @@ export default function AdminDoctorClaimsWorkflowScreen() {
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
       <DoctorBackHeader
-        onBack={() => router.back()}
+        onBack={goToDoctorWorkflow}
         title="Doctor Claims"
       />
       <KeyboardAvoidingView
@@ -334,7 +340,7 @@ export default function AdminDoctorClaimsWorkflowScreen() {
                   accessibilityRole="button"
                   disabled={rejectMutation.isPending}
                   style={styles.secondaryButton}
-                  onPress={() => setRejectingClaim(null)}
+                  onPress={goToDoctorWorkflow}
                 >
                   <Text style={styles.secondaryButtonText}>Cancel</Text>
                 </TouchableOpacity>
@@ -494,17 +500,17 @@ function FilterCard({
           );
         })}
       </View>
-      <DoctorField
+      <AppDatePickerField
+        allowClear
         label="From date"
-        placeholder="YYYY-MM-DD"
         value={filters.from_date ?? ""}
-        onChangeText={(value) => onChange({ ...filters, from_date: value })}
+        onChange={(value) => onChange({ ...filters, from_date: value })}
       />
-      <DoctorField
+      <AppDatePickerField
+        allowClear
         label="To date"
-        placeholder="YYYY-MM-DD"
         value={filters.to_date ?? ""}
-        onChangeText={(value) => onChange({ ...filters, to_date: value })}
+        onChange={(value) => onChange({ ...filters, to_date: value })}
       />
       <View style={styles.filterActions}>
         <TouchableOpacity

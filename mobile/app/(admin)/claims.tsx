@@ -28,6 +28,7 @@ import {
   rejectAdminClaim,
 } from "../../src/services/adminClaimService";
 import type { ClaimResponse } from "../../src/types/claim";
+import { formatDateForDisplay } from "../../src/utils/date";
 import { clearAuthSession } from "../../src/utils/storage";
 
 const PRIMARY = colors.primary;
@@ -49,22 +50,7 @@ const formatDistance = (value: number): string =>
 const formatDate = (
   value: string | null | undefined
 ): string => {
-  if (typeof value !== "string" || !value.trim()) {
-    return "Date not available";
-  }
-
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDateForDisplay(value) || value || "Date not available";
 };
 
 const getErrorMessage = (error: unknown): string => {

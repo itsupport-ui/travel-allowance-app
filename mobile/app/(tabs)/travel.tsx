@@ -28,6 +28,7 @@ import {
 import { getApiErrorMessage } from "../../src/services/errorHandler";
 import { getTodayTravels } from "../../src/services/travelService";
 import type { TravelResponse } from "../../src/types/travel";
+import { formatDateForApi } from "../../src/utils/date";
 
 const PRIMARY = colors.primary;
 
@@ -38,10 +39,7 @@ interface TravelSummary {
 }
 
 const getLocalDateKey = (value: Date): string => {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return formatDateForApi(value);
 };
 
 const formatAmount = (value: number): string =>
