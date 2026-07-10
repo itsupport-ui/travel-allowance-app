@@ -61,3 +61,8 @@ app.include_router(doctor_visit.router)
 @app.get("/", tags=["Health"])
 def home():
     return {"message": "Welcome to the Travel Allowance App!"}
+
+
+@app.get("/health", tags=["Health"])
+def health():
+    return {"status": "ok"}
