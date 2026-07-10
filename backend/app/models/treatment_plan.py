@@ -1,7 +1,6 @@
 from sqlalchemy import (
     Column,
     DateTime,
-    Enum,
     ForeignKey,
     Integer,
     String,
@@ -12,6 +11,7 @@ from datetime import datetime
 from app.database import Base
 from app.models.doctor_visit import DoctorVisit
 from app.models.doctor import Doctor
+from app.models.enums import TREATMENT_PLAN_STATUS
 
 class TreatmentPlan(Base):
     __tablename__ = "treatment_plans"
@@ -35,16 +35,7 @@ class TreatmentPlan(Base):
     duration = Column(String, nullable=True)
     special_instructions = Column(String, nullable=True)
     remarks = Column(String, nullable=True)
-    status = Column(
-        Enum(
-            "pending",
-            "submitted",
-            "approved",
-            "rejected",
-            name="treatment_plan_status",
-        ),
-        default="pending",
-    )
+    status = Column(TREATMENT_PLAN_STATUS, default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     treatment_schedules = relationship(

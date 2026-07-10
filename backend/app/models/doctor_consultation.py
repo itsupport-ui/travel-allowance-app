@@ -2,7 +2,6 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
-    Enum,
     Float,
     ForeignKey,
     Integer,
@@ -13,6 +12,10 @@ from sqlalchemy import (
 from sqlalchemy.sql import func
 
 from app.database import Base
+from app.models.enums import (
+    DOCTOR_CONSULTATION_PATIENT_DECISION,
+    DOCTOR_CONSULTATION_STATUS,
+)
 
 
 class DoctorConsultation(Base):
@@ -45,24 +48,13 @@ class DoctorConsultation(Base):
     estimated_amount = Column(Float, nullable=True)
     rejection_reason = Column(Text, nullable=True)
     patient_decision = Column(
-        Enum(
-            "pending",
-            "confirmed",
-            "rejected",
-            "follow_up",
-            name="doctor_consultation_patient_decision",
-        ),
+        DOCTOR_CONSULTATION_PATIENT_DECISION,
         nullable=False,
         default="pending",
         server_default="pending",
     )
     status = Column(
-        Enum(
-            "scheduled",
-            "completed",
-            "cancelled",
-            name="doctor_consultation_status",
-        ),
+        DOCTOR_CONSULTATION_STATUS,
         nullable=False,
         default="scheduled",
         server_default="scheduled",

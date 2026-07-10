@@ -3,7 +3,6 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
-    Enum,
     ForeignKey,
     Integer,
     String,
@@ -13,6 +12,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
+from app.models.enums import VISIT_STATUS
 
 class DoctorVisit(Base):
     __tablename__ = 'doctor_visits'
@@ -32,7 +32,7 @@ class DoctorVisit(Base):
     visit_time = Column(Time, nullable=False)
     chief_complaint = Column(Text, nullable=True)
     remarks = Column(Text, nullable=True)
-    status = Column(Enum('scheduled', 'visited', 'treatment_plan_submitted', 'cancelled', name='visit_status'), default='scheduled')
+    status = Column(VISIT_STATUS, default='scheduled')
     created_by = Column(Integer, ForeignKey('users.id'), nullable=False)
     consultation_id = Column(Integer, ForeignKey('doctor_consultations.id'), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)

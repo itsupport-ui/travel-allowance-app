@@ -19,28 +19,36 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _managed_enum(*values: str, name: str) -> postgresql.ENUM:
+    return postgresql.ENUM(
+        *values,
+        name=name,
+        create_type=False,
+    )
+
+
 def upgrade() -> None:
-    visit_status = postgresql.ENUM(
+    visit_status = _managed_enum(
         "scheduled",
         "visited",
         "treatment_plan_submitted",
         "cancelled",
         name="visit_status",
     )
-    doctor_consultation_patient_decision = postgresql.ENUM(
+    doctor_consultation_patient_decision = _managed_enum(
         "pending",
         "confirmed",
         "rejected",
         "follow_up",
         name="doctor_consultation_patient_decision",
     )
-    doctor_consultation_status = postgresql.ENUM(
+    doctor_consultation_status = _managed_enum(
         "scheduled",
         "completed",
         "cancelled",
         name="doctor_consultation_status",
     )
-    treatment_plan_status = postgresql.ENUM(
+    treatment_plan_status = _managed_enum(
         "pending",
         "submitted",
         "approved",
@@ -415,7 +423,19 @@ def downgrade() -> None:
     op.drop_index("ix_settings_id", table_name="settings")
     op.drop_table("settings")
 
-    postgresql.ENUM(name="treatment_plan_status").drop(op.get_bind(), checkfirst=True)
-    postgresql.ENUM(name="doctor_consultation_status").drop(op.get_bind(), checkfirst=True)
-    postgresql.ENUM(name="doctor_consultation_patient_decision").drop(op.get_bind(), checkfirst=True)
-    postgresql.ENUM(name="visit_status").drop(op.get_bind(), checkfirst=True)
+    _managed_enum(name="treatment_plan_status").drop(
+        op.get_bind(),
+        checkfirst=True,
+    )
+    _managed_enum(name="doctor_consultation_status").drop(
+        op.get_bind(),
+        checkfirst=True,
+    )
+    _managed_enum(name="doctor_consultation_patient_decision").drop(
+        op.get_bind(),
+        checkfirst=True,
+    )
+    _managed_enum(name="visit_status").drop(
+        op.get_bind(),
+        checkfirst=True,
+    )
