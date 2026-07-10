@@ -68,7 +68,7 @@ const statusFilters = [
 ] as const;
 
 const EMPTY_CLAIMS: AdminDoctorClaim[] = [];
-const DOCTOR_WORKFLOW_ROUTE = "/doctor-workflow" as const;
+const DOCTOR_WORKFLOW_ROUTE = "/(admin)/doctor-workflow" as const;
 
 const goToDoctorWorkflow = () => {
   router.replace(DOCTOR_WORKFLOW_ROUTE);

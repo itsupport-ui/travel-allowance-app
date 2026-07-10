@@ -65,7 +65,7 @@ const transportOptions = [
 const priorityOptions = ["normal", "high"] as const;
 
 const EMPTY_PLANS: TreatmentPlan[] = [];
-const DOCTOR_WORKFLOW_ROUTE = "/doctor-workflow" as const;
+const DOCTOR_WORKFLOW_ROUTE = "/(admin)/doctor-workflow" as const;
 
 const goToDoctorWorkflow = () => {
   router.replace(DOCTOR_WORKFLOW_ROUTE);

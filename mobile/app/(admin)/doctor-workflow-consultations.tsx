@@ -107,7 +107,7 @@ const isConsultationConverted = (
 
 const EMPTY_CONSULTATIONS: DoctorConsultation[] = [];
 const EMPTY_DOCTORS: Doctor[] = [];
-const DOCTOR_WORKFLOW_ROUTE = "/doctor-workflow" as const;
+const DOCTOR_WORKFLOW_ROUTE = "/(admin)/doctor-workflow" as const;
 
 const goToDoctorWorkflow = () => {
   router.replace(DOCTOR_WORKFLOW_ROUTE);
