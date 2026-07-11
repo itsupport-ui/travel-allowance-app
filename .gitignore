@@ -9,6 +9,14 @@ env/
 
 # Environment variables
 .env
+.env.*
+!.env.example
+
+# Private credentials and keys
+credentials.json
+*credentials*.json
+*.pem
+*.key
 
 # VS Code
 .vscode/

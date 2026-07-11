@@ -1,9 +1,12 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import models  # noqa: F401
 from app.config import AUTO_CREATE_SCHEMA, CORS_ORIGINS
 from app.database import Base, engine
+from app.services.admin_seed import ensure_admin_user
 from app.routers import (
     admin_dashboard,
     auth,
@@ -27,9 +30,18 @@ from app.routers import (
 if AUTO_CREATE_SCHEMA:
     Base.metadata.create_all(bind=engine)
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    if not ensure_admin_user():
+        raise RuntimeError("Admin seed failed; review the sanitized server log")
+    yield
+
+
 app = FastAPI(
     title="Travel Allowance API",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
