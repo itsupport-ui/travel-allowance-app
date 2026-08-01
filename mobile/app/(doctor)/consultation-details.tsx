@@ -120,10 +120,19 @@ export default function DoctorConsultationDetailsScreen() {
           </View>
 
           <View style={styles.detailsCard}>
+            <Text style={styles.sectionTitle}>Patient information</Text>
             <DoctorDetailRow
               label="Address"
               value={consultation.patient_address || "Not available"}
             />
+            <DoctorDetailRow
+              label="Phone"
+              value={consultation.patient_phone || "Not available"}
+            />
+          </View>
+
+          <View style={styles.detailsCard}>
+            <Text style={styles.sectionTitle}>Consultation & schedule</Text>
             <DoctorDetailRow
               label="Scheduled"
               value={`${formatDoctorDate(
@@ -142,6 +151,10 @@ export default function DoctorConsultationDetailsScreen() {
               label="Notes"
               value={consultation.notes || "Not available"}
             />
+          </View>
+
+          <View style={styles.detailsCard}>
+            <Text style={styles.sectionTitle}>Decision & clinical notes</Text>
             <DoctorDetailRow
               label="Call outcome"
               value={consultation.call_outcome || "Not available"}
@@ -251,6 +264,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.control,
     paddingHorizontal: spacing.xl,
+  },
+  sectionTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.body,
+    fontWeight: typography.weight.extrabold,
+    paddingBottom: spacing.sm,
+    paddingTop: spacing.md,
   },
   completeButton: {
     alignItems: "center",

@@ -136,6 +136,7 @@ export default function DoctorTreatmentPlanDetailsScreen() {
           </View>
 
           <View style={styles.detailsCard}>
+            <Text style={styles.sectionTitle}>Patient & treatment</Text>
             <DoctorDetailRow
               label="Diagnosis"
               value={plan.diagnosis || "Not available"}
@@ -152,6 +153,10 @@ export default function DoctorTreatmentPlanDetailsScreen() {
               label="Medicines"
               value={plan.medicines || "Not available"}
             />
+          </View>
+
+          <View style={styles.detailsCard}>
+            <Text style={styles.sectionTitle}>Schedule & instructions</Text>
             <DoctorDetailRow
               label="Sessions required"
               value={plan.sessions_required ?? "Not available"}
@@ -171,6 +176,16 @@ export default function DoctorTreatmentPlanDetailsScreen() {
             <DoctorDetailRow
               label="Remarks"
               value={plan.remarks || "Not available"}
+            />
+          </View>
+
+          <View style={styles.detailsCard}>
+            <Text style={styles.sectionTitle}>Progress & timeline</Text>
+            <DoctorDetailRow
+              label="Schedule progress"
+              value={`${plan.schedule_count ?? 0} schedule${
+                plan.schedule_count === 1 ? "" : "s"
+              } created`}
             />
             <DoctorDetailRow
               label="Submitted"
@@ -257,5 +272,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.control,
     paddingHorizontal: spacing.xl,
+  },
+  sectionTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.body,
+    fontWeight: typography.weight.extrabold,
+    paddingBottom: spacing.sm,
+    paddingTop: spacing.md,
   },
 });

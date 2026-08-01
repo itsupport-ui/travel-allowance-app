@@ -1,14 +1,18 @@
 import { colors, radius, shadows, spacing, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import {
-  ActivityIndicator,
+  Animated,
+  Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
+  type StyleProp,
   type TextInputProps,
   TouchableOpacity,
   View,
+  type ViewStyle,
 } from "react-native";
 
 import { formatDoctorLabel } from "../../utils/doctorWorkflow";
@@ -86,6 +90,97 @@ export function DoctorScreenHeader({
   );
 }
 
+export function DoctorSearchBar({
+  accessibilityLabel = "Search",
+  onChangeText,
+  placeholder,
+  value,
+}: {
+  accessibilityLabel?: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.searchBox}>
+      <Ionicons
+        color={colors.textSubtle}
+        name="search-outline"
+        size={20}
+      />
+      <TextInput
+        accessibilityLabel={accessibilityLabel}
+        autoCapitalize="none"
+        autoCorrect={false}
+        clearButtonMode="while-editing"
+        placeholder={placeholder}
+        placeholderTextColor={colors.textSubtle}
+        returnKeyType="search"
+        style={styles.searchInput}
+        value={value}
+        onChangeText={onChangeText}
+      />
+      {value ? (
+        <TouchableOpacity
+          accessibilityLabel="Clear search"
+          accessibilityRole="button"
+          style={styles.clearSearchButton}
+          onPress={() => onChangeText("")}
+        >
+          <Ionicons
+            color={colors.textMuted}
+            name="close-circle"
+            size={20}
+          />
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
+export function DoctorPressableCard({
+  accessibilityLabel,
+  children,
+  onPress,
+  style,
+}: {
+  accessibilityLabel: string;
+  children: ReactNode;
+  onPress: () => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const animateTo = (value: number) => {
+    Animated.spring(scale, {
+      damping: 18,
+      mass: 0.45,
+      stiffness: 260,
+      toValue: value,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable
+        accessibilityLabel={accessibilityLabel}
+        accessibilityRole="button"
+        android_ripple={{ color: colors.primarySurface }}
+        style={({ pressed }) => [
+          style,
+          Platform.OS === "ios" && pressed && styles.pressedCard,
+        ]}
+        onPress={onPress}
+        onPressIn={() => animateTo(0.985)}
+        onPressOut={() => animateTo(1)}
+      >
+        {children}
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 export function DoctorBackHeader({
   action,
   onBack,
@@ -122,10 +217,48 @@ export function DoctorLoadingState({
 }: {
   label?: string;
 }) {
+  const opacity = useRef(new Animated.Value(0.42)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          duration: 700,
+          toValue: 0.9,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          duration: 700,
+          toValue: 0.42,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [opacity]);
+
   return (
-    <View style={styles.centerState}>
-      <ActivityIndicator color={colors.primary} size="large" />
-      <Text style={styles.stateText}>{label}</Text>
+    <View accessibilityLabel={label} accessibilityRole="progressbar" style={styles.loadingScreen}>
+      <Animated.View style={[styles.skeletonHeader, { opacity }]}>
+        <View style={styles.skeletonTitle} />
+        <View style={styles.skeletonSubtitle} />
+      </Animated.View>
+      {Array.from({ length: 6 }, (_, index) => (
+        <Animated.View
+          key={`doctor-skeleton-${index}`}
+          style={[styles.skeletonCard, { opacity }]}
+        >
+          <View style={styles.skeletonRow}>
+            <View style={styles.skeletonAvatar} />
+            <View style={styles.skeletonTextBlock}>
+              <View style={styles.skeletonLineStrong} />
+              <View style={styles.skeletonLine} />
+            </View>
+          </View>
+          <View style={styles.skeletonFooter} />
+        </Animated.View>
+      ))}
     </View>
   );
 }
@@ -278,6 +411,33 @@ export function DoctorChoiceChips<T extends string>({
 }
 
 const styles = StyleSheet.create({
+  searchBox: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.inputBorder,
+    borderRadius: radius.panel,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    minHeight: 52,
+    paddingHorizontal: spacing.lg,
+  },
+  searchInput: {
+    color: colors.textPrimary,
+    flex: 1,
+    fontSize: typography.size.bodySmall,
+    minHeight: 50,
+    paddingVertical: spacing.md,
+  },
+  clearSearchButton: {
+    alignItems: "center",
+    height: 44,
+    justifyContent: "center",
+    width: 44,
+  },
+  pressedCard: {
+    opacity: 0.88,
+  },
   badge: {
     alignSelf: "flex-start",
     borderRadius: radius.pill,
@@ -379,6 +539,69 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     padding: spacing.section,
+  },
+  loadingScreen: {
+    backgroundColor: colors.background,
+    flex: 1,
+    padding: spacing.xl,
+  },
+  skeletonHeader: {
+    marginBottom: spacing.xl,
+    paddingVertical: spacing.sm,
+  },
+  skeletonTitle: {
+    backgroundColor: colors.neutral175,
+    borderRadius: radius.pill,
+    height: 25,
+    width: "48%",
+  },
+  skeletonSubtitle: {
+    backgroundColor: colors.neutral175,
+    borderRadius: radius.pill,
+    height: 14,
+    marginTop: spacing.md,
+    width: "76%",
+  },
+  skeletonCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.panel,
+    marginBottom: spacing.lgPlus,
+    minHeight: 118,
+    padding: spacing.xl,
+  },
+  skeletonRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.lg,
+  },
+  skeletonAvatar: {
+    backgroundColor: colors.neutral175,
+    borderRadius: radius.card,
+    height: 44,
+    width: 44,
+  },
+  skeletonTextBlock: {
+    flex: 1,
+    gap: spacing.md,
+  },
+  skeletonLineStrong: {
+    backgroundColor: colors.neutral175,
+    borderRadius: radius.pill,
+    height: 14,
+    width: "68%",
+  },
+  skeletonLine: {
+    backgroundColor: colors.neutral175,
+    borderRadius: radius.pill,
+    height: 11,
+    width: "44%",
+  },
+  skeletonFooter: {
+    backgroundColor: colors.neutral175,
+    borderRadius: radius.pill,
+    height: 12,
+    marginTop: spacing.xl,
+    width: "88%",
   },
   emptyState: {
     alignItems: "center",

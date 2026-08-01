@@ -7,8 +7,6 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
-  TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
 
@@ -18,6 +16,8 @@ import {
   DoctorEmptyState,
   DoctorErrorState,
   DoctorLoadingState,
+  DoctorPressableCard,
+  DoctorSearchBar,
   DoctorScreenHeader,
   DoctorStatusBadge,
 } from "../../../src/components/doctor/DoctorWorkflowUi";
@@ -26,7 +26,6 @@ import { getApiErrorMessage } from "../../../src/services/errorHandler";
 import { getMyDoctorConsultations } from "../../../src/services/doctorWorkflowService";
 import {
   formatDoctorDate,
-  formatDoctorLabel,
 } from "../../../src/utils/doctorWorkflow";
 
 type ConsultationFilter =
@@ -67,9 +66,8 @@ export default function DoctorConsultationsScreen() {
         consultation.patient_name
           .toLowerCase()
           .includes(normalizedSearch) ||
-        consultation.patient_phone
-          .toLowerCase()
-          .includes(normalizedSearch);
+        consultation.patient_phone.toLowerCase().includes(normalizedSearch) ||
+        consultation.purpose.toLowerCase().includes(normalizedSearch);
 
       return matchesFilter && matchesSearch;
     });
@@ -111,21 +109,12 @@ export default function DoctorConsultationsScreen() {
       />
 
       <View style={styles.filters}>
-        <View style={styles.searchBox}>
-          <Ionicons
-            color={colors.textSubtle}
-            name="search-outline"
-            size={19}
-          />
-          <TextInput
-            autoCapitalize="none"
-            placeholder="Search name or phone"
-            placeholderTextColor={colors.textSubtle}
-            style={styles.searchInput}
-            value={search}
-            onChangeText={setSearch}
-          />
-        </View>
+        <DoctorSearchBar
+          accessibilityLabel="Search consultations by patient, phone, or purpose"
+          placeholder="Search patient, phone, or purpose"
+          value={search}
+          onChangeText={setSearch}
+        />
         <DoctorChoiceChips
           onChange={setFilter}
           options={filters}
@@ -145,80 +134,49 @@ export default function DoctorConsultationsScreen() {
         />
       ) : (
         visibleConsultations.map((consultation) => (
-          <View key={consultation.id} style={styles.card}>
+          <DoctorPressableCard
+            accessibilityLabel={`Open consultation for ${consultation.patient_name}`}
+            key={consultation.id}
+            style={styles.card}
+            onPress={() =>
+              router.push({
+                pathname: "/(doctor)/consultation-details",
+                params: { id: String(consultation.id) },
+              })
+            }
+          >
             <View style={styles.cardHeader}>
               <View style={styles.patient}>
                 <Text style={styles.patientName}>
                   {consultation.patient_name}
                 </Text>
-                <Text style={styles.patientPhone}>
-                  {consultation.patient_phone}
-                </Text>
+                <Text style={styles.cardCaption}>Patient consultation</Text>
               </View>
               <DoctorStatusBadge status={consultation.status} />
             </View>
 
             <View style={styles.metaRow}>
               <View style={styles.metaBlock}>
-                <Text style={styles.metaLabel}>Scheduled</Text>
+                <Text style={styles.metaLabel}>Scheduled date</Text>
                 <Text style={styles.metaValue}>
                   {formatDoctorDate(consultation.scheduled_date)}
                 </Text>
-                <Text style={styles.metaSubvalue}>
+              </View>
+              <View style={styles.metaBlock}>
+                <Text style={styles.metaLabel}>Scheduled time</Text>
+                <Text style={styles.metaValue}>
                   {consultation.scheduled_time.slice(0, 5)}
                 </Text>
               </View>
-              <View style={styles.metaBlock}>
-                <Text style={styles.metaLabel}>Patient decision</Text>
-                <Text style={styles.decision}>
-                  {formatDoctorLabel(consultation.patient_decision)}
-                </Text>
+              <View style={styles.chevron}>
+                <Ionicons
+                  color={colors.textMuted}
+                  name="chevron-forward"
+                  size={20}
+                />
               </View>
             </View>
-
-            <Text style={styles.purposeLabel}>Purpose</Text>
-            <Text style={styles.purpose}>{consultation.purpose}</Text>
-
-            <View style={styles.actions}>
-              <TouchableOpacity
-                accessibilityRole="button"
-                style={styles.secondaryButton}
-                onPress={() =>
-                  router.push({
-                    pathname: "/(doctor)/consultation-details",
-                    params: { id: String(consultation.id) },
-                  })
-                }
-              >
-                <Ionicons
-                  color={colors.primary}
-                  name="eye-outline"
-                  size={18}
-                />
-                <Text style={styles.secondaryButtonText}>View</Text>
-              </TouchableOpacity>
-
-              {consultation.status === "scheduled" ? (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  style={styles.primaryButton}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/(doctor)/consultation-complete",
-                      params: { id: String(consultation.id) },
-                    })
-                  }
-                >
-                  <Ionicons
-                    color={colors.surface}
-                    name="checkmark-circle-outline"
-                    size={18}
-                  />
-                  <Text style={styles.primaryButtonText}>Complete</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          </View>
+          </DoctorPressableCard>
         ))
       )}
     </FormScrollView>
@@ -259,8 +217,11 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.control,
+    borderColor: colors.borderMuted,
+    borderRadius: radius.panel,
+    borderWidth: 1,
     marginBottom: spacing.lgPlus,
+    overflow: "hidden",
     padding: spacing.xl,
     elevation: shadows.elevation.card,
     shadowColor: shadows.color,
@@ -287,11 +248,15 @@ const styles = StyleSheet.create({
     fontSize: typography.size.smallLarge,
     marginTop: spacing.xs,
   },
+  cardCaption: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    marginTop: spacing.xs,
+  },
   metaRow: {
-    borderBottomColor: colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
     flexDirection: "row",
     gap: spacing.xl,
     marginVertical: spacing.lg,
@@ -299,6 +264,14 @@ const styles = StyleSheet.create({
   },
   metaBlock: {
     flex: 1,
+  },
+  chevron: {
+    alignItems: "center",
+    backgroundColor: colors.neutral100,
+    borderRadius: radius.pill,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
   },
   metaLabel: {
     color: colors.textMuted,

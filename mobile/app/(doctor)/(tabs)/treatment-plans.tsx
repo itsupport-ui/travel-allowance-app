@@ -7,7 +7,6 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -18,6 +17,8 @@ import {
   DoctorEmptyState,
   DoctorErrorState,
   DoctorLoadingState,
+  DoctorPressableCard,
+  DoctorSearchBar,
   DoctorScreenHeader,
   DoctorStatusBadge,
 } from "../../../src/components/doctor/DoctorWorkflowUi";
@@ -77,7 +78,10 @@ export default function DoctorTreatmentPlansScreen() {
           filter === "all" || plan.status === filter;
         const matchesSearch =
           !normalizedSearch ||
-          plan.patient_name.toLowerCase().includes(normalizedSearch);
+          plan.patient_name.toLowerCase().includes(normalizedSearch) ||
+          (plan.treatment_plan ?? "").toLowerCase().includes(normalizedSearch) ||
+          (plan.diagnosis ?? "").toLowerCase().includes(normalizedSearch) ||
+          (plan.doctor_name ?? "").toLowerCase().includes(normalizedSearch);
         return matchesFilter && matchesSearch;
       })
       .sort(
@@ -178,20 +182,12 @@ export default function DoctorTreatmentPlansScreen() {
       )}
 
       <View style={styles.filters}>
-        <View style={styles.searchBox}>
-          <Ionicons
-            color={colors.textSubtle}
-            name="search-outline"
-            size={19}
-          />
-          <TextInput
-            placeholder="Search patient"
-            placeholderTextColor={colors.textSubtle}
-            style={styles.searchInput}
-            value={search}
-            onChangeText={setSearch}
-          />
-        </View>
+        <DoctorSearchBar
+          accessibilityLabel="Search treatment plans by patient, treatment, diagnosis, or doctor"
+          placeholder="Search patient, treatment, or doctor"
+          value={search}
+          onChangeText={setSearch}
+        />
         <DoctorChoiceChips
           onChange={setFilter}
           options={filters}
@@ -211,9 +207,8 @@ export default function DoctorTreatmentPlansScreen() {
         />
       ) : (
         visiblePlans.map((plan) => (
-          <TouchableOpacity
-            accessibilityRole="button"
-            activeOpacity={0.84}
+          <DoctorPressableCard
+            accessibilityLabel={`Open treatment plan for ${plan.patient_name}`}
             key={plan.id}
             style={styles.card}
             onPress={() =>
@@ -232,20 +227,18 @@ export default function DoctorTreatmentPlansScreen() {
               </View>
               <DoctorStatusBadge status={plan.status} />
             </View>
-            <Text style={styles.label}>Diagnosis</Text>
-            <Text numberOfLines={3} style={styles.diagnosis}>
-              {plan.diagnosis || "Not recorded"}
+            <Text style={styles.label}>Treatment</Text>
+            <Text numberOfLines={2} style={styles.diagnosis}>
+              {plan.treatment_plan || plan.diagnosis || "Treatment not recorded"}
             </Text>
             <View style={styles.cardFooter}>
               <Text style={styles.footerText}>
-                {plan.sessions_required
-                  ? `${plan.sessions_required} session${
-                      plan.sessions_required === 1 ? "" : "s"
-                    }`
-                  : "Sessions not set"}
+                {plan.doctor_name ?? `Doctor #${plan.doctor_id}`}
               </Text>
               <Text style={styles.footerText}>
-                {formatDoctorDate(plan.created_at)}
+                {plan.sessions_required
+                  ? `${plan.schedule_count ?? 0}/${plan.sessions_required} sessions`
+                  : formatDoctorDate(plan.created_at)}
               </Text>
               <Ionicons
                 color={colors.textSubtle}
@@ -253,7 +246,7 @@ export default function DoctorTreatmentPlansScreen() {
                 size={18}
               />
             </View>
-          </TouchableOpacity>
+          </DoctorPressableCard>
         ))
       )}
     </FormScrollView>
@@ -330,8 +323,11 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.control,
+    borderColor: colors.borderMuted,
+    borderRadius: radius.panel,
+    borderWidth: 1,
     marginBottom: spacing.lgPlus,
+    overflow: "hidden",
     padding: spacing.xl,
     elevation: shadows.elevation.card,
     shadowColor: shadows.color,

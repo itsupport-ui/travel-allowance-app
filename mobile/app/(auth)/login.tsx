@@ -1,4 +1,5 @@
 import { colors, radius, spacing, typography } from "@/src/theme";
+import { Ionicons } from "@expo/vector-icons";
 import { AxiosError } from "axios";
 import { router } from "expo-router";
 import { useRef, useState } from "react";
@@ -9,6 +10,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -53,6 +55,7 @@ const getLoginErrorMessage = (error: unknown): string => {
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const loginInProgressRef = useRef(false);
 
@@ -111,47 +114,115 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <FormScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.logo}>Travel Allowance</Text>
-        <Text style={styles.subtitle}>Sign in to continue</Text>
+        <View style={styles.brandBlock}>
+          <View style={styles.brandIcon}>
+            <Ionicons color={colors.surface} name="medical" size={30} />
+          </View>
+          <Text style={styles.eyebrow}>HOSPITAL MANAGEMENT SYSTEM</Text>
+          <Text style={styles.logo}>Travel Allowance</Text>
+          <Text style={styles.subtitle}>
+            Secure access for your hospital care team
+          </Text>
+        </View>
 
-        <TextInput
-          autoCapitalize="none"
-          autoComplete="email"
-          editable={!loading}
-          keyboardType="email-address"
-          placeholder="Email"
-          placeholderTextColor={colors.textSubtle}
-          style={styles.input}
-          value={email}
-          onChangeText={setEmail}
-        />
+        <View style={styles.loginCard}>
+          <Text style={styles.welcomeTitle}>Welcome back</Text>
+          <Text style={styles.welcomeCopy}>
+            Sign in with your registered hospital account.
+          </Text>
 
-        <TextInput
-          autoComplete="password"
-          editable={!loading}
-          placeholder="Password"
-          placeholderTextColor={colors.textSubtle}
-          secureTextEntry
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-          onSubmitEditing={handleLogin}
-        />
+          <Text style={styles.fieldLabel}>Email address</Text>
+          <View style={styles.inputShell}>
+            <Ionicons
+              color={colors.textMuted}
+              name="mail-outline"
+              size={20}
+            />
+            <TextInput
+              accessibilityLabel="Email address"
+              autoCapitalize="none"
+              autoComplete="email"
+              editable={!loading}
+              keyboardType="email-address"
+              placeholder="doctor@hospital.com"
+              placeholderTextColor={colors.textSubtle}
+              returnKeyType="next"
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+            />
+          </View>
 
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityState={{ disabled: loading }}
-          activeOpacity={0.85}
-          disabled={loading}
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleLogin}
-        >
-          {loading ? (
-            <ActivityIndicator color={colors.surface} size="small" />
-          ) : (
-            <Text style={styles.buttonText}>Login</Text>
-          )}
-        </TouchableOpacity>
+          <Text style={styles.fieldLabel}>Password</Text>
+          <View style={styles.inputShell}>
+            <Ionicons
+              color={colors.textMuted}
+              name="lock-closed-outline"
+              size={20}
+            />
+            <TextInput
+              accessibilityLabel="Password"
+              autoComplete="password"
+              editable={!loading}
+              placeholder="Enter your password"
+              placeholderTextColor={colors.textSubtle}
+              returnKeyType="done"
+              secureTextEntry={!passwordVisible}
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              onSubmitEditing={handleLogin}
+            />
+            <TouchableOpacity
+              accessibilityLabel={
+                passwordVisible ? "Hide password" : "Show password"
+              }
+              accessibilityRole="button"
+              style={styles.passwordToggle}
+              onPress={() => setPasswordVisible((visible) => !visible)}
+            >
+              <Ionicons
+                color={colors.textMuted}
+                name={passwordVisible ? "eye-off-outline" : "eye-outline"}
+                size={21}
+              />
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            accessibilityLabel="Sign in securely"
+            accessibilityRole="button"
+            accessibilityState={{ disabled: loading }}
+            activeOpacity={0.85}
+            disabled={loading}
+            style={[styles.button, loading && styles.buttonDisabled]}
+            onPress={handleLogin}
+          >
+            {loading ? (
+              <ActivityIndicator color={colors.surface} size="small" />
+            ) : (
+              <>
+                <Text style={styles.buttonText}>Sign in securely</Text>
+                <Ionicons
+                  color={colors.surface}
+                  name="arrow-forward"
+                  size={19}
+                />
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.securityNote}>
+          <Ionicons
+            color={colors.primary}
+            name="shield-checkmark-outline"
+            size={18}
+          />
+          <Text style={styles.securityText}>
+            Protected access. Your session is securely stored on this device.
+          </Text>
+        </View>
       </FormScrollView>
     </SafeAreaView>
   );
@@ -165,38 +236,100 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     justifyContent: "center",
-    padding: spacing.xxxl,
+    padding: spacing.xl,
+    paddingVertical: spacing.sectionLg,
+  },
+  brandBlock: {
+    alignItems: "center",
+    marginBottom: spacing.xxxl,
+  },
+  brandIcon: {
+    alignItems: "center",
+    backgroundColor: PRIMARY,
+    borderRadius: radius.largePanel,
+    height: 64,
+    justifyContent: "center",
+    marginBottom: spacing.xl,
+    width: 64,
+  },
+  eyebrow: {
+    color: colors.primary,
+    fontSize: typography.size.caption,
+    fontWeight: typography.weight.extrabold,
+    letterSpacing: 1,
+    textAlign: "center",
   },
   logo: {
-    color: PRIMARY,
-    fontSize: typography.size.displayLarge,
+    color: colors.textPrimary,
+    fontSize: typography.size.display,
     fontWeight: typography.weight.extrabold,
-    marginBottom: spacing.md,
+    marginTop: spacing.md,
     textAlign: "center",
   },
   subtitle: {
     color: colors.textMuted,
-    fontSize: typography.size.body,
-    marginBottom: spacing.sectionLg,
+    fontSize: typography.size.bodySmall,
+    marginTop: spacing.md,
     textAlign: "center",
   },
-  input: {
+  loginCard: {
     backgroundColor: colors.surface,
-    borderColor: colors.inputBorder,
-    borderRadius: radius.control,
+    borderColor: colors.borderMuted,
+    borderRadius: radius.largePanel,
     borderWidth: 1,
+    padding: spacing.xxl,
+  },
+  welcomeTitle: {
     color: colors.textPrimary,
-    fontSize: typography.size.body,
+    fontSize: typography.size.titleLarge,
+    fontWeight: typography.weight.extrabold,
+  },
+  welcomeCopy: {
+    color: colors.textMuted,
+    fontSize: typography.size.bodySmall,
+    lineHeight: typography.lineHeight.bodyRelaxed,
     marginBottom: spacing.xl,
+    marginTop: spacing.sm,
+  },
+  fieldLabel: {
+    color: colors.textMutedDark,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.bold,
+    marginBottom: spacing.md,
+    marginTop: spacing.md,
+  },
+  inputShell: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.inputBorder,
+    borderRadius: radius.panel,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    minHeight: 54,
+    paddingLeft: spacing.lg,
+  },
+  input: {
+    color: colors.textPrimary,
+    flex: 1,
+    fontSize: typography.size.body,
     minHeight: 52,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.s13,
+    paddingVertical: spacing.md,
+  },
+  passwordToggle: {
+    alignItems: "center",
+    height: 52,
+    justifyContent: "center",
+    width: 48,
   },
   button: {
     alignItems: "center",
     backgroundColor: PRIMARY,
-    borderRadius: radius.control,
+    borderRadius: radius.panel,
+    flexDirection: "row",
+    gap: spacing.md,
     justifyContent: "center",
+    marginTop: spacing.xxl,
     minHeight: 52,
     padding: spacing.lgPlus,
   },
@@ -208,5 +341,19 @@ const styles = StyleSheet.create({
     fontSize: typography.size.bodyLarge,
     fontWeight: typography.weight.bold,
     textAlign: "center",
+  },
+  securityNote: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "center",
+    marginTop: spacing.xl,
+    paddingHorizontal: spacing.lg,
+  },
+  securityText: {
+    color: colors.textMuted,
+    flexShrink: 1,
+    fontSize: typography.size.captionLarge,
+    lineHeight: typography.lineHeight.small,
   },
 });

@@ -5,8 +5,8 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { router } from "expo-router";
-import { useCallback, useEffect, useRef } from "react";
+import { router, type Href } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -21,7 +21,7 @@ import {
 import {
   DoctorErrorState,
   DoctorLoadingState,
-  DoctorScreenHeader,
+  DoctorPressableCard,
 } from "../../../src/components/doctor/DoctorWorkflowUi";
 import { queryKeys } from "../../../src/query/queryKeys";
 import { getDoctorDashboardSummary } from "../../../src/services/doctorWorkflowService";
@@ -33,47 +33,60 @@ import {
   startDoctorWorkday,
 } from "../../../src/services/workdayService";
 import type { DoctorDashboardSummary } from "../../../src/types/doctorWorkflow";
+import type { AuthUser } from "../../../src/types/auth";
 import {
   getCurrentLocation,
   requestLocationPermission,
 } from "../../../src/utils/location";
-import { clearAuthSession } from "../../../src/utils/storage";
+import { clearAuthSession, getStoredUser } from "../../../src/utils/storage";
 
 const dashboardCards: {
   icon: keyof typeof Ionicons.glyphMap;
   key: keyof DoctorDashboardSummary;
   label: string;
-  tone: "danger" | "primary" | "success" | "warning";
+  description: string;
+  route: Href;
+  tone: "blue" | "green" | "orange" | "purple" | "teal";
 }[] = [
   {
     icon: "call-outline",
     key: "today_consultations",
-    label: "Today's Consultations",
-    tone: "primary",
+    label: "Consultations",
+    description: "Review patient calls and record clinical outcomes",
+    route: "/(doctor)/(tabs)/consultations",
+    tone: "blue",
   },
   {
     icon: "calendar-outline",
     key: "today_visits",
-    label: "Today's Visits",
-    tone: "success",
+    label: "Visits",
+    description: "Manage scheduled visits and treatment sessions",
+    route: "/(doctor)/(tabs)/visits",
+    tone: "green",
   },
   {
     icon: "document-text-outline",
     key: "pending_treatment_plans",
-    label: "Pending Treatment Plans",
-    tone: "warning",
+    label: "Treatment Plans",
+    description: "Create plans and follow approval progress",
+    route: "/(doctor)/(tabs)/treatment-plans",
+    tone: "purple",
   },
   {
     icon: "wallet-outline",
     key: "today_expenses",
-    label: "Today's Expenses",
-    tone: "primary",
+    label: "Expenses",
+    description: "Record and review patient travel expenses",
+    route: "/(doctor)/(tabs)/expenses",
+    tone: "orange",
   },
   {
     icon: "receipt-outline",
     key: "pending_claims",
-    label: "Pending Claims",
-    tone: "danger",
+    label: "Claims",
+    description: "Submit expenses and track reimbursements",
+    route: "/(doctor)/(tabs)/claims",
+    tone: "teal",
   },
 ];
 
@@ -89,19 +102,48 @@ const getToneStyle = (
   tone: (typeof dashboardCards)[number]["tone"]
 ) => {
   switch (tone) {
-    case "danger":
-      return styles.dangerIcon;
-    case "success":
-      return styles.successIcon;
-    case "warning":
-      return styles.warningIcon;
+    case "blue":
+      return styles.blueIcon;
+    case "green":
+      return styles.greenIcon;
+    case "orange":
+      return styles.orangeIcon;
+    case "purple":
+      return styles.purpleIcon;
     default:
-      return styles.primaryIcon;
+      return styles.tealIcon;
   }
+};
+
+const getToneColor = (
+  tone: (typeof dashboardCards)[number]["tone"]
+) => {
+  switch (tone) {
+    case "blue":
+      return colors.blue;
+    case "green":
+      return colors.greenDark;
+    case "orange":
+      return colors.warningBright;
+    case "purple":
+      return colors.purple;
+    default:
+      return colors.teal;
+  }
+};
+
+const getGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
 };
 
 export default function DoctorHomeScreen() {
   const queryClient = useQueryClient();
+  const [doctor, setDoctor] = useState<AuthUser | null>(
+    () => queryClient.getQueryData<AuthUser>(queryKeys.auth.user) ?? null
+  );
   const endingRef = useRef(false);
   const promptShownRef = useRef(false);
   const dashboardQuery = useQuery({
@@ -192,6 +234,17 @@ export default function DoctorHomeScreen() {
   });
   const endPending = endMutation.isPending;
   const mutateEnd = endMutation.mutate;
+  const currentDate = useMemo(
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        day: "numeric",
+        month: "long",
+        weekday: "long",
+      }).format(new Date()),
+    []
+  );
+  const doctorName = doctor?.username?.trim() || "Doctor";
+  const doctorInitial = doctorName.charAt(0).toUpperCase() || "D";
   const executeEnd = useCallback(() => {
     if (
       endingRef.current ||
@@ -221,6 +274,16 @@ export default function DoctorHomeScreen() {
       ]
     );
   }, [executeEnd]);
+
+  useEffect(() => {
+    let active = true;
+    void getStoredUser().then((user) => {
+      if (active && user?.role === "doctor") setDoctor(user);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const workday = workdayQuery.data;
@@ -293,10 +356,32 @@ export default function DoctorHomeScreen() {
       }
       style={styles.container}
     >
-      <DoctorScreenHeader
-        subtitle="Your consultations, visits, treatment plans, expenses, and claims."
-        title="Doctor Dashboard"
-      />
+      <View style={styles.hero}>
+        <View style={styles.heroCopy}>
+          <Text style={styles.greeting}>{getGreeting()},</Text>
+          <Text numberOfLines={1} style={styles.doctorName}>
+            Dr. {doctorName}
+          </Text>
+          <Text style={styles.doctorRole}>Hospital care team</Text>
+          <View style={styles.dateRow}>
+            <Ionicons
+              color={colors.textMuted}
+              name="calendar-clear-outline"
+              size={15}
+            />
+            <Text style={styles.currentDate}>{currentDate}</Text>
+          </View>
+        </View>
+        <TouchableOpacity
+          accessibilityLabel="Open doctor profile"
+          accessibilityRole="button"
+          style={styles.avatar}
+          onPress={() => router.push("/(doctor)/(tabs)/profile")}
+        >
+          <Text style={styles.avatarText}>{doctorInitial}</Text>
+          <View style={styles.onlineDot} />
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.attendanceCard}>
         <View style={styles.attendanceText}>
@@ -360,19 +445,50 @@ export default function DoctorHomeScreen() {
         ) : null}
       </View>
 
+      <View style={styles.sectionHeadingRow}>
+        <View>
+          <Text style={styles.sectionEyebrow}>CLINICAL WORKSPACE</Text>
+          <Text style={styles.sectionTitle}>Your modules</Text>
+        </View>
+        <Text style={styles.sectionHint}>Tap to open</Text>
+      </View>
+
       <View style={styles.grid}>
         {dashboardCards.map((card) => (
-          <View key={card.key} style={styles.card}>
-            <View style={[styles.icon, getToneStyle(card.tone)]}>
-              <Ionicons
-                color={colors.primary}
-                name={card.icon}
-                size={23}
-              />
+          <DoctorPressableCard
+            accessibilityLabel={`Open ${card.label}. ${summary[card.key]} items.`}
+            key={card.key}
+            style={styles.card}
+            onPress={() => router.push(card.route)}
+          >
+            <View style={styles.moduleRow}>
+              <View style={[styles.icon, getToneStyle(card.tone)]}>
+                <Ionicons
+                  color={getToneColor(card.tone)}
+                  name={card.icon}
+                  size={24}
+                />
+              </View>
+              <View style={styles.moduleCopy}>
+                <View style={styles.moduleTitleRow}>
+                  <Text style={styles.cardLabel}>{card.label}</Text>
+                  <View style={[styles.countBadge, getToneStyle(card.tone)]}>
+                    <Text style={[styles.cardValue, { color: getToneColor(card.tone) }]}>
+                      {summary[card.key]}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.cardDescription}>{card.description}</Text>
+              </View>
+              <View style={styles.arrowButton}>
+                <Ionicons
+                  color={colors.textMuted}
+                  name="chevron-forward"
+                  size={20}
+                />
+              </View>
             </View>
-            <Text style={styles.cardLabel}>{card.label}</Text>
-            <Text style={styles.cardValue}>{summary[card.key]}</Text>
-          </View>
+          </DoctorPressableCard>
         ))}
       </View>
     </ScrollView>
@@ -388,10 +504,99 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     paddingBottom: spacing.sectionLg,
   },
-  grid: {
+  hero: {
+    alignItems: "center",
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.lgPlus,
+    justifyContent: "space-between",
+    marginBottom: spacing.xl,
+  },
+  heroCopy: {
+    flex: 1,
+    paddingRight: spacing.lg,
+  },
+  greeting: {
+    color: colors.primary,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.bold,
+  },
+  doctorName: {
+    color: colors.textPrimary,
+    fontSize: typography.size.heading,
+    fontWeight: typography.weight.extrabold,
+    marginTop: spacing.xs,
+  },
+  doctorRole: {
+    color: colors.textMutedDark,
+    fontSize: typography.size.smallLarge,
+    marginTop: spacing.xs,
+  },
+  dateRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.mdPlus,
+  },
+  currentDate: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.semibold,
+  },
+  avatar: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderColor: colors.surface,
+    borderRadius: radius.pill,
+    borderWidth: 3,
+    height: 58,
+    justifyContent: "center",
+    width: 58,
+    elevation: shadows.elevation.raised,
+    shadowColor: shadows.color,
+    shadowOffset: shadows.offset.y2,
+    shadowOpacity: shadows.opacity.medium,
+    shadowRadius: shadows.radius.card,
+  },
+  avatarText: {
+    color: colors.surface,
+    fontSize: typography.size.titleLarge,
+    fontWeight: typography.weight.extrabold,
+  },
+  onlineDot: {
+    backgroundColor: colors.greenBright,
+    borderColor: colors.surface,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    bottom: 0,
+    height: 14,
+    position: "absolute",
+    right: 0,
+    width: 14,
+  },
+  grid: {
+    gap: spacing.lg,
+  },
+  sectionHeadingRow: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: spacing.lg,
+    marginTop: spacing.md,
+  },
+  sectionEyebrow: {
+    color: colors.primary,
+    fontSize: typography.size.caption,
+    fontWeight: typography.weight.extrabold,
+    letterSpacing: 0.7,
+  },
+  sectionTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.title,
+    fontWeight: typography.weight.extrabold,
+    marginTop: spacing.xs,
+  },
+  sectionHint: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
   },
   attendanceCard: {
     alignItems: "center",
@@ -446,11 +651,12 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.control,
-    flexBasis: "47%",
-    flexGrow: 1,
-    minHeight: 142,
-    padding: spacing.xl,
+    borderColor: colors.borderMuted,
+    borderRadius: radius.panel,
+    borderWidth: 1,
+    minHeight: 104,
+    overflow: "hidden",
+    padding: spacing.lgPlus,
     elevation: shadows.elevation.card,
     shadowColor: shadows.color,
     shadowOffset: shadows.offset.y2,
@@ -462,31 +668,65 @@ const styles = StyleSheet.create({
     borderRadius: radius.control,
     height: 42,
     justifyContent: "center",
-    marginBottom: spacing.lg,
-    width: 42,
+    width: 46,
   },
-  primaryIcon: {
-    backgroundColor: colors.primarySurface,
+  blueIcon: {
+    backgroundColor: colors.blueSurface,
   },
-  successIcon: {
+  greenIcon: {
     backgroundColor: colors.greenSurface,
   },
-  warningIcon: {
+  orangeIcon: {
     backgroundColor: colors.warningSurface,
   },
-  dangerIcon: {
-    backgroundColor: colors.dangerSurface,
+  purpleIcon: {
+    backgroundColor: colors.purpleSurface,
+  },
+  tealIcon: {
+    backgroundColor: colors.tealSurface,
+  },
+  moduleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.lg,
+  },
+  moduleCopy: {
+    flex: 1,
+  },
+  moduleTitleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  countBadge: {
+    alignItems: "center",
+    borderRadius: radius.pill,
+    justifyContent: "center",
+    minHeight: 24,
+    minWidth: 28,
+    paddingHorizontal: spacing.md,
   },
   cardLabel: {
-    color: colors.textMuted,
-    fontSize: typography.size.small,
-    fontWeight: typography.weight.bold,
-    lineHeight: typography.lineHeight.smallRelaxed,
+    color: colors.textPrimary,
+    fontSize: typography.size.body,
+    fontWeight: typography.weight.extrabold,
   },
   cardValue: {
-    color: colors.textPrimary,
-    fontSize: typography.size.display,
+    fontSize: typography.size.small,
     fontWeight: typography.weight.extrabold,
-    marginTop: spacing.md,
+  },
+  cardDescription: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    lineHeight: typography.lineHeight.smallRelaxed,
+    marginTop: spacing.sm,
+  },
+  arrowButton: {
+    alignItems: "center",
+    backgroundColor: colors.neutral100,
+    borderRadius: radius.pill,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
   },
 });

@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -23,6 +23,8 @@ import {
   DoctorEmptyState,
   DoctorErrorState,
   DoctorLoadingState,
+  DoctorPressableCard,
+  DoctorSearchBar,
   DoctorScreenHeader,
   DoctorStatusBadge,
 } from "../../../src/components/doctor/DoctorWorkflowUi";
@@ -50,6 +52,7 @@ const tabs: readonly { label: string; value: ClaimsTab }[] = [
 export default function DoctorClaimsScreen() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<ClaimsTab>("today");
+  const [search, setSearch] = useState("");
   const expensesQuery = useQuery({
     queryFn: getTodayDoctorExpenses,
     queryKey: queryKeys.doctor.expenses.today,
@@ -62,7 +65,35 @@ export default function DoctorClaimsScreen() {
     () => expensesQuery.data ?? [],
     [expensesQuery.data]
   );
-  const claims = claimsQuery.data ?? [];
+  const claims = useMemo(
+    () => claimsQuery.data ?? [],
+    [claimsQuery.data]
+  );
+  const visibleTodayExpenses = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    if (!normalizedSearch) return todayExpenses;
+    return todayExpenses.filter((expense) =>
+      [
+        expense.from_location,
+        expense.to_location,
+        expense.transport_mode,
+        expense.remarks ?? "",
+        `expense ${expense.id}`,
+      ].some((value) => value.toLowerCase().includes(normalizedSearch))
+    );
+  }, [search, todayExpenses]);
+  const visibleClaims = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    if (!normalizedSearch) return claims;
+    return claims.filter((claim) =>
+      [
+        `claim ${claim.id}`,
+        claim.claim_date,
+        claim.status,
+        String(claim.total_amount),
+      ].some((value) => value.toLowerCase().includes(normalizedSearch))
+    );
+  }, [claims, search]);
   const eligibleExpenses = useMemo(
     () =>
       todayExpenses.filter(
@@ -247,6 +278,16 @@ export default function DoctorClaimsScreen() {
       </TouchableOpacity>
 
       <View style={styles.tabs}>
+        <DoctorSearchBar
+          accessibilityLabel="Search claims or eligible expenses"
+          placeholder={
+            activeTab === "today"
+              ? "Search today’s expenses"
+              : "Search claim number, date, or status"
+          }
+          value={search}
+          onChangeText={setSearch}
+        />
         <DoctorChoiceChips
           onChange={setActiveTab}
           options={tabs}
@@ -255,15 +296,31 @@ export default function DoctorClaimsScreen() {
       </View>
 
       {activeTab === "today" ? (
-        todayExpenses.length === 0 ? (
+        visibleTodayExpenses.length === 0 ? (
           <DoctorEmptyState
-            description="Add today’s expenses before submitting a claim."
+            description={
+              todayExpenses.length === 0
+                ? "Add today’s expenses before submitting a claim."
+                : "No expenses match your search."
+            }
             icon="wallet-outline"
             title="No expenses today"
           />
         ) : (
-          todayExpenses.map((expense) => (
-            <View key={expense.id} style={styles.expenseCard}>
+          visibleTodayExpenses.map((expense) => (
+            <DoctorPressableCard
+              accessibilityLabel={`Open expense ${expense.id} details`}
+              key={expense.id}
+              style={styles.expenseCard}
+              onPress={() =>
+                router.push(
+                  {
+                    pathname: "/(doctor)/expense-details",
+                    params: { id: String(expense.id) },
+                  } as unknown as Href
+                )
+              }
+            >
               <View style={styles.expenseRoute}>
                 <View style={styles.routeText}>
                   <Text style={styles.expenseFrom}>
@@ -283,20 +340,23 @@ export default function DoctorClaimsScreen() {
                 </Text>
                 <DoctorStatusBadge status={expense.status} />
               </View>
-            </View>
+            </DoctorPressableCard>
           ))
         )
-      ) : claims.length === 0 ? (
+      ) : visibleClaims.length === 0 ? (
         <DoctorEmptyState
-          description="Submitted claims will appear here."
+          description={
+            claims.length === 0
+              ? "Submitted claims will appear here."
+              : "No claims match your search."
+          }
           icon="receipt-outline"
           title="No claim history"
         />
       ) : (
-        claims.map((claim) => (
-          <TouchableOpacity
-            accessibilityRole="button"
-            activeOpacity={0.84}
+        visibleClaims.map((claim) => (
+          <DoctorPressableCard
+            accessibilityLabel={`Open claim ${claim.id} details`}
             key={claim.id}
             style={styles.claimCard}
             onPress={() =>
@@ -332,7 +392,7 @@ export default function DoctorClaimsScreen() {
               name="chevron-forward"
               size={19}
             />
-          </TouchableOpacity>
+          </DoctorPressableCard>
         ))
       )}
     </ScrollView>
@@ -426,13 +486,17 @@ const styles = StyleSheet.create({
     fontWeight: typography.weight.extrabold,
   },
   tabs: {
+    gap: spacing.lg,
     marginBottom: spacing.xl,
     marginTop: spacing.xxxl,
   },
   expenseCard: {
     backgroundColor: colors.surface,
-    borderRadius: radius.control,
+    borderColor: colors.borderMuted,
+    borderRadius: radius.panel,
+    borderWidth: 1,
     marginBottom: spacing.lg,
+    overflow: "hidden",
     padding: spacing.xl,
   },
   expenseRoute: {
@@ -476,10 +540,13 @@ const styles = StyleSheet.create({
   claimCard: {
     alignItems: "center",
     backgroundColor: colors.surface,
-    borderRadius: radius.control,
+    borderColor: colors.borderMuted,
+    borderRadius: radius.panel,
+    borderWidth: 1,
     flexDirection: "row",
     gap: spacing.lg,
     marginBottom: spacing.lg,
+    overflow: "hidden",
     padding: spacing.xl,
     elevation: shadows.elevation.card,
     shadowColor: shadows.color,

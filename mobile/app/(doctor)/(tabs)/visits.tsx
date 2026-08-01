@@ -17,6 +17,8 @@ import {
   DoctorEmptyState,
   DoctorErrorState,
   DoctorLoadingState,
+  DoctorPressableCard,
+  DoctorSearchBar,
   DoctorScreenHeader,
   DoctorStatusBadge,
 } from "../../../src/components/doctor/DoctorWorkflowUi";
@@ -51,6 +53,7 @@ const sortVisits = (visits: DoctorVisit[]): DoctorVisit[] =>
 
 export default function DoctorVisitsScreen() {
   const [filter, setFilter] = useState<VisitFilter>("today");
+  const [search, setSearch] = useState("");
   const today = getLocalIsoDate();
   const visitsQuery = useQuery({
     queryFn: getMyDoctorVisits,
@@ -64,9 +67,16 @@ export default function DoctorVisitsScreen() {
     () => sortVisits(visitsQuery.data ?? []),
     [visitsQuery.data]
   );
-  const visibleVisits = useMemo(
-    () =>
-      visits.filter((visit) => {
+  const visibleVisits = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    return visits.filter((visit) => {
+        const matchesSearch =
+          !normalizedSearch ||
+          visit.patient_name.toLowerCase().includes(normalizedSearch) ||
+          visit.patient_phone.toLowerCase().includes(normalizedSearch) ||
+          (visit.doctor_name ?? "").toLowerCase().includes(normalizedSearch) ||
+          (visit.chief_complaint ?? "").toLowerCase().includes(normalizedSearch);
+        if (!matchesSearch) return false;
         if (filter === "today") {
           return visit.visit_date === today;
         }
@@ -74,9 +84,8 @@ export default function DoctorVisitsScreen() {
           return visit.visit_date > today;
         }
         return true;
-      }),
-    [filter, today, visits]
-  );
+      });
+  }, [filter, search, today, visits]);
   const doctorId = visits[0]?.doctor_id ?? null;
 
   if (visitsQuery.isPending && !visitsQuery.data) {
@@ -162,6 +171,12 @@ export default function DoctorVisitsScreen() {
       </View>
 
       <View style={styles.filters}>
+        <DoctorSearchBar
+          accessibilityLabel="Search visits by patient, phone, doctor, or complaint"
+          placeholder="Search patient, phone, or doctor"
+          value={search}
+          onChangeText={setSearch}
+        />
         <DoctorChoiceChips
           onChange={setFilter}
           options={filters}
@@ -181,13 +196,23 @@ export default function DoctorVisitsScreen() {
         />
       ) : (
         visibleVisits.map((visit) => (
-          <View key={visit.id} style={styles.card}>
+          <DoctorPressableCard
+            accessibilityLabel={`Open visit details for ${visit.patient_name}`}
+            key={visit.id}
+            style={styles.card}
+            onPress={() =>
+              router.push(
+                {
+                  pathname: "/(doctor)/visit-details",
+                  params: { id: String(visit.id) },
+                } as unknown as Href
+              )
+            }
+          >
             <View style={styles.cardHeader}>
               <View style={styles.patient}>
                 <Text style={styles.patientName}>{visit.patient_name}</Text>
-                <Text style={styles.patientPhone}>
-                  {visit.patient_phone}
-                </Text>
+                <Text style={styles.patientPhone}>Patient visit</Text>
               </View>
               <DoctorStatusBadge status={visit.status} />
             </View>
@@ -203,35 +228,18 @@ export default function DoctorVisitsScreen() {
                 </Text>
               </View>
               <View style={styles.metaBlock}>
-                <Text style={styles.metaLabel}>Doctor</Text>
-                <Text style={styles.metaValue}>
-                  {visit.doctor_name ?? `Doctor #${visit.doctor_id}`}
-                </Text>
+                <Text style={styles.metaLabel}>Treatment status</Text>
+                <DoctorStatusBadge status={visit.session_status} />
+              </View>
+              <View style={styles.chevron}>
+                <Ionicons
+                  color={colors.textMuted}
+                  name="chevron-forward"
+                  size={20}
+                />
               </View>
             </View>
-
-            <Text style={styles.label}>Chief complaint</Text>
-            <Text style={styles.bodyText}>
-              {visit.chief_complaint || "Not available"}
-            </Text>
-
-            <TouchableOpacity
-              accessibilityRole="button"
-              activeOpacity={0.84}
-              style={styles.primaryButton}
-              onPress={() =>
-                router.push(
-                  {
-                    pathname: "/(doctor)/visit-details",
-                    params: { id: String(visit.id) },
-                  } as unknown as Href
-                )
-              }
-            >
-              <Ionicons color={colors.surface} name="eye-outline" size={18} />
-              <Text style={styles.primaryButtonText}>View Details</Text>
-            </TouchableOpacity>
-          </View>
+          </DoctorPressableCard>
         ))
       )}
     </ScrollView>
@@ -307,13 +315,17 @@ const styles = StyleSheet.create({
   filters: {
     backgroundColor: colors.surface,
     borderRadius: radius.control,
+    gap: spacing.lg,
     marginBottom: spacing.xl,
     padding: spacing.lg,
   },
   card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.control,
+    borderColor: colors.borderMuted,
+    borderRadius: radius.panel,
+    borderWidth: 1,
     marginBottom: spacing.lgPlus,
+    overflow: "hidden",
     padding: spacing.xl,
     elevation: shadows.elevation.card,
     shadowColor: shadows.color,
@@ -345,6 +357,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
     flexDirection: "row",
     gap: spacing.xl,
     marginVertical: spacing.lg,
@@ -352,6 +365,14 @@ const styles = StyleSheet.create({
   },
   metaBlock: {
     flex: 1,
+  },
+  chevron: {
+    alignItems: "center",
+    backgroundColor: colors.neutral100,
+    borderRadius: radius.pill,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
   },
   metaLabel: {
     color: colors.textMuted,

@@ -6,7 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import * as Sharing from "expo-sharing";
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -24,6 +24,8 @@ import {
   DoctorEmptyState,
   DoctorErrorState,
   DoctorLoadingState,
+  DoctorPressableCard,
+  DoctorSearchBar,
   DoctorScreenHeader,
   DoctorStatusBadge,
 } from "../../../src/components/doctor/DoctorWorkflowUi";
@@ -59,6 +61,7 @@ const getProofMimeType = (proofName: string): string => {
 export default function DoctorExpensesScreen() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<ExpenseTab>("today");
+  const [search, setSearch] = useState("");
   const todayQuery = useQuery({
     queryFn: getTodayDoctorExpenses,
     queryKey: queryKeys.doctor.expenses.today,
@@ -71,9 +74,25 @@ export default function DoctorExpensesScreen() {
     () => todayQuery.data ?? [],
     [todayQuery.data]
   );
-  const allExpenses = allQuery.data ?? [];
-  const visibleExpenses =
-    activeTab === "today" ? todayExpenses : allExpenses;
+  const allExpenses = useMemo(
+    () => allQuery.data ?? [],
+    [allQuery.data]
+  );
+  const visibleExpenses = useMemo(() => {
+    const source = activeTab === "today" ? todayExpenses : allExpenses;
+    const normalizedSearch = search.trim().toLowerCase();
+    if (!normalizedSearch) return source;
+    return source.filter((expense) =>
+      [
+        expense.from_location,
+        expense.to_location,
+        expense.transport_mode,
+        expense.remarks ?? "",
+        `expense ${expense.id}`,
+        expense.visit_id ? `visit ${expense.visit_id}` : "",
+      ].some((value) => value.toLowerCase().includes(normalizedSearch))
+    );
+  }, [activeTab, allExpenses, search, todayExpenses]);
   const todayTotal = useMemo(
     () =>
       todayExpenses.reduce(
@@ -221,6 +240,12 @@ export default function DoctorExpensesScreen() {
       </View>
 
       <View style={styles.tabCard}>
+        <DoctorSearchBar
+          accessibilityLabel="Search expenses by location, mode, visit, or remarks"
+          placeholder="Search expense, visit, or location"
+          value={search}
+          onChangeText={setSearch}
+        />
         <DoctorChoiceChips
           onChange={setActiveTab}
           options={tabs}
@@ -250,11 +275,29 @@ export default function DoctorExpensesScreen() {
             proofMutation.variables?.id === expense.id;
 
           return (
-            <View key={expense.id} style={styles.card}>
+            <DoctorPressableCard
+              accessibilityLabel={`Open expense ${expense.id} details`}
+              key={expense.id}
+              style={styles.card}
+              onPress={() =>
+                router.push(
+                  {
+                    pathname: "/(doctor)/expense-details",
+                    params: { id: String(expense.id) },
+                  } as unknown as Href
+                )
+              }
+            >
               <View style={styles.cardHeader}>
                 <View style={styles.route}>
-                  <Text style={styles.from}>{expense.from_location}</Text>
-                  <Text style={styles.to}>to {expense.to_location}</Text>
+                  <Text style={styles.from}>
+                    {expense.visit_id
+                      ? `Visit #${expense.visit_id}`
+                      : `Expense #${expense.id}`}
+                  </Text>
+                  <Text numberOfLines={1} style={styles.to}>
+                    {expense.from_location} to {expense.to_location}
+                  </Text>
                 </View>
                 <DoctorStatusBadge status={expense.status} />
               </View>
@@ -363,7 +406,15 @@ export default function DoctorExpensesScreen() {
               ) : (
                 <Text style={styles.linkedText}>Linked to claim</Text>
               )}
-            </View>
+              <View style={styles.detailsHint}>
+                <Text style={styles.detailsHintText}>View expense details</Text>
+                <Ionicons
+                  color={colors.textMuted}
+                  name="chevron-forward"
+                  size={19}
+                />
+              </View>
+            </DoctorPressableCard>
           );
         })
       )}
@@ -421,12 +472,16 @@ const styles = StyleSheet.create({
     fontWeight: typography.weight.extrabold,
   },
   tabCard: {
+    gap: spacing.lg,
     marginBottom: spacing.xl,
   },
   card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.control,
+    borderColor: colors.borderMuted,
+    borderRadius: radius.panel,
+    borderWidth: 1,
     marginBottom: spacing.lgPlus,
+    overflow: "hidden",
     padding: spacing.xl,
     elevation: shadows.elevation.card,
     shadowColor: shadows.color,
@@ -552,5 +607,19 @@ const styles = StyleSheet.create({
     fontWeight: typography.weight.bold,
     marginTop: spacing.lg,
     textAlign: "right",
+  },
+  detailsHint: {
+    alignItems: "center",
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: spacing.lg,
+    paddingTop: spacing.lg,
+  },
+  detailsHintText: {
+    color: colors.textMutedDark,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.bold,
   },
 });
