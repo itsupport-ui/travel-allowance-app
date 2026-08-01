@@ -346,6 +346,7 @@ export const SearchableSelect = ({
             getItemLayout={getOptionItemLayout}
             initialNumToRender={10}
             ItemSeparatorComponent={OptionSeparator}
+            keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
             keyExtractor={optionKeyExtractor}
             ListEmptyComponent={

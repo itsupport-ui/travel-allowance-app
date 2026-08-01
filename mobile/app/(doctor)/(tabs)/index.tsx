@@ -1,11 +1,20 @@
 import { colors, radius, shadows, spacing, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
-import { useQuery } from "@tanstack/react-query";
 import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { router } from "expo-router";
+import { useCallback, useEffect, useRef } from "react";
+import {
+  ActivityIndicator,
+  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 
@@ -17,7 +26,18 @@ import {
 import { queryKeys } from "../../../src/query/queryKeys";
 import { getDoctorDashboardSummary } from "../../../src/services/doctorWorkflowService";
 import { getApiErrorMessage } from "../../../src/services/errorHandler";
+import { reverseGeocode } from "../../../src/services/mapsService";
+import {
+  endDoctorWorkday,
+  getTodayDoctorWorkday,
+  startDoctorWorkday,
+} from "../../../src/services/workdayService";
 import type { DoctorDashboardSummary } from "../../../src/types/doctorWorkflow";
+import {
+  getCurrentLocation,
+  requestLocationPermission,
+} from "../../../src/utils/location";
+import { clearAuthSession } from "../../../src/utils/storage";
 
 const dashboardCards: {
   icon: keyof typeof Ionicons.glyphMap;
@@ -81,10 +101,162 @@ const getToneStyle = (
 };
 
 export default function DoctorHomeScreen() {
+  const queryClient = useQueryClient();
+  const endingRef = useRef(false);
+  const promptShownRef = useRef(false);
   const dashboardQuery = useQuery({
     queryFn: getDoctorDashboardSummary,
     queryKey: queryKeys.doctor.dashboard.summary,
   });
+  const workdayQuery = useQuery({
+    queryFn: getTodayDoctorWorkday,
+    queryKey: queryKeys.doctor.workday.today,
+  });
+  const startMutation = useMutation({
+    mutationFn: async () => {
+      await requestLocationPermission();
+      const coordinates = await getCurrentLocation();
+      let address = `${coordinates.latitude}, ${coordinates.longitude}`;
+      try {
+        address = await reverseGeocode(
+          coordinates.latitude,
+          coordinates.longitude
+        );
+      } catch {
+        // Coordinates remain the authoritative attendance location.
+      }
+      return startDoctorWorkday({
+        start_address: address,
+        start_latitude: coordinates.latitude,
+        start_longitude: coordinates.longitude,
+      });
+    },
+    onError: (error) => {
+      Alert.alert(
+        "Unable to Start Workday",
+        getApiErrorMessage(error, "Unable to start your workday.")
+      );
+    },
+    onSuccess: async () => {
+      await workdayQuery.refetch();
+      Alert.alert("Workday Started", "Attendance is now active.");
+    },
+  });
+  const endMutation = useMutation({
+    mutationFn: async () => {
+      await requestLocationPermission();
+      const coordinates = await getCurrentLocation();
+      let address: string | undefined;
+      try {
+        address = await reverseGeocode(
+          coordinates.latitude,
+          coordinates.longitude
+        );
+      } catch {
+        address = undefined;
+      }
+      return endDoctorWorkday({
+        device_timestamp: new Date().toISOString(),
+        end_address: address,
+        end_latitude: coordinates.latitude,
+        end_longitude: coordinates.longitude,
+      });
+    },
+    onError: (error) => {
+      Alert.alert(
+        "Unable to End Workday",
+        getApiErrorMessage(error, "Unable to end your workday.")
+      );
+    },
+    onSuccess: async (response) => {
+      await clearAuthSession();
+      queryClient.clear();
+      Alert.alert(
+        "Workday Ended",
+        [
+          `Completed visits: ${response.completed_visits_count}`,
+          `Pending visits: ${response.pending_visits_count}`,
+          `Distance: ${response.total_distance_km.toFixed(2)} km`,
+        ].join("\n"),
+        [
+          {
+            onPress: () => router.replace("/(auth)/login"),
+            text: "OK",
+          },
+        ]
+      );
+    },
+    onSettled: () => {
+      endingRef.current = false;
+    },
+  });
+  const endPending = endMutation.isPending;
+  const mutateEnd = endMutation.mutate;
+  const executeEnd = useCallback(() => {
+    if (
+      endingRef.current ||
+      endPending ||
+      !workdayQuery.data?.can_end_workday
+    ) {
+      return;
+    }
+    endingRef.current = true;
+    mutateEnd();
+  }, [
+    endPending,
+    mutateEnd,
+    workdayQuery.data?.can_end_workday,
+  ]);
+  const confirmEnd = useCallback(() => {
+    Alert.alert(
+      "End Workday",
+      "Attendance will close and you will be logged out.",
+      [
+        { style: "cancel", text: "Cancel" },
+        {
+          onPress: executeEnd,
+          style: "destructive",
+          text: "End Workday",
+        },
+      ]
+    );
+  }, [executeEnd]);
+
+  useEffect(() => {
+    const workday = workdayQuery.data;
+    if (
+      !workday?.is_active ||
+      !workday.should_prompt_end ||
+      promptShownRef.current
+    ) {
+      return;
+    }
+    promptShownRef.current = true;
+    Alert.alert(
+      "Your workday has ended",
+      "Please end your workday.",
+      [
+        { style: "cancel", text: "Cancel" },
+        { onPress: executeEnd, text: "End Workday" },
+      ]
+    );
+  }, [executeEnd, workdayQuery.data]);
+
+  useEffect(() => {
+    const workday = workdayQuery.data;
+    if (
+      !workday?.is_active ||
+      !workday.auto_logout_enabled ||
+      !workday.should_prompt_end
+    ) {
+      return;
+    }
+    const timeout = setTimeout(
+      executeEnd,
+      workday.auto_logout_grace_minutes * 60_000
+    );
+    return () => clearTimeout(timeout);
+  }, [executeEnd, workdayQuery.data]);
 
   if (dashboardQuery.isPending && !dashboardQuery.data) {
     return <DoctorLoadingState label="Loading doctor dashboard..." />;
@@ -126,6 +298,68 @@ export default function DoctorHomeScreen() {
         title="Doctor Dashboard"
       />
 
+      <View style={styles.attendanceCard}>
+        <View style={styles.attendanceText}>
+          <Text style={styles.attendanceTitle}>Attendance</Text>
+          <Text style={styles.attendanceStatus}>
+            {workdayQuery.data?.is_active
+              ? `Active since ${new Date(
+                  workdayQuery.data.started_at ?? ""
+                ).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}`
+              : workdayQuery.data?.started
+                ? "Workday completed"
+                : "Workday not started"}
+          </Text>
+          {workdayQuery.data?.is_active &&
+          !workdayQuery.data.can_end_workday ? (
+            <Text style={styles.attendanceHint}>
+              End available at {workdayQuery.data.workday_end_time}
+            </Text>
+          ) : null}
+        </View>
+        {!workdayQuery.data?.started ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            disabled={startMutation.isPending}
+            style={styles.startButton}
+            onPress={() => startMutation.mutate()}
+          >
+            {startMutation.isPending ? (
+              <ActivityIndicator color={colors.surface} size="small" />
+            ) : (
+              <Ionicons
+                color={colors.surface}
+                name="play-outline"
+                size={18}
+              />
+            )}
+            <Text style={styles.attendanceButtonText}>Start Day</Text>
+          </TouchableOpacity>
+        ) : workdayQuery.data?.is_active &&
+          workdayQuery.data.can_end_workday ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            disabled={endPending}
+            style={styles.endButton}
+            onPress={confirmEnd}
+          >
+            {endPending ? (
+              <ActivityIndicator color={colors.surface} size="small" />
+            ) : (
+              <Ionicons
+                color={colors.surface}
+                name="stop-circle-outline"
+                size={18}
+              />
+            )}
+            <Text style={styles.attendanceButtonText}>End Day</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
       <View style={styles.grid}>
         {dashboardCards.map((card) => (
           <View key={card.key} style={styles.card}>
@@ -158,6 +392,57 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.lgPlus,
+  },
+  attendanceCard: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
+    flexDirection: "row",
+    gap: spacing.lg,
+    justifyContent: "space-between",
+    marginBottom: spacing.xl,
+    padding: spacing.xl,
+  },
+  attendanceText: {
+    flex: 1,
+  },
+  attendanceTitle: {
+    color: colors.textStrong,
+    fontSize: typography.size.body,
+    fontWeight: typography.weight.extrabold,
+  },
+  attendanceStatus: {
+    color: colors.textMuted,
+    fontSize: typography.size.smallLarge,
+    marginTop: spacing.xs,
+  },
+  attendanceHint: {
+    color: colors.warningDark,
+    fontSize: typography.size.small,
+    marginTop: spacing.xs,
+  },
+  startButton: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: radius.control,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+  },
+  endButton: {
+    alignItems: "center",
+    backgroundColor: colors.danger,
+    borderRadius: radius.control,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+  },
+  attendanceButtonText: {
+    color: colors.surface,
+    fontSize: typography.size.smallLarge,
+    fontWeight: typography.weight.extrabold,
   },
   card: {
     backgroundColor: colors.surface,

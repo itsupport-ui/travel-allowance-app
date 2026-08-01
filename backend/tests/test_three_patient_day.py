@@ -47,15 +47,30 @@ class ThreePatientDayFlowTests(unittest.TestCase):
             is_active=True,
             base_location="Fallback origin",
         )
+        self.doctor_user = User(
+            username="Doctor",
+            email="doctor@example.com",
+            password_hash="not-used",
+            role="doctor",
+            is_active=True,
+        )
+        self.settings = Settings(per_km_rate=8.0, daily_allowance=150.0)
+        self.db.add_all(
+            [
+                self.admin,
+                self.therapist,
+                self.doctor_user,
+                self.settings,
+            ]
+        )
+        self.db.flush()
         self.doctor = Doctor(
+            user_id=self.doctor_user.id,
             name="Doctor",
             specialization="General",
             phone="1234567890",
         )
-        self.settings = Settings(per_km_rate=8.0, daily_allowance=150.0)
-        self.db.add_all(
-            [self.admin, self.therapist, self.doctor, self.settings]
-        )
+        self.db.add(self.doctor)
         self.db.commit()
 
         app = FastAPI()
@@ -264,7 +279,7 @@ class ThreePatientDayFlowTests(unittest.TestCase):
         self.assertEqual(duplicate_response.status_code, 400)
         self.assertEqual(
             duplicate_response.json()["detail"],
-            "Claim for today already submitted",
+            "Claim for today already exists with status 'pending'",
         )
 
     def test_claim_commit_failure_does_not_leave_partial_links(self):

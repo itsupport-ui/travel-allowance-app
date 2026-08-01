@@ -33,6 +33,8 @@ export function ClaimStatusBadge({ status }: ClaimStatusBadgeProps) {
       ? styles.approvedBadge
       : normalizedStatus === "rejected"
         ? styles.rejectedBadge
+        : normalizedStatus === "under_review"
+          ? styles.reviewBadge
         : normalizedStatus === "pending"
           ? styles.pendingBadge
           : styles.neutralBadge;
@@ -42,12 +44,18 @@ export function ClaimStatusBadge({ status }: ClaimStatusBadgeProps) {
       ? styles.approvedText
       : normalizedStatus === "rejected"
         ? styles.rejectedText
+        : normalizedStatus === "under_review"
+          ? styles.reviewText
         : normalizedStatus === "pending"
           ? styles.pendingText
           : styles.neutralText;
 
   return (
-    <View style={[styles.badge, badgeStyle]}>
+    <View
+      accessibilityLabel={`Claim status: ${formatStatus(status)}`}
+      accessible
+      style={[styles.badge, badgeStyle]}
+    >
       <Text style={[styles.text, textStyle]}>{formatStatus(status)}</Text>
     </View>
   );
@@ -82,6 +90,12 @@ const styles = StyleSheet.create({
   },
   rejectedText: {
     color: colors.danger,
+  },
+  reviewBadge: {
+    backgroundColor: colors.blueSurface,
+  },
+  reviewText: {
+    color: colors.blueDark,
   },
   neutralBadge: {
     backgroundColor: colors.border,

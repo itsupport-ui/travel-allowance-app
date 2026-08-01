@@ -12,9 +12,7 @@ import type { ReactNode } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -28,18 +26,18 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
+import { FormScrollView } from "../src/components/layout/FormScrollView";
 import { ScheduleListSkeleton } from "../src/components/skeletons/ScreenSkeletons";
 import { queryKeys } from "../src/query/queryKeys";
 import { getApiErrorMessage } from "../src/services/errorHandler";
 import {
-  completeTreatment,
   getScheduleById,
+  getTreatmentSession,
   markTreatmentMissed,
+  punchInTreatment,
+  punchOutTreatment,
 } from "../src/services/scheduleService";
-import type {
-  Schedule,
-  ScheduleTransportMode,
-} from "../src/types/schedule";
+import type { ScheduleTransportMode } from "../src/types/schedule";
 import {
   getCurrentLocation,
   requestLocationPermission,
@@ -123,14 +121,31 @@ const formatLabel = (
     .join(" ");
 };
 
-const getDefaultTransport = (
-  schedule: Schedule
-): ScheduleTransportMode => {
-  const value = schedule.transport_mode;
+const formatDateTime = (
+  value: string | null | undefined
+): string => {
+  if (!value) return "Not recorded";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+};
 
-  return transportModes.some((mode) => mode.value === value)
-    ? (value as ScheduleTransportMode)
-    : "vehicle";
+const formatDuration = (totalSeconds: number): string => {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  return [
+    hours > 0 ? `${hours}h` : null,
+    `${minutes}m`,
+    `${remainingSeconds}s`,
+  ]
+    .filter(Boolean)
+    .join(" ");
 };
 
 function DetailRow({
@@ -187,6 +202,14 @@ export default function ScheduleDetailsScreen() {
   const [locationAccuracy, setLocationAccuracy] =
     useState<number | null>(null);
   const [capturingLocation, setCapturingLocation] = useState(false);
+  const [eligibilityCoordinates, setEligibilityCoordinates] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [eligibilityError, setEligibilityError] =
+    useState<string | null>(null);
+  const [checkingEligibility, setCheckingEligibility] = useState(false);
+  const [, setElapsedTick] = useState(0);
 
   const scheduleQuery = useQuery({
     enabled: scheduleId !== null,
@@ -203,11 +226,81 @@ export default function ScheduleDetailsScreen() {
     },
   });
 
+  const sessionQuery = useQuery({
+    enabled: scheduleId !== null,
+    queryKey:
+      scheduleId === null
+        ? ["treatment-sessions", "invalid"]
+        : queryKeys.treatmentSessions.detail(
+            scheduleId,
+            eligibilityCoordinates?.latitude,
+            eligibilityCoordinates?.longitude
+          ),
+    queryFn: () => {
+      if (scheduleId === null) {
+        throw new Error("A valid schedule ID is required.");
+      }
+      return getTreatmentSession(
+        scheduleId,
+        eligibilityCoordinates ?? undefined
+      );
+    },
+  });
+
   useEffect(() => {
-    if (scheduleQuery.data) {
-      setTransportMode(getDefaultTransport(scheduleQuery.data));
+    const schedule = scheduleQuery.data;
+    if (
+      !schedule ||
+      schedule.status !== "scheduled" ||
+      schedule.session_status !== "NOT_STARTED"
+    ) {
+      return;
     }
+
+    let active = true;
+    setCheckingEligibility(true);
+    setEligibilityError(null);
+
+    void (async () => {
+      try {
+        await requestLocationPermission();
+        const coordinates = await getCurrentLocation();
+        if (active) {
+          setLocationAccuracy(coordinates.accuracy);
+          setEligibilityCoordinates({
+            latitude: coordinates.latitude,
+            longitude: coordinates.longitude,
+          });
+        }
+      } catch (error) {
+        if (active) {
+          setEligibilityError(
+            getApiErrorMessage(
+              error,
+              "Unable to verify your current location."
+            )
+          );
+        }
+      } finally {
+        if (active) setCheckingEligibility(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, [scheduleQuery.data]);
+
+  useEffect(() => {
+    if (sessionQuery.data?.session_status !== "IN_PROGRESS") {
+      return;
+    }
+    const timer = setInterval(
+      () => setElapsedTick((value) => value + 1),
+      1000
+    );
+    return () => clearInterval(timer);
+  }, [sessionQuery.data?.session_status]);
 
   const invalidateTreatmentQueries = async () => {
     await Promise.all([
@@ -216,6 +309,9 @@ export default function ScheduleDetailsScreen() {
       }),
       queryClient.invalidateQueries({
         queryKey: queryKeys.schedules.all,
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.treatmentSessions.all,
       }),
       queryClient.invalidateQueries({
         queryKey: queryKeys.travel.today,
@@ -236,7 +332,7 @@ export default function ScheduleDetailsScreen() {
       setLocationAccuracy(coordinates.accuracy);
       setCapturingLocation(false);
 
-      return completeTreatment(scheduleId, {
+      return punchOutTreatment(scheduleId, {
         arrival_latitude: coordinates.latitude,
         arrival_longitude: coordinates.longitude,
         bill_amount:
@@ -288,6 +384,60 @@ export default function ScheduleDetailsScreen() {
       completionRef.current = false;
     },
   });
+
+  const punchInMutation = useMutation({
+    mutationFn: async () => {
+      if (scheduleId === null) {
+        throw new Error("A valid schedule ID is required.");
+      }
+      setCapturingLocation(true);
+      await requestLocationPermission();
+      const coordinates = await getCurrentLocation();
+      setLocationAccuracy(coordinates.accuracy);
+      setEligibilityCoordinates({
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+      });
+      setCapturingLocation(false);
+      return punchInTreatment(scheduleId, {
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        device_timestamp: new Date().toISOString(),
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        scheduleQuery.refetch(),
+        sessionQuery.refetch(),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.schedules.all,
+        }),
+      ]);
+      Alert.alert("Treatment Started", "Punch In was recorded successfully.");
+    },
+    onError: (error) => {
+      setCapturingLocation(false);
+      Alert.alert(
+        "Unable to Punch In",
+        getApiErrorMessage(error, "Unable to start this treatment.")
+      );
+    },
+  });
+
+  const confirmPunchIn = () => {
+    if (!sessionQuery.data?.can_punch_in) return;
+    Alert.alert(
+      "Punch In",
+      "Confirm that you are ready to begin this treatment.",
+      [
+        { style: "cancel", text: "Cancel" },
+        {
+          text: "Punch In",
+          onPress: () => punchInMutation.mutate(),
+        },
+      ]
+    );
+  };
 
   const missedMutation = useMutation({
     mutationFn: async () => {
@@ -394,9 +544,21 @@ export default function ScheduleDetailsScreen() {
       }
     }
 
-    completionRef.current = true;
     setFormError(null);
-    completionMutation.mutate();
+    Alert.alert(
+      "Punch Out",
+      "Punching out will complete this treatment and create the travel entry.",
+      [
+        { style: "cancel", text: "Cancel" },
+        {
+          text: "Punch Out",
+          onPress: () => {
+            completionRef.current = true;
+            completionMutation.mutate();
+          },
+        },
+      ]
+    );
   };
 
   const submitMissed = () => {
@@ -440,9 +602,21 @@ export default function ScheduleDetailsScreen() {
   }
 
   const schedule = scheduleQuery.data;
+  const session = sessionQuery.data;
+  const elapsedSeconds =
+    session?.session_status === "IN_PROGRESS" && session.punch_in_time
+      ? Math.max(
+          session.elapsed_seconds,
+          Math.floor(
+            (Date.now() - new Date(session.punch_in_time).getTime()) /
+              1000
+          )
+        )
+      : (session?.treatment_duration ?? 0);
   const actionBusy =
     completionMutation.isPending ||
     missedMutation.isPending ||
+    punchInMutation.isPending ||
     capturingLocation;
   const actionBarBottomPadding = Math.max(insets.bottom, spacing.lg);
   const actionContentPadding =
@@ -582,12 +756,99 @@ export default function ScheduleDetailsScreen() {
                 label="Priority"
                 value={formatLabel(schedule.priority)}
               />
-              <DetailRow
-                label="Transport"
-                value={formatLabel(
-                  schedule.transport_mode ?? "vehicle"
-                )}
-              />
+            </Section>
+
+            <Section title="Treatment Session">
+              {sessionQuery.isPending || checkingEligibility ? (
+                <View style={styles.sessionState}>
+                  <ActivityIndicator color={PRIMARY} size="small" />
+                  <Text style={styles.sessionStateText}>
+                    Verifying workday and patient location...
+                  </Text>
+                </View>
+              ) : sessionQuery.error ? (
+                <View style={styles.sessionState}>
+                  <Text style={styles.sessionErrorText}>
+                    {getApiErrorMessage(
+                      sessionQuery.error,
+                      "Unable to load treatment session."
+                    )}
+                  </Text>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    style={styles.retryButton}
+                    onPress={() => void sessionQuery.refetch()}
+                  >
+                    <Text style={styles.retryText}>Try Again</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : session ? (
+                <>
+                  <DetailRow
+                    label="Current Status"
+                    value={formatLabel(session.session_status)}
+                  />
+                  <DetailRow
+                    label="Punch In"
+                    value={formatDateTime(session.punch_in_time)}
+                  />
+                  {session.session_status !== "NOT_STARTED" ? (
+                    <DetailRow
+                      label={
+                        session.session_status === "IN_PROGRESS"
+                          ? "Elapsed Duration"
+                          : "Treatment Duration"
+                      }
+                      value={formatDuration(elapsedSeconds)}
+                    />
+                  ) : null}
+                  {session.punch_out_time ? (
+                    <DetailRow
+                      label="Punch Out"
+                      value={formatDateTime(session.punch_out_time)}
+                    />
+                  ) : null}
+                  {session.eligibility_message ? (
+                    <View
+                      style={[
+                        styles.eligibilityBanner,
+                        session.location_verified === false
+                          ? styles.eligibilityBlocked
+                          : styles.eligibilityReady,
+                      ]}
+                    >
+                      <Ionicons
+                        color={
+                          session.location_verified === false
+                            ? DANGER
+                            : PRIMARY
+                        }
+                        name={
+                          session.location_verified === false
+                            ? "location-outline"
+                            : "checkmark-circle-outline"
+                        }
+                        size={18}
+                      />
+                      <Text style={styles.eligibilityText}>
+                        {session.eligibility_message}
+                      </Text>
+                    </View>
+                  ) : null}
+                </>
+              ) : null}
+              {eligibilityError ? (
+                <View style={styles.eligibilityBanner}>
+                  <Text style={styles.sessionErrorText}>
+                    {eligibilityError}
+                  </Text>
+                </View>
+              ) : null}
+              {locationAccuracy !== null ? (
+                <Text style={styles.locationAccuracy}>
+                  GPS accuracy: approximately {Math.round(locationAccuracy)} m
+                </Text>
+              ) : null}
             </Section>
 
             {schedule.status === "completed" ? (
@@ -632,22 +893,47 @@ export default function ScheduleDetailsScreen() {
                 />
                 <Text style={styles.missedActionText}>Missed</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                accessibilityRole="button"
-                activeOpacity={0.85}
-                style={styles.completeAction}
-                onPress={() => {
-                  setFormError(null);
-                  setActionMode("complete");
-                }}
-              >
-                <Ionicons
-                  color={colors.surface}
-                  name="checkmark-circle-outline"
-                  size={20}
-                />
-                <Text style={styles.completeActionText}>Complete</Text>
-              </TouchableOpacity>
+              {session?.can_punch_in ? (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  activeOpacity={0.85}
+                  disabled={actionBusy}
+                  style={[
+                    styles.completeAction,
+                    actionBusy && styles.disabledButton,
+                  ]}
+                  onPress={confirmPunchIn}
+                >
+                  {punchInMutation.isPending ? (
+                    <ActivityIndicator color={colors.surface} size="small" />
+                  ) : (
+                    <Ionicons
+                      color={colors.surface}
+                      name="log-in-outline"
+                      size={20}
+                    />
+                  )}
+                  <Text style={styles.completeActionText}>Punch In</Text>
+                </TouchableOpacity>
+              ) : null}
+              {session?.can_punch_out ? (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  activeOpacity={0.85}
+                  style={styles.completeAction}
+                  onPress={() => {
+                    setFormError(null);
+                    setActionMode("complete");
+                  }}
+                >
+                  <Ionicons
+                    color={colors.surface}
+                    name="log-out-outline"
+                    size={20}
+                  />
+                  <Text style={styles.completeActionText}>Punch Out</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : null}
         </>
@@ -663,16 +949,13 @@ export default function ScheduleDetailsScreen() {
         transparent
         visible={actionMode !== null}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.modalOverlay}
-        >
+        <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
                 {actionMode === "complete"
-                  ? "Complete Treatment"
+                  ? "Punch Out & Complete"
                   : "Mark Treatment Missed"}
               </Text>
               <TouchableOpacity
@@ -690,8 +973,16 @@ export default function ScheduleDetailsScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView
-              keyboardShouldPersistTaps="handled"
+            <FormScrollView
+              contentContainerStyle={[
+                styles.modalFormContent,
+                {
+                  paddingBottom: Math.max(
+                    insets.bottom,
+                    spacing.section
+                  ),
+                },
+              ]}
               showsVerticalScrollIndicator={false}
             >
               {actionMode === "complete" ? (
@@ -846,14 +1137,14 @@ export default function ScheduleDetailsScreen() {
                 ) : (
                   <Text style={styles.submitButtonText}>
                     {actionMode === "complete"
-                      ? "Complete Treatment"
+                      ? "Punch Out & Complete"
                       : "Mark as Missed"}
                   </Text>
                 )}
               </TouchableOpacity>
-            </ScrollView>
+            </FormScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -962,6 +1253,49 @@ const styles = StyleSheet.create({
     fontWeight: typography.weight.semibold,
     lineHeight: typography.lineHeight.bodyLarge,
   },
+  sessionState: {
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.lg,
+  },
+  sessionStateText: {
+    color: colors.textMuted,
+    fontSize: typography.size.bodySmall,
+    textAlign: "center",
+  },
+  sessionErrorText: {
+    color: DANGER,
+    fontSize: typography.size.bodySmall,
+    lineHeight: typography.lineHeight.bodyRelaxed,
+    textAlign: "center",
+  },
+  eligibilityBanner: {
+    alignItems: "center",
+    backgroundColor: colors.background,
+    borderRadius: radius.control,
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    padding: spacing.lg,
+  },
+  eligibilityReady: {
+    backgroundColor: colors.primarySurface,
+  },
+  eligibilityBlocked: {
+    backgroundColor: colors.dangerSurface,
+  },
+  eligibilityText: {
+    color: colors.textSecondary,
+    flex: 1,
+    fontSize: typography.size.bodySmall,
+    lineHeight: typography.lineHeight.bodyRelaxed,
+  },
+  locationAccuracy: {
+    color: colors.textSubtle,
+    fontSize: typography.size.caption,
+    marginTop: spacing.sm,
+    textAlign: "right",
+  },
   actionBar: {
     backgroundColor: colors.surface,
     borderTopColor: colors.border,
@@ -1052,10 +1386,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopLeftRadius: radius.largePanel,
     borderTopRightRadius: radius.largePanel,
-    maxHeight: "90%",
-    paddingBottom: spacing.section,
+    height: "90%",
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.sm,
+  },
+  modalFormContent: {
+    flexGrow: 1,
   },
   modalHandle: {
     alignSelf: "center",

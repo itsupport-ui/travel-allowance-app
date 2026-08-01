@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import toast from "react-hot-toast"
 
 import AdminLayout from "../layouts/AdminLayout"
@@ -10,20 +10,27 @@ import {
   getTherapists,
   updateSchedule
 } from "../services/scheduleService"
+import { getErrorMessage } from "../services/http"
+import { isEndAfterStart, isValidPhone } from "../utils/validation"
 
 function AdminEditSchedulePage() {
   const navigate = useNavigate()
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
+  const isRescheduling = searchParams.get("reschedule") === "1"
 
   const [loading, setLoading] = useState(true)
   const [doctors, setDoctors] = useState([])
   const [therapists, setTherapists] = useState([])
   const [formData, setFormData] = useState({
     patient_name: "",
+    patient_reference_id: "",
+    patient_phone: "",
     doctor_id: "",
     therapist_id: "",
     treatment_name: "",
-    medicine: "",
+    visit_type: "home_visit",
+    medicines: "",
     patient_address: "",
     schedule_type: "one_time",
     treatment_date: "",
@@ -32,48 +39,78 @@ function AdminEditSchedulePage() {
     in_time: "",
     out_time: "",
     instructions: "",
+    clinical_notes: "",
+    precautions: "",
     priority: "normal"
   })
 
   useEffect(() => {
-    loadData()
-  }, [])
+    let active = true
 
-  const loadData = async () => {
-    try {
-      const token = localStorage.getItem("token")
-      const schedule = await getScheduleDetails(id, token)
-      const doctorsData = await getDoctors(token)
-      const therapistsData = await getTherapists(token)
-      setDoctors(doctorsData)
-      setTherapists(therapistsData)
-
-      setFormData({
-        patient_name: schedule.patient_name || "",
-        doctor_id: schedule.doctor_id || "",
-        therapist_id: schedule.therapist_id || "",
-        treatment_name: schedule.treatment_name || "",
-        medicines: schedule.medicines || "",
-        patient_address: schedule.patient_address || "",
-        schedule_type: schedule.schedule_type || "one_time",
-        treatment_date: schedule.treatment_date || "",
-        start_date: schedule.start_date || "",
-        end_date: schedule.end_date || "",
-        in_time: schedule.in_time ? schedule.in_time.slice(0, 5) : "",
-        out_time: schedule.out_time ? schedule.out_time.slice(0, 5) : "", 
-        instructions: schedule.instructions || "",
-        priority: schedule.priority || "normal"
-      })
-    } catch (error) {
-      console.error(error)
-      toast.error("Failed to load schedule details")
-    } finally {
-      setLoading(false)
+    async function loadData() {
+      try {
+        const token = localStorage.getItem("token")
+        const [schedule, doctorsData, therapistsData] = await Promise.all([
+          getScheduleDetails(id, token),
+          getDoctors(token),
+          getTherapists(token),
+        ])
+        if (!active) return
+        setDoctors(doctorsData)
+        setTherapists(therapistsData)
+        setFormData({
+          patient_name: schedule.patient_name || "",
+          patient_reference_id: schedule.patient_reference_id || "",
+          patient_phone: schedule.patient_phone || "",
+          doctor_id: schedule.doctor_id || "",
+          therapist_id: schedule.therapist_id || "",
+          treatment_name: schedule.treatment_name || "",
+          visit_type: schedule.visit_type || "home_visit",
+          medicines: schedule.medicines || "",
+          patient_address: schedule.patient_address || "",
+          schedule_type: schedule.schedule_type || "one_time",
+          treatment_date: schedule.treatment_date || "",
+          start_date: schedule.start_date || "",
+          end_date: schedule.end_date || "",
+          in_time: schedule.in_time ? schedule.in_time.slice(0, 5) : "",
+          out_time: schedule.out_time ? schedule.out_time.slice(0, 5) : "",
+          instructions: schedule.instructions || "",
+          clinical_notes: schedule.clinical_notes || "",
+          precautions: schedule.precautions || "",
+          priority: schedule.priority || "normal"
+        })
+      } catch (error) {
+        console.error(error)
+        toast.error("Failed to load schedule details")
+      } finally {
+        if (active) setLoading(false)
+      }
     }
-  }
+
+    loadData()
+    return () => {
+      active = false
+    }
+  }, [id])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+
+    if (!isValidPhone(formData.patient_phone)) {
+      toast.error("Enter a valid patient phone number")
+      return
+    }
+    if (!isEndAfterStart(formData.in_time, formData.out_time)) {
+      toast.error("Expected end time must be after the start time")
+      return
+    }
+    if (
+      formData.schedule_type === "recurring" &&
+      formData.end_date < formData.start_date
+    ) {
+      toast.error("End date cannot be before start date")
+      return
+    }
 
     try {
       const token = localStorage.getItem("token")
@@ -82,6 +119,11 @@ function AdminEditSchedulePage() {
         ...formData,
         doctor_id: Number(formData.doctor_id),
         therapist_id: Number(formData.therapist_id),
+        patient_reference_id: formData.patient_reference_id || null,
+        patient_phone: formData.patient_phone || null,
+        medicines: formData.medicines || null,
+        clinical_notes: formData.clinical_notes || null,
+        precautions: formData.precautions || null,
         start_date: formData.schedule_type === "recurring" ? formData.start_date : null,
         end_date: formData.schedule_type === "recurring" ? formData.end_date : null,
         treatment_date: formData.schedule_type === "one_time" ? formData.treatment_date : null
@@ -92,7 +134,7 @@ function AdminEditSchedulePage() {
       navigate(`/admin/schedule/${id}`) // Fixed string interpolation here
     } catch (error) {
       console.error(error)
-      toast.error("Failed to update schedule")
+      toast.error(getErrorMessage(error, "Failed to update schedule"))
     }
   }
 
@@ -139,10 +181,12 @@ function AdminEditSchedulePage() {
         {/* Page Header */}
         <div className="mb-6">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 tracking-tight">
-            Edit Schedule
+            {isRescheduling ? "Reschedule Appointment" : "Edit Schedule"}
           </h1>
           <p className="text-xs sm:text-sm text-gray-500 mt-1">
-            Modify core patient data, reassignment configurations, or timeline windows.
+            {isRescheduling
+              ? "Choose a new appointment date or time and confirm staff availability."
+              : "Modify patient, clinical assignment, and appointment details."}
           </p>
         </div>
 
@@ -174,6 +218,30 @@ function AdminEditSchedulePage() {
                 className={inputClasses}
                 placeholder="Treatment Name"
                 required
+              />
+            </div>
+
+            <div>
+              <label className={labelClasses}>Patient ID</label>
+              <input
+                type="text"
+                name="patient_reference_id"
+                value={formData.patient_reference_id}
+                onChange={handleChange}
+                className={inputClasses}
+                placeholder="Optional patient reference"
+              />
+            </div>
+
+            <div>
+              <label className={labelClasses}>Patient Phone</label>
+              <input
+                type="tel"
+                name="patient_phone"
+                value={formData.patient_phone}
+                onChange={handleChange}
+                className={inputClasses}
+                placeholder="Optional phone number"
               />
             </div>
           </div>
@@ -229,6 +297,21 @@ function AdminEditSchedulePage() {
               placeholder="Medicines and dosages (Optional)"
             />
                 
+          </div>
+
+          <div>
+            <label className={labelClasses}>Visit Type</label>
+            <select
+              name="visit_type"
+              value={formData.visit_type}
+              onChange={handleChange}
+              className={inputClasses}
+            >
+              <option value="home_visit">Home visit</option>
+              <option value="clinic_visit">Clinic visit</option>
+              <option value="follow_up">Follow-up</option>
+              <option value="assessment">Assessment</option>
+            </select>
           </div>
 
 
@@ -340,7 +423,7 @@ function AdminEditSchedulePage() {
                 className={inputClasses}
               >
                 <option value="normal">Normal</option>
-                <option value="important">Important</option>
+                <option value="high">High</option>
               </select>
             </div>
           </div>
@@ -358,6 +441,29 @@ function AdminEditSchedulePage() {
             ></textarea>
           </div>
 
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <label className={labelClasses}>Clinical Notes</label>
+              <textarea
+                name="clinical_notes"
+                value={formData.clinical_notes}
+                onChange={handleChange}
+                className={`${inputClasses} resize-none`}
+                rows="3"
+              />
+            </div>
+            <div>
+              <label className={labelClasses}>Precautions</label>
+              <textarea
+                name="precautions"
+                value={formData.precautions}
+                onChange={handleChange}
+                className={`${inputClasses} resize-none`}
+                rows="3"
+              />
+            </div>
+          </div>
+
           {/* Dynamic Interactive Action Buttons Terminal */}
           <div className="flex flex-col-reverse sm:flex-row justify-between items-center gap-3 pt-3 border-t border-gray-50">
             <button
@@ -371,7 +477,7 @@ function AdminEditSchedulePage() {
               type="submit"
               className="w-full sm:w-44 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-semibold transition text-sm shadow-md active:scale-[0.99] text-center"
             >
-              Update Schedule
+              {isRescheduling ? "Save New Schedule" : "Update Schedule"}
             </button>
           </div>
 

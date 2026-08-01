@@ -51,20 +51,30 @@ class StaffManagementTests(unittest.TestCase):
             role="therapist",
             is_active=False,
         )
-        self.doctor = Doctor(
-            name="Doctor One",
-            specialization="General",
-            phone="1234567890",
-            active=True,
+        self.doctor_user = User(
+            username="Doctor One User",
+            email="doctor-one@example.com",
+            password_hash="existing-hash",
+            role="doctor",
+            is_active=True,
         )
         self.db.add_all(
             [
                 self.admin,
                 self.therapist,
                 self.inactive_therapist,
-                self.doctor,
+                self.doctor_user,
             ]
         )
+        self.db.flush()
+        self.doctor = Doctor(
+            user_id=self.doctor_user.id,
+            name="Doctor One",
+            specialization="General",
+            phone="1234567890",
+            active=True,
+        )
+        self.db.add(self.doctor)
         self.db.commit()
 
         self.current_user = self.admin
@@ -124,6 +134,7 @@ class StaffManagementTests(unittest.TestCase):
         response = self.client.put(
             f"/doctors/{self.doctor.id}",
             json={
+                "user_id": self.doctor_user.id,
                 "name": "Updated Doctor",
                 "specialization": "Orthopedics",
                 "phone": "9876543210",
@@ -149,6 +160,7 @@ class StaffManagementTests(unittest.TestCase):
         doctor_response = self.client.put(
             f"/doctors/{self.doctor.id}",
             json={
+                "user_id": self.doctor_user.id,
                 "name": "Unauthorized",
                 "specialization": None,
                 "phone": None,
@@ -168,12 +180,26 @@ class StaffManagementTests(unittest.TestCase):
                 "is_active": True,
             },
         )
-        second_doctor = Doctor(name="Doctor Two", active=True)
+        second_doctor_user = User(
+            username="Doctor Two User",
+            email="doctor-two@example.com",
+            password_hash="existing-hash",
+            role="doctor",
+            is_active=True,
+        )
+        self.db.add(second_doctor_user)
+        self.db.flush()
+        second_doctor = Doctor(
+            user_id=second_doctor_user.id,
+            name="Doctor Two",
+            active=True,
+        )
         self.db.add(second_doctor)
         self.db.commit()
         duplicate_name = self.client.put(
             f"/doctors/{second_doctor.id}",
             json={
+                "user_id": second_doctor_user.id,
                 "name": self.doctor.name.lower(),
                 "specialization": None,
                 "phone": None,

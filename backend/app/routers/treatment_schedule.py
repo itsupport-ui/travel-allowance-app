@@ -21,6 +21,7 @@ from datetime import date, datetime
 from sqlalchemy import and_, or_, func
 # import get_current_user
 from app.utils.auth import get_current_user
+from app.utils.timezone import india_now
 from app.services.claim_service import (
     TRAVEL_ENTRY_EXISTS_MESSAGE,
     cleanup_invoice_file,
@@ -34,6 +35,7 @@ from app.services.push_notification_service import (
     notify_schedule_assigned,
     notify_schedule_updated,
 )
+from app.services.schedule_conflict_service import find_schedule_conflicts
 from app.utils.workflow_transitions import (
     TREATMENT_SCHEDULE_STATUS_TRANSITIONS,
     validate_status_transition,
@@ -162,6 +164,31 @@ def create_schedule(
             "Invalid schedule type"
         )
 
+    if treatment_schedule.out_time <= treatment_schedule.in_time:
+        raise HTTPException(
+            status_code=400,
+            detail="Expected end time must be after the start time.",
+        )
+
+    conflicts = find_schedule_conflicts(
+        db,
+        therapist_id=treatment_schedule.therapist_id,
+        schedule_type=treatment_schedule.schedule_type,
+        treatment_date=treatment_schedule.treatment_date,
+        start_date=treatment_schedule.start_date,
+        end_date=treatment_schedule.end_date,
+        in_time=treatment_schedule.in_time,
+        out_time=treatment_schedule.out_time,
+    )
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The selected therapist already has an overlapping "
+                "appointment during this time."
+            ),
+        )
+
     try:
         patient_latitude, patient_longitude = resolve_patient_coordinates(
             treatment_schedule.patient_address
@@ -171,6 +198,10 @@ def create_schedule(
             patient_name=
             treatment_schedule.patient_name,
 
+            patient_reference_id=treatment_schedule.patient_reference_id,
+
+            patient_phone=treatment_schedule.patient_phone,
+
             doctor_id=
             treatment_schedule.doctor_id,
 
@@ -179,6 +210,8 @@ def create_schedule(
 
             treatment_name=
             treatment_schedule.treatment_name,
+
+            visit_type=treatment_schedule.visit_type,
 
             medicines=
             treatment_schedule.medicines,
@@ -213,11 +246,12 @@ def create_schedule(
             instructions=
             treatment_schedule.instructions,
 
-            priority=
-            treatment_schedule.priority,
+            clinical_notes=treatment_schedule.clinical_notes,
 
-            transport_mode=
-            treatment_schedule.transport_mode
+            precautions=treatment_schedule.precautions,
+
+            priority=
+            treatment_schedule.priority
         )
 
         db.add(schedule)
@@ -489,6 +523,23 @@ def complete_treatment(
         schedule.status = "completed"
         schedule.completion_notes = completion_notes
         schedule.completed_at = datetime.now()
+        if (
+            schedule.punch_in_time is not None
+            and schedule.punch_out_time is None
+        ):
+            punched_out_at = india_now()
+            started_at = schedule.punch_in_time
+            duration_end = punched_out_at
+            if started_at.tzinfo is None:
+                duration_end = punched_out_at.replace(tzinfo=None)
+            schedule.punch_out_time = punched_out_at
+            schedule.punch_out_latitude = arrival_latitude
+            schedule.punch_out_longitude = arrival_longitude
+            schedule.treatment_duration = max(
+                0,
+                int((duration_end - started_at).total_seconds()),
+            )
+            schedule.session_status = "COMPLETED"
         schedule.doctor_name = (
             schedule.doctor.name if schedule.doctor else None
         )
@@ -1335,6 +1386,32 @@ def update_schedule(
             "Invalid schedule type"
         )
 
+    if payload.out_time <= payload.in_time:
+        raise HTTPException(
+            status_code=400,
+            detail="Expected end time must be after the start time.",
+        )
+
+    conflicts = find_schedule_conflicts(
+        db,
+        therapist_id=payload.therapist_id,
+        schedule_type=payload.schedule_type,
+        treatment_date=payload.treatment_date,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        in_time=payload.in_time,
+        out_time=payload.out_time,
+        exclude_schedule_id=schedule_id,
+    )
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The selected therapist already has an overlapping "
+                "appointment during this time."
+            ),
+        )
+
     address_changed = (
         payload.patient_address.strip()
         != schedule.patient_address.strip()
@@ -1363,6 +1440,10 @@ def update_schedule(
         payload.patient_name
     )
 
+    schedule.patient_reference_id = payload.patient_reference_id
+
+    schedule.patient_phone = payload.patient_phone
+
     schedule.doctor_id = (
         payload.doctor_id
     )
@@ -1374,6 +1455,8 @@ def update_schedule(
     schedule.treatment_name = (
         payload.treatment_name
     )
+
+    schedule.visit_type = payload.visit_type
 
     schedule.medicines = (
         payload.medicines
@@ -1419,14 +1502,12 @@ def update_schedule(
         payload.instructions
     )
 
+    schedule.clinical_notes = payload.clinical_notes
+
+    schedule.precautions = payload.precautions
+
     schedule.priority = (
         payload.priority
-    )
-
-    schedule.transport_mode = (
-        payload.transport_mode
-        or
-        schedule.transport_mode
     )
 
     try:

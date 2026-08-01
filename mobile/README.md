@@ -28,6 +28,42 @@ In the output, you'll find options to open the app in a
 Expo reads client-safe variables from `.env.development` during local
 development and `.env.production` for production exports and builds.
 
+## Run In Expo Go
+
+For local phone testing, the API URL must use the computer's current
+LAN IP address because the phone cannot reach the computer through
+`localhost`.
+
+1. Start the backend from the `backend` directory:
+
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+   ```
+
+2. Confirm the API is reachable from the phone browser:
+
+   ```text
+   http://192.168.0.3:8000/health
+   ```
+
+3. Set the same host in `mobile/.env.development`:
+
+   ```bash
+   EXPO_PUBLIC_API_URL=http://192.168.0.3:8000
+   ```
+
+4. Start Metro for Expo Go from the `mobile` directory:
+
+   ```bash
+   npm run start:go -- --clear
+   ```
+
+5. Scan the QR code in Expo Go.
+
+If the computer's LAN IP changes, replace only the host part in
+`mobile/.env.development`, restart Metro with `--clear`, and reopen the
+app in Expo Go.
+
 Before creating a production build:
 
 1. Replace the placeholder `EXPO_PUBLIC_API_URL` in `.env.production`

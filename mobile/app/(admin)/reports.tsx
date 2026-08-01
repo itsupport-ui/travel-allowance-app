@@ -25,8 +25,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { appConfig } from "../../src/config/env";
 import {
   FilterFieldSkeleton,
-  ReportsSkeleton,
 } from "../../src/components/skeletons/ScreenSkeletons";
+import {
+  ReportDashboard,
+  ReportDashboardSkeleton,
+  ReportExportPanel,
+} from "../../src/components/reports/ReportDashboard";
 import {
   DateTimeField,
   SearchableSelect,
@@ -65,15 +69,6 @@ class ReportExportError extends Error {
   }
 }
 
-interface MetricCardProps {
-  backgroundColor: string;
-  color: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  period: string;
-  value: string;
-}
-
 interface ReportFilterForm {
   fromDate: Date | null;
   status: ReportClaimStatus;
@@ -106,6 +101,14 @@ const statusOptions: SelectOption[] = [
   { id: "approved", label: "Approved" },
   { id: "rejected", label: "Rejected" },
 ];
+
+const isReportClaimStatus = (
+  value: SelectOption["id"]
+): value is ReportClaimStatus =>
+  value === "all" ||
+  value === "pending" ||
+  value === "approved" ||
+  value === "rejected";
 
 const toApiFilters = (
   filters: ReportFilterForm
@@ -706,26 +709,6 @@ const buildReportHtml = (
   `;
 };
 
-const MetricCard = ({
-  backgroundColor,
-  color,
-  icon,
-  label,
-  period,
-  value,
-}: MetricCardProps) => (
-  <View style={styles.metricCard}>
-    <View style={[styles.metricIcon, { backgroundColor }]}>
-      <Ionicons color={color} name={icon} size={22} />
-    </View>
-    <Text numberOfLines={1} style={styles.metricValue}>
-      {value}
-    </Text>
-    <Text style={styles.metricLabel}>{label}</Text>
-    <Text style={styles.metricPeriod}>{period}</Text>
-  </View>
-);
-
 export default function AdminReportsScreen() {
   const [summary, setSummary] =
     useState<AdminReportSummary | null>(null);
@@ -746,6 +729,7 @@ export default function AdminReportsScreen() {
   const [applying, setApplying] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const appliedFiltersRef = useRef(appliedFilters);
   const exportInFlightRef = useRef(false);
@@ -871,6 +855,7 @@ export default function AdminReportsScreen() {
     if (applied) {
       appliedFiltersRef.current = nextFilters;
       setAppliedFilters(nextFilters);
+      setFiltersExpanded(false);
     }
   }, [draftFilters, loadReports]);
 
@@ -885,6 +870,7 @@ export default function AdminReportsScreen() {
     if (reset) {
       appliedFiltersRef.current = emptyFilters;
       setAppliedFilters(emptyFilters);
+      setFiltersExpanded(false);
     }
   }, [loadReports]);
 
@@ -1076,6 +1062,8 @@ export default function AdminReportsScreen() {
     <SafeAreaView edges={["top"]} style={styles.safeArea}>
       <ScrollView
         contentContainerStyle={styles.content}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
             colors={[PRIMARY]}
@@ -1095,7 +1083,20 @@ export default function AdminReportsScreen() {
         </Text>
 
         <View style={styles.filterSection}>
-          <View style={styles.filterHeader}>
+          <TouchableOpacity
+            accessibilityLabel={
+              filtersExpanded
+                ? "Collapse report filters"
+                : "Expand report filters"
+            }
+            accessibilityRole="button"
+            accessibilityState={{ expanded: filtersExpanded }}
+            activeOpacity={0.78}
+            onPress={() =>
+              setFiltersExpanded((current) => !current)
+            }
+            style={styles.filterHeader}
+          >
             <View style={styles.filterHeaderIcon}>
               <Ionicons
                 color={PRIMARY}
@@ -1116,9 +1117,16 @@ export default function AdminReportsScreen() {
                 <Text style={styles.activeFilterText}>Applied</Text>
               </View>
             ) : null}
-          </View>
+            <Ionicons
+              color={colors.textMuted}
+              name={filtersExpanded ? "chevron-up" : "chevron-down"}
+              size={20}
+            />
+          </TouchableOpacity>
 
-          <View style={styles.dateFields}>
+          {filtersExpanded ? (
+            <View style={styles.filterBody}>
+              <View style={styles.dateFields}>
             <DateTimeField
               label="From Date"
               mode="date"
@@ -1146,191 +1154,153 @@ export default function AdminReportsScreen() {
               placeholder="Select end date"
               value={draftFilters.toDate}
             />
-          </View>
-
-          {therapistsLoading ? (
-            <FilterFieldSkeleton />
-          ) : therapistError ? (
-            <View style={styles.filterInlineError}>
-              <View style={styles.filterInlineErrorText}>
-                <Ionicons
-                  color={colors.danger}
-                  name="alert-circle-outline"
-                  size={18}
-                />
-                <Text style={styles.filterInlineErrorMessage}>
-                  {therapistError}
-                </Text>
               </View>
-              <TouchableOpacity
-                accessibilityLabel="Retry loading therapists"
-                accessibilityRole="button"
-                activeOpacity={0.82}
-                onPress={() => void loadTherapists()}
-                style={styles.inlineRetryButton}
-              >
-                <Ionicons color={PRIMARY} name="refresh" size={17} />
-                <Text style={styles.inlineRetryText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <SearchableSelect
-              accessibilityLabel="Select therapist report filter"
-              emptyMessage="No therapists found."
-              icon="person-outline"
-              label="Therapist"
-              onSelect={(option) => {
-                setDraftFilters((current) => ({
-                  ...current,
-                  therapistId:
-                    typeof option.id === "number"
-                      ? option.id
-                      : Number(option.id),
-                  therapistName: option.label,
-                }));
-                setFilterError(null);
-              }}
-              options={therapistOptions}
-              placeholder="All therapists"
-              searchPlaceholder="Search therapists"
-              selectedId={draftFilters.therapistId}
-              title="Select Therapist"
-            />
-          )}
 
-          <SearchableSelect
-            accessibilityLabel="Select claim status report filter"
-            emptyMessage="No statuses found."
-            icon="checkmark-circle-outline"
-            label="Claim Status"
-            onSelect={(option) => {
-              setDraftFilters((current) => ({
-                ...current,
-                status: option.id as ReportClaimStatus,
-              }));
-              setFilterError(null);
-            }}
-            options={statusOptions}
-            placeholder="All statuses"
-            searchPlaceholder="Search statuses"
-            selectedId={draftFilters.status}
-            title="Select Claim Status"
-          />
-
-          {filterError ? (
-            <View style={styles.filterError}>
-              <Ionicons
-                color={colors.danger}
-                name="alert-circle-outline"
-                size={17}
-              />
-              <Text style={styles.filterErrorText}>{filterError}</Text>
-            </View>
-          ) : null}
-
-          <View style={styles.filterActions}>
-            <TouchableOpacity
-              accessibilityLabel="Reset report filters"
-              accessibilityRole="button"
-              activeOpacity={0.82}
-              disabled={filterBusy}
-              onPress={() => void resetFilters()}
-              style={[
-                styles.resetButton,
-                filterBusy ? styles.disabledButton : null,
-              ]}
-            >
-              <Ionicons color={PRIMARY} name="refresh" size={18} />
-              <Text style={styles.resetButtonText}>Reset Filters</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              accessibilityLabel="Apply report filters"
-              accessibilityRole="button"
-              activeOpacity={0.82}
-              disabled={filterBusy}
-              onPress={() => void applyFilters()}
-              style={[
-                styles.applyButton,
-                filterBusy ? styles.disabledButton : null,
-              ]}
-            >
-              {applying ? (
-                <ActivityIndicator color={colors.surface} size="small" />
+              {therapistsLoading ? (
+                <FilterFieldSkeleton />
+              ) : therapistError ? (
+                <View style={styles.filterInlineError}>
+                  <View style={styles.filterInlineErrorText}>
+                    <Ionicons
+                      color={colors.danger}
+                      name="alert-circle-outline"
+                      size={18}
+                    />
+                    <Text style={styles.filterInlineErrorMessage}>
+                      {therapistError}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    accessibilityLabel="Retry loading therapists"
+                    accessibilityRole="button"
+                    activeOpacity={0.82}
+                    onPress={() => void loadTherapists()}
+                    style={styles.inlineRetryButton}
+                  >
+                    <Ionicons
+                      color={PRIMARY}
+                      name="refresh"
+                      size={17}
+                    />
+                    <Text style={styles.inlineRetryText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
               ) : (
-                <Ionicons color={colors.surface} name="funnel" size={18} />
+                <SearchableSelect
+                  accessibilityLabel="Select therapist report filter"
+                  emptyMessage="No therapists found."
+                  icon="person-outline"
+                  label="Therapist"
+                  onSelect={(option) => {
+                    setDraftFilters((current) => ({
+                      ...current,
+                      therapistId:
+                        typeof option.id === "number"
+                          ? option.id
+                          : Number(option.id),
+                      therapistName: option.label,
+                    }));
+                    setFilterError(null);
+                  }}
+                  options={therapistOptions}
+                  placeholder="All therapists"
+                  searchPlaceholder="Search therapists"
+                  selectedId={draftFilters.therapistId}
+                  title="Select Therapist"
+                />
               )}
-              <Text style={styles.applyButtonText}>
-                {applying ? "Applying..." : "Apply Filters"}
-              </Text>
-            </TouchableOpacity>
-          </View>
 
-          {appConfig.features.reportExports ? (
-            <View style={styles.exportActions}>
-              <TouchableOpacity
-                accessibilityLabel="Export filtered report as CSV"
-                accessibilityRole="button"
-                accessibilityState={{
-                  busy: exporting,
-                  disabled: exportDisabled,
+              <SearchableSelect
+                accessibilityLabel="Select claim status report filter"
+                emptyMessage="No statuses found."
+                icon="checkmark-circle-outline"
+                label="Claim Status"
+                onSelect={(option) => {
+                  const nextStatus = option.id;
+                  if (!isReportClaimStatus(nextStatus)) {
+                    return;
+                  }
+                  setDraftFilters((current) => ({
+                    ...current,
+                    status: nextStatus,
+                  }));
+                  setFilterError(null);
                 }}
-                activeOpacity={0.82}
-                disabled={exportDisabled}
-                onPress={() => void exportReport()}
-                style={[
-                  styles.exportButton,
-                  exportDisabled ? styles.disabledButton : null,
-                ]}
-              >
-                {exporting ? (
-                  <ActivityIndicator color={colors.surface} size="small" />
-                ) : (
+                options={statusOptions}
+                placeholder="All statuses"
+                searchPlaceholder="Search statuses"
+                selectedId={draftFilters.status}
+                title="Select Claim Status"
+              />
+
+              {filterError ? (
+                <View style={styles.filterError}>
                   <Ionicons
-                    color={colors.surface}
-                    name="download-outline"
+                    color={colors.danger}
+                    name="alert-circle-outline"
+                    size={17}
+                  />
+                  <Text style={styles.filterErrorText}>
+                    {filterError}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.filterActions}>
+                <TouchableOpacity
+                  accessibilityLabel="Reset report filters"
+                  accessibilityRole="button"
+                  activeOpacity={0.82}
+                  disabled={filterBusy}
+                  onPress={() => void resetFilters()}
+                  style={[
+                    styles.resetButton,
+                    filterBusy ? styles.disabledButton : null,
+                  ]}
+                >
+                  <Ionicons
+                    color={PRIMARY}
+                    name="refresh"
                     size={18}
                   />
-                )}
-                <Text style={styles.exportButtonText}>
-                  {exporting ? "Preparing..." : "Export CSV"}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                accessibilityLabel="Export filtered report as PDF"
-                accessibilityRole="button"
-                accessibilityState={{
-                  busy: pdfExporting,
-                  disabled: exportDisabled,
-                }}
-                activeOpacity={0.82}
-                disabled={exportDisabled}
-                onPress={() => void exportPdfReport()}
-                style={[
-                  styles.exportButton,
-                  styles.pdfExportButton,
-                  exportDisabled ? styles.disabledButton : null,
-                ]}
-              >
-                {pdfExporting ? (
-                  <ActivityIndicator color={colors.surface} size="small" />
-                ) : (
-                  <Ionicons
-                    color={colors.surface}
-                    name="document-text-outline"
-                    size={18}
-                  />
-                )}
-                <Text style={styles.exportButtonText}>
-                  {pdfExporting ? "Preparing..." : "Export PDF"}
-                </Text>
-              </TouchableOpacity>
+                  <Text style={styles.resetButtonText}>
+                    Reset Filters
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  accessibilityLabel="Apply report filters"
+                  accessibilityRole="button"
+                  activeOpacity={0.82}
+                  disabled={filterBusy}
+                  onPress={() => void applyFilters()}
+                  style={[
+                    styles.applyButton,
+                    filterBusy ? styles.disabledButton : null,
+                  ]}
+                >
+                  {applying ? (
+                    <ActivityIndicator
+                      color={colors.surface}
+                      size="small"
+                    />
+                  ) : (
+                    <Ionicons
+                      color={colors.surface}
+                      name="funnel"
+                      size={18}
+                    />
+                  )}
+                  <Text style={styles.applyButtonText}>
+                    {applying ? "Applying..." : "Apply Filters"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ) : null}
         </View>
 
         {loading ? (
-          <ReportsSkeleton />
+          <ReportDashboardSkeleton />
         ) : error ? (
           <View style={styles.errorCard}>
             <View style={styles.errorIcon}>
@@ -1359,58 +1329,20 @@ export default function AdminReportsScreen() {
           </View>
         ) : summary ? (
           <>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Operational Summary</Text>
-              <View style={styles.liveBadge}>
-                <View style={styles.liveDot} />
-                <Text style={styles.liveText}>
-                  {filtersActive ? "Filtered" : "Current"}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.metricsGrid}>
-              <MetricCard
-                backgroundColor={colors.blueSurface}
-                color={colors.blueDark}
-                icon="calendar-outline"
-                label="Today's Treatments"
-                period="Scheduled today"
-                value={String(summary.todaysTreatments)}
+            <ReportDashboard
+              filtersActive={filtersActive}
+              onClearFilters={() => void resetFilters()}
+              summary={summary}
+            />
+            {appConfig.features.reportExports ? (
+              <ReportExportPanel
+                csvExporting={exporting}
+                disabled={exportDisabled}
+                onExportCsv={() => void exportReport()}
+                onExportPdf={() => void exportPdfReport()}
+                pdfExporting={pdfExporting}
               />
-              <MetricCard
-                backgroundColor={colors.tealSurface}
-                color={colors.teal}
-                icon="navigate-outline"
-                label="Total KM"
-                period="All travel entries"
-                value={summary.totalKm.toFixed(2)}
-              />
-              <MetricCard
-                backgroundColor={colors.purpleSurface}
-                color={colors.purple}
-                icon="receipt-outline"
-                label="Total Claims"
-                period="All claim records"
-                value={String(summary.totalClaims)}
-              />
-              <MetricCard
-                backgroundColor={colors.warningSurface}
-                color={colors.warning}
-                icon="time-outline"
-                label="Pending Claims"
-                period="Awaiting review"
-                value={String(summary.pendingClaims)}
-              />
-              <MetricCard
-                backgroundColor={colors.greenSurface}
-                color={colors.greenDark}
-                icon="checkmark-done-outline"
-                label="Completed Treatments"
-                period="All completed records"
-                value={String(summary.completedTreatments)}
-              />
-            </View>
+            ) : null}
           </>
         ) : (
           <View style={styles.stateContainer}>
@@ -1472,9 +1404,9 @@ const styles = StyleSheet.create({
     shadowRadius: shadows.radius.cardSoft,
   },
   filterHeader: {
-    alignItems: "flex-start",
+    alignItems: "center",
     flexDirection: "row",
-    marginBottom: spacing.xlPlus,
+    minHeight: 44,
   },
   filterHeaderIcon: {
     alignItems: "center",
@@ -1488,6 +1420,9 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: spacing.lg,
     paddingRight: spacing.md,
+  },
+  filterBody: {
+    marginTop: spacing.xlPlus,
   },
   filterTitle: {
     color: colors.textPrimary,
@@ -1610,30 +1545,6 @@ const styles = StyleSheet.create({
     fontSize: typography.size.smallLarge,
     fontWeight: typography.weight.extrabold,
   },
-  exportActions: {
-    flexDirection: "row",
-    gap: spacing.mdPlus,
-    marginTop: spacing.lg,
-  },
-  exportButton: {
-    alignItems: "center",
-    backgroundColor: colors.primaryDark,
-    borderRadius: radius.control,
-    flex: 1,
-    flexDirection: "row",
-    gap: spacing.md,
-    justifyContent: "center",
-    minHeight: 48,
-    paddingHorizontal: spacing.mdPlus,
-  },
-  pdfExportButton: {
-    backgroundColor: colors.teal,
-  },
-  exportButtonText: {
-    color: colors.surface,
-    fontSize: typography.size.smallLarge,
-    fontWeight: typography.weight.extrabold,
-  },
   disabledButton: {
     opacity: 0.6,
   },
@@ -1649,85 +1560,6 @@ const styles = StyleSheet.create({
     fontSize: typography.size.bodySmall,
     marginTop: spacing.s13,
     textAlign: "center",
-  },
-  sectionHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: spacing.lg,
-    marginTop: spacing.s26,
-  },
-  sectionTitle: {
-    color: colors.textPrimary,
-    fontSize: typography.size.titleSmall,
-    fontWeight: typography.weight.extrabold,
-  },
-  liveBadge: {
-    alignItems: "center",
-    backgroundColor: colors.primarySurface,
-    borderRadius: radius.control,
-    flexDirection: "row",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.s9,
-    paddingVertical: spacing.sm,
-  },
-  liveDot: {
-    backgroundColor: colors.green,
-    borderRadius: radius.sm,
-    height: 7,
-    width: 7,
-  },
-  liveText: {
-    color: colors.primaryDark,
-    fontSize: typography.size.caption,
-    fontWeight: typography.weight.extrabold,
-    textTransform: "uppercase",
-  },
-  metricsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.lg,
-  },
-  metricCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.borderMuted,
-    borderRadius: radius.control,
-    borderWidth: 1,
-    flexBasis: "47%",
-    flexGrow: 1,
-    minHeight: 166,
-    padding: spacing.s15,
-    elevation: shadows.elevation.card,
-    shadowColor: shadows.color,
-    shadowOffset: shadows.offset.y2,
-    shadowOpacity: shadows.opacity.mediumSoft,
-    shadowRadius: shadows.radius.cardSoft,
-  },
-  metricIcon: {
-    alignItems: "center",
-    borderRadius: radius.control,
-    height: 40,
-    justifyContent: "center",
-    width: 40,
-  },
-  metricValue: {
-    color: colors.textPrimary,
-    fontSize: typography.size.size27,
-    fontWeight: typography.weight.extrabold,
-    marginTop: spacing.lgPlus,
-  },
-  metricLabel: {
-    color: colors.textSecondary,
-    fontSize: typography.size.smallLarge,
-    fontWeight: typography.weight.extrabold,
-    lineHeight: typography.lineHeight.body,
-    marginTop: spacing.s5,
-  },
-  metricPeriod: {
-    color: colors.textSubtle,
-    fontSize: typography.size.caption,
-    fontWeight: typography.weight.semibold,
-    marginTop: spacing.xs,
   },
   errorCard: {
     alignItems: "center",

@@ -5,9 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -17,6 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { FormScrollView } from "../../src/components/layout/FormScrollView";
 import {
   getTherapistById,
   TherapistServiceError,
@@ -231,10 +229,7 @@ export default function TherapistEditScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={styles.safeArea}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.flex}
-      >
+      <View style={styles.flex}>
         <View style={styles.header}>
           <TouchableOpacity
             accessibilityLabel="Cancel therapist editing"
@@ -256,9 +251,8 @@ export default function TherapistEditScreen() {
           </View>
         </View>
 
-        <ScrollView
+        <FormScrollView
           contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.profileCard}>
@@ -400,8 +394,8 @@ export default function TherapistEditScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
+      </View>
     </SafeAreaView>
   );
 }

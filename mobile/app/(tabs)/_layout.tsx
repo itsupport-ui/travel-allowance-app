@@ -173,6 +173,7 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        tabBarHideOnKeyboard: true,
         sceneStyle: {
           backgroundColor: colors.background,
           paddingTop: insets.top,

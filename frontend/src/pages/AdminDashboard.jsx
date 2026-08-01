@@ -1,167 +1,145 @@
-import { useEffect, useState } from "react";
-import AdminLayout from "../layouts/AdminLayout";
-import { getAdminSummary } from "../services/adminDashboardService";
-import { getDashboardSummary } from "../services/scheduleService";
-import toast from "react-hot-toast";
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Link } from "react-router-dom"
+import toast from "react-hot-toast"
+import AdminLayout from "../layouts/AdminLayout"
+import PageState from "../components/ui/PageState"
+import { getAdminSummary } from "../services/adminDashboardService"
+import { getDashboardSummary } from "../services/scheduleService"
+
+const toneClasses = {
+  blue: "border-blue-200 bg-blue-50 text-blue-800",
+  green: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  rose: "border-rose-200 bg-rose-50 text-rose-800",
+  slate: "border-slate-200 bg-slate-100 text-slate-800",
+  amber: "border-amber-200 bg-amber-50 text-amber-800",
+  violet: "border-violet-200 bg-violet-50 text-violet-800",
+}
 
 function AdminDashboard() {
-  // Clear operational metrics state initialization
-  const [summary, setSummary] = useState(null);
-  const [dashboard, setDashboard] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [summary, setSummary] = useState(null)
+  const [dashboard, setDashboard] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+
+  const loadDashboard = useCallback(async () => {
+    setLoading(true)
+    setError("")
+    try {
+      const token = localStorage.getItem("token")
+      const [adminSummary, scheduleSummary] = await Promise.all([
+        getAdminSummary(token),
+        getDashboardSummary(token),
+      ])
+      setSummary(adminSummary)
+      setDashboard(scheduleSummary)
+    } catch {
+      setError("Failed to load dashboard metrics")
+      toast.error("Failed to load dashboard metrics")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    // Fire both async calls concurrently to reduce load latency
-    Promise.all([fetchSummary(), fetchDashboard()])
-      .finally(() => setIsLoading(false));
-  }, []);
+    // Load the dashboard aggregates on entry.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadDashboard()
+  }, [loadDashboard])
 
-  const fetchSummary = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const data = await getAdminSummary(token);
-      setSummary(data);
-    } catch {
-      toast.error("Failed to load admin summary statistics");
-    }
-  };
-
-  const fetchDashboard = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const data = await getDashboardSummary(token);
-      setDashboard(data);
-    } catch {
-      toast.error("Failed to load schedule overview metrics");
-    }
-  };
+  const metrics = useMemo(
+    () => [
+      {
+        label: "Today's schedules",
+        value: dashboard?.today_scheduled || 0,
+        route: "/admin/schedules?view=today",
+        tone: "blue",
+      },
+      {
+        label: "Completed treatments",
+        value: dashboard?.completed || 0,
+        route: "/admin/schedules?view=completed",
+        tone: "green",
+      },
+      {
+        label: "Missed schedules",
+        value: dashboard?.missed || 0,
+        route: "/admin/schedule/missed",
+        tone: "rose",
+      },
+      {
+        label: "Cancelled",
+        value: dashboard?.cancelled || 0,
+        route: "/admin/schedules?view=cancelled",
+        tone: "slate",
+      },
+      {
+        label: "Pending claims",
+        value: summary?.pending_claims || 0,
+        route: "/admin/claims?status=pending",
+        tone: "amber",
+      },
+      {
+        label: "Approved claims",
+        value: summary?.approved_claims || 0,
+        route: "/admin/claims?status=approved",
+        tone: "green",
+      },
+      {
+        label: "Active therapists",
+        value: summary?.total_therapists || 0,
+        route: "/admin/staff",
+        tone: "blue",
+      },
+      {
+        label: "Today's claims",
+        value: summary?.todays_claims || 0,
+        route: "/admin/claims",
+        tone: "violet",
+      },
+    ],
+    [dashboard, summary],
+  )
 
   return (
     <AdminLayout>
-      {/* px-3 sm:px-6 isolates the view space safely from hardware bezel edges */}
-      <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 py-4">
-        
-        {/* Page Context Branding Header */}
-        <div className="mb-6 sm:mb-8 border-b border-gray-100 pb-4">
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-800 tracking-tight">
+      <div className="mx-auto w-full max-w-7xl">
+        <header className="mb-6 border-b border-slate-200 pb-4">
+          <h1 className="text-2xl font-black text-slate-900 sm:text-3xl">
             Admin Dashboard
           </h1>
-          <p className="text-xs sm:text-sm text-gray-400 mt-1 font-medium">
-            Welcome back 🚀 Review corporate clinical performance and logistics claims today.
+          <p className="mt-1 text-sm text-slate-500">
+            Review clinical workload, staffing, and reimbursement activity.
           </p>
-        </div>
+        </header>
 
-        {!isLoading && (
-          <div className="space-y-8">
-            
-            {/* SECTION 1: SYSTEM OPERATION METRICS (High Contrast Colored Blocks) */}
-            <div>
-              <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3.5 px-1">
-                Clinical Workflow Overview
-              </h2>
-              {/* grid-cols-2 splits data onto a highly clean 2x2 thumb-grid layout over mobile glass, expanding to columns on screens */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
-                
-                {/* Today's Scheduled */}
-                <div className="bg-blue-600 text-white rounded-2xl p-4 sm:p-5 shadow-sm shadow-blue-600/10 flex flex-col justify-between min-h-[100px] sm:min-h-[120px]">
-                  <p className="text-xs sm:text-sm font-medium text-blue-100 uppercase tracking-wider">
-                    Today's Scheduled
-                  </p>
-                  <h3 className="text-2xl sm:text-4xl font-black mt-2">
-                    {dashboard?.today_scheduled || 0}
-                  </h3>
+        <PageState loading={loading} error={error} onRetry={loadDashboard} />
+
+        {!loading && !error && (
+          <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {metrics.map((metric) => (
+              <Link
+                key={metric.label}
+                to={metric.route}
+                className={`group min-h-28 rounded-lg border p-4 transition hover:-translate-y-0.5 hover:shadow-md sm:p-5 ${
+                  toneClasses[metric.tone]
+                }`}
+              >
+                <p className="text-[10px] font-bold uppercase tracking-wide opacity-70 sm:text-xs">
+                  {metric.label}
+                </p>
+                <div className="mt-4 flex items-end justify-between">
+                  <p className="text-3xl font-black sm:text-4xl">{metric.value}</p>
+                  <span className="text-xs font-bold opacity-0 transition group-hover:opacity-70">
+                    View
+                  </span>
                 </div>
-
-                {/* Completed */}
-                <div className="bg-emerald-600 text-white rounded-2xl p-4 sm:p-5 shadow-sm shadow-emerald-600/10 flex flex-col justify-between min-h-[100px] sm:min-h-[120px]">
-                  <p className="text-xs sm:text-sm font-medium text-emerald-100 uppercase tracking-wider">
-                    Completed Today
-                  </p>
-                  <h3 className="text-2xl sm:text-4xl font-black mt-2">
-                    {dashboard?.completed || 0}
-                  </h3>
-                </div>
-
-                {/* Missed */}
-                <div className="bg-rose-600 text-white rounded-2xl p-4 sm:p-5 shadow-sm shadow-rose-600/10 flex flex-col justify-between min-h-[100px] sm:min-h-[120px]">
-                  <p className="text-xs sm:text-sm font-medium text-rose-100 uppercase tracking-wider">
-                    Missed Tasks
-                  </p>
-                  <h3 className="text-2xl sm:text-4xl font-black mt-2">
-                    {dashboard?.missed || 0}
-                  </h3>
-                </div>
-
-                {/* Cancelled */}
-                <div className="bg-gray-700 text-white rounded-2xl p-4 sm:p-5 shadow-sm shadow-gray-700/10 flex flex-col justify-between min-h-[100px] sm:min-h-[120px]">
-                  <p className="text-xs sm:text-sm font-medium text-gray-300 uppercase tracking-wider">
-                    Cancelled Orders
-                  </p>
-                  <h3 className="text-2xl sm:text-4xl font-black mt-2">
-                    {dashboard?.cancelled || 0}
-                  </h3>
-                </div>
-
-              </div>
-            </div>
-
-            {/* SECTION 2: LOGISTICS & TRAVEL CLAIMS (Clean Minimalist Panels) */}
-            {summary && (
-              <div>
-                <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3.5 px-1">
-                  Financial & Resource Accounting
-                </h2>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
-                  
-                  {/* Pending Claims */}
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 flex flex-col justify-between min-h-[100px] sm:min-h-[120px] transition-all hover:shadow-md">
-                    <h3 className="text-xs sm:text-sm font-semibold text-gray-400 uppercase tracking-wider">
-                      Pending Claims
-                    </h3>
-                    <p className="text-2xl sm:text-4xl font-black text-amber-500 mt-2">
-                      {summary.pending_claims}
-                    </p>
-                  </div>
-
-                  {/* Approved Claims */}
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 flex flex-col justify-between min-h-[100px] sm:min-h-[120px] transition-all hover:shadow-md">
-                    <h3 className="text-xs sm:text-sm font-semibold text-gray-400 uppercase tracking-wider">
-                      Approved Claims
-                    </h3>
-                    <p className="text-2xl sm:text-4xl font-black text-green-600 mt-2">
-                      {summary.approved_claims}
-                    </p>
-                  </div>
-
-                  {/* Total Therapists */}
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 flex flex-col justify-between min-h-[100px] sm:min-h-[120px] transition-all hover:shadow-md">
-                    <h3 className="text-xs sm:text-sm font-semibold text-gray-400 uppercase tracking-wider">
-                      Active Staff
-                    </h3>
-                    <p className="text-2xl sm:text-4xl font-black text-blue-600 mt-2">
-                      {summary.total_therapists}
-                    </p>
-                  </div>
-
-                  {/* Today's Claims */}
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 flex flex-col justify-between min-h-[100px] sm:min-h-[120px] transition-all hover:shadow-md">
-                    <h3 className="text-xs sm:text-sm font-semibold text-gray-400 uppercase tracking-wider">
-                      Today's Claims
-                    </h3>
-                    <p className="text-2xl sm:text-4xl font-black text-purple-600 mt-2">
-                      {summary.todays_claims}
-                    </p>
-                  </div>
-
-                </div>
-              </div>
-            )}
-
-          </div>
+              </Link>
+            ))}
+          </section>
         )}
       </div>
     </AdminLayout>
-  );
+  )
 }
 
-export default AdminDashboard;
+export default AdminDashboard

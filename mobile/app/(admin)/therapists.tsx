@@ -389,6 +389,7 @@ export default function AdminDirectoryScreen() {
         initialNumToRender={8}
         ItemSeparatorComponent={ListSeparator}
         keyExtractor={keyExtractor}
+        keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={listHeader}
         refreshControl={

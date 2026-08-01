@@ -5,9 +5,6 @@ import { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -15,6 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { FormScrollView } from "../../src/components/layout/FormScrollView";
 import {
   DoctorBackHeader,
   DoctorChoiceChips,
@@ -183,13 +181,9 @@ export default function CompleteDoctorConsultationScreen() {
           title="Consultation not editable"
         />
       ) : consultation ? (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.flex}
-        >
-          <ScrollView
+        <View style={styles.flex}>
+          <FormScrollView
             contentContainerStyle={styles.content}
-            keyboardShouldPersistTaps="handled"
           >
             <View style={styles.contextCard}>
               <Text style={styles.patientName}>
@@ -273,8 +267,8 @@ export default function CompleteDoctorConsultationScreen() {
                   : "Complete Consultation"}
               </Text>
             </TouchableOpacity>
-          </ScrollView>
-        </KeyboardAvoidingView>
+          </FormScrollView>
+        </View>
       ) : null}
     </SafeAreaView>
   );

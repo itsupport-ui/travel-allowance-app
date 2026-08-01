@@ -33,6 +33,25 @@ export const queryKeys = {
     detail: (claimId: number) =>
       ["claims", "detail", claimId] as const,
   },
+  treatmentSessions: {
+    all: ["treatment-sessions"] as const,
+    detail: (
+      scheduleId: number,
+      latitude?: number,
+      longitude?: number
+    ) =>
+      [
+        "treatment-sessions",
+        scheduleId,
+        latitude ?? null,
+        longitude ?? null,
+      ] as const,
+  },
+  adminClaims: {
+    all: ["admin", "claims"] as const,
+    detail: (claimId: number) =>
+      ["admin", "claims", "detail", claimId] as const,
+  },
   doctor: {
     dashboard: {
       summary: ["doctor", "dashboard", "summary"] as const,
@@ -47,6 +66,28 @@ export const queryKeys = {
       dashboard: ["doctor", "visits", "dashboard"] as const,
       detail: (visitId: number) =>
         ["doctor", "visits", "detail", visitId] as const,
+      completedToday: [
+        "doctor",
+        "visits",
+        "completed-today",
+      ] as const,
+      session: (
+        visitId: number,
+        latitude?: number,
+        longitude?: number
+      ) =>
+        [
+          "doctor",
+          "visits",
+          "session",
+          visitId,
+          latitude ?? null,
+          longitude ?? null,
+        ] as const,
+    },
+    workday: {
+      today: ["doctor", "workday", "today"] as const,
+      route: ["doctor", "workday", "route"] as const,
     },
     treatmentPlans: {
       all: ["doctor", "treatment-plans"] as const,

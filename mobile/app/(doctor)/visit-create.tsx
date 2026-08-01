@@ -5,9 +5,6 @@ import { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -16,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppDatePickerField } from "../../src/components/common/AppDatePickerField";
+import { FormScrollView } from "../../src/components/layout/FormScrollView";
 import {
   DoctorBackHeader,
   DoctorErrorState,
@@ -193,13 +191,9 @@ export default function CreateDoctorVisitScreen() {
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
       <DoctorBackHeader onBack={goBack} title="Create Visit" />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.flex}
-      >
-        <ScrollView
+      <View style={styles.flex}>
+        <FormScrollView
           contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
         >
           <View style={styles.notice}>
             <Text style={styles.noticeText}>
@@ -275,8 +269,8 @@ export default function CreateDoctorVisitScreen() {
               {mutation.isPending ? "Creating..." : "Create Visit"}
             </Text>
           </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
+      </View>
     </SafeAreaView>
   );
 }

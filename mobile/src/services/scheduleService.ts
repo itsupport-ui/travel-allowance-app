@@ -5,6 +5,7 @@ import type {
   CompleteTreatmentRequest,
   CreateScheduleRequest,
   ScheduleResponse,
+  TreatmentSession,
   UpdateScheduleRequest,
 } from "../types/schedule";
 import { getToken } from "../utils/storage";
@@ -261,6 +262,82 @@ export const completeTreatment = async (
         }
       ),
     "Unable to complete the treatment."
+  );
+};
+
+export const getTreatmentSession = async (
+  scheduleId: number,
+  coordinates?: { latitude: number; longitude: number }
+): Promise<TreatmentSession> =>
+  executeRequest(
+    async () =>
+      api.get<TreatmentSession>(
+        `/treatment-sessions/${scheduleId}`,
+        {
+          headers: await getAuthHeaders(),
+          params: coordinates,
+        }
+      ),
+    "Unable to verify treatment session eligibility."
+  );
+
+export const punchInTreatment = async (
+  scheduleId: number,
+  request: {
+    latitude: number;
+    longitude: number;
+    device_timestamp: string;
+  }
+): Promise<TreatmentSession> =>
+  executeRequest(
+    async () =>
+      api.post<TreatmentSession>(
+        `/treatment-sessions/${scheduleId}/punch-in`,
+        request,
+        {
+          headers: await getAuthHeaders(),
+        }
+      ),
+    "Unable to punch in to this treatment."
+  );
+
+export const punchOutTreatment = async (
+  scheduleId: number,
+  request: CompleteTreatmentRequest
+): Promise<ScheduleResponse> => {
+  const formData = new FormData();
+  formData.append("completion_notes", request.completion_notes);
+  formData.append("latitude", String(request.arrival_latitude));
+  formData.append("longitude", String(request.arrival_longitude));
+  formData.append("device_timestamp", new Date().toISOString());
+  formData.append("transport_mode", request.transport_mode);
+
+  if (
+    request.bill_amount !== null &&
+    request.bill_amount !== undefined
+  ) {
+    formData.append("bill_amount", String(request.bill_amount));
+  }
+
+  if (request.invoice_file) {
+    const nativeFile = {
+      name: request.invoice_file.name,
+      type: request.invoice_file.mimeType,
+      uri: request.invoice_file.uri,
+    };
+    formData.append("invoice_file", nativeFile as unknown as Blob);
+  }
+
+  return executeRequest(
+    async () =>
+      api.post<ScheduleResponse>(
+        `/treatment-sessions/${scheduleId}/punch-out`,
+        formData,
+        {
+          headers: await getAuthHeaders(),
+        }
+      ),
+    "Unable to punch out from this treatment."
   );
 };
 

@@ -323,7 +323,10 @@ def get_claim_details(
     ):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    travels = (db.query(TravelEntry).filter(TravelEntry.claim_id == claim.id).all()
+    travels = (db.query(TravelEntry)
+        .filter(TravelEntry.claim_id == claim.id)
+        .order_by(TravelEntry.travel_date.asc(), TravelEntry.id.asc())
+        .all()
     )
 
     return {
@@ -331,20 +334,26 @@ def get_claim_details(
         "claim": {
 
         "id": claim.id,
+        "therapist_id": claim.therapist_id,
         "therapist_name": claim.therapist.username,
+        "therapist_role": claim.therapist.role,
         "claim_date": claim.claim_date,
+        "submitted_at": claim.submitted_at,
         "total_km": claim.total_km,
         "per_km_rate": claim.per_km_rate,
         "travel_total": claim.travel_total,
         "daily_allowance": claim.daily_allowance,
         "grand_total": claim.grand_total,
         "status": claim.status,
+        "notes": claim.remarks,
+        "patient_count": len(travels),
     },
 
     "travels": [
         {
             "id": travel.id,
-            "travel_date": travel.travel_date,
+            "travel_date": travel.travel_date.date(),
+            "travel_timestamp": travel.travel_date,
             "patient_name": travel.patient_name,
             "transport_mode": travel.transport_mode,
             "bill_amount": travel.bill_amount,

@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { FormScrollView } from "../../src/components/layout/FormScrollView";
 import { queryClient } from "../../src/query/queryClient";
 import { queryKeys } from "../../src/query/queryKeys";
 import { login } from "../../src/services/authService";
@@ -109,47 +110,49 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.logo}>Travel Allowance</Text>
-      <Text style={styles.subtitle}>Sign in to continue</Text>
+      <FormScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.logo}>Travel Allowance</Text>
+        <Text style={styles.subtitle}>Sign in to continue</Text>
 
-      <TextInput
-        autoCapitalize="none"
-        autoComplete="email"
-        editable={!loading}
-        keyboardType="email-address"
-        placeholder="Email"
-        placeholderTextColor={colors.textSubtle}
-        style={styles.input}
-        value={email}
-        onChangeText={setEmail}
-      />
+        <TextInput
+          autoCapitalize="none"
+          autoComplete="email"
+          editable={!loading}
+          keyboardType="email-address"
+          placeholder="Email"
+          placeholderTextColor={colors.textSubtle}
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+        />
 
-      <TextInput
-        autoComplete="password"
-        editable={!loading}
-        placeholder="Password"
-        placeholderTextColor={colors.textSubtle}
-        secureTextEntry
-        style={styles.input}
-        value={password}
-        onChangeText={setPassword}
-        onSubmitEditing={handleLogin}
-      />
+        <TextInput
+          autoComplete="password"
+          editable={!loading}
+          placeholder="Password"
+          placeholderTextColor={colors.textSubtle}
+          secureTextEntry
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+          onSubmitEditing={handleLogin}
+        />
 
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityState={{ disabled: loading }}
-        activeOpacity={0.85}
-        disabled={loading}
-        style={[styles.button, loading && styles.buttonDisabled]}
-        onPress={handleLogin}
-      >
-        {loading ? (
-          <ActivityIndicator color={colors.surface} size="small" />
-        ) : (
-          <Text style={styles.buttonText}>Login</Text>
-        )}
-      </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityState={{ disabled: loading }}
+          activeOpacity={0.85}
+          disabled={loading}
+          style={[styles.button, loading && styles.buttonDisabled]}
+          onPress={handleLogin}
+        >
+          {loading ? (
+            <ActivityIndicator color={colors.surface} size="small" />
+          ) : (
+            <Text style={styles.buttonText}>Login</Text>
+          )}
+        </TouchableOpacity>
+      </FormScrollView>
     </SafeAreaView>
   );
 }
@@ -157,9 +160,12 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    flexGrow: 1,
     justifyContent: "center",
     padding: spacing.xxxl,
-    backgroundColor: colors.background,
   },
   logo: {
     color: PRIMARY,

@@ -1,19 +1,77 @@
 import { AxiosError } from "axios";
 
 import { api } from "../api/apiClient";
-import type { AdminDashboardSummary } from "../types/adminDashboard";
 import type {
   AdminReportFilters,
   AdminReportSummary,
+  ReportActivityType,
+  ReportClaimStatus,
+  ReportInsightDirection,
 } from "../types/adminReport";
 import type { ClaimResponse } from "../types/claim";
-import type { ScheduleResponse } from "../types/schedule";
-import type { TravelResponse } from "../types/travel";
 import { getToken } from "../utils/storage";
-import { getLocalApiDate } from "../utils/date";
 
 interface ApiErrorBody {
   detail?: unknown;
+}
+
+const isApiErrorBody = (value: unknown): value is ApiErrorBody =>
+  typeof value === "object" && value !== null && "detail" in value;
+
+interface AdminReportOverviewResponse {
+  generated_at: string;
+  period_label: string;
+  trend_period_label: string;
+  has_data: boolean;
+  kpis: {
+    todays_treatments: number;
+    completed_treatments: number;
+    cancelled_treatments: number;
+    patients_visited: number;
+    total_claims: number;
+    pending_claims: number;
+    approved_claims: number;
+    rejected_claims: number;
+    total_km: number;
+    total_travel_amount: number;
+    average_km_per_therapist: number;
+    active_therapists: number;
+    top_performing_therapist: string | null;
+  };
+  trends: {
+    date: string;
+    completed_treatments: number;
+    total_km: number;
+    travel_amount: number;
+  }[];
+  claims_by_status: {
+    status: Exclude<ReportClaimStatus, "all">;
+    count: number;
+  }[];
+  top_therapists: {
+    therapist_id: number;
+    therapist_name: string;
+    completed_treatments: number;
+    total_km: number;
+    claims_submitted: number;
+  }[];
+  recent_activity: {
+    id: string;
+    activity_type: ReportActivityType;
+    therapist_name: string;
+    occurred_at: string;
+    status: string;
+    amount: number | null;
+    description: string;
+  }[];
+  insights: {
+    key: string;
+    title: string;
+    value: string;
+    detail: string;
+    direction: ReportInsightDirection;
+    change_percent: number | null;
+  }[];
 }
 
 export class AdminReportServiceError extends Error {
@@ -53,7 +111,9 @@ const normalizeError = (error: unknown): AdminReportServiceError => {
       );
     }
 
-    const body = error.response.data as ApiErrorBody | undefined;
+    const body = isApiErrorBody(error.response.data)
+      ? error.response.data
+      : undefined;
 
     if (error.response.status === 401) {
       return new AdminReportServiceError(
@@ -89,10 +149,6 @@ const normalizeError = (error: unknown): AdminReportServiceError => {
   return new AdminReportServiceError("Unable to load report metrics.");
 };
 
-const getLocalDateKey = (): string => {
-  return getLocalApiDate();
-};
-
 const dateMatchesFilters = (
   date: string,
   filters: AdminReportFilters
@@ -120,146 +176,91 @@ const filterClaims = (
     return matchesDate && matchesStatus && matchesTherapist;
   });
 
-const scheduleMatchesDateRange = (
-  schedule: ScheduleResponse,
-  filters: AdminReportFilters
-): boolean => {
-  if (!filters.fromDate && !filters.toDate) {
-    return true;
-  }
+const normalizeOverview = (
+  response: AdminReportOverviewResponse
+): AdminReportSummary => ({
+  todaysTreatments: response.kpis.todays_treatments,
+  completedTreatments: response.kpis.completed_treatments,
+  cancelledTreatments: response.kpis.cancelled_treatments,
+  patientsVisited: response.kpis.patients_visited,
+  totalClaims: response.kpis.total_claims,
+  pendingClaims: response.kpis.pending_claims,
+  approvedClaims: response.kpis.approved_claims,
+  rejectedClaims: response.kpis.rejected_claims,
+  totalKm: response.kpis.total_km,
+  totalTravelAmount: response.kpis.total_travel_amount,
+  averageKmPerTherapist:
+    response.kpis.average_km_per_therapist,
+  activeTherapists: response.kpis.active_therapists,
+  topPerformingTherapist:
+    response.kpis.top_performing_therapist,
+  generatedAt: response.generated_at,
+  periodLabel: response.period_label,
+  trendPeriodLabel: response.trend_period_label,
+  hasData: response.has_data,
+  trends: response.trends.map((point) => ({
+    date: point.date,
+    completedTreatments: point.completed_treatments,
+    totalKm: point.total_km,
+    travelAmount: point.travel_amount,
+  })),
+  claimsByStatus: response.claims_by_status,
+  topTherapists: response.top_therapists.map((therapist) => ({
+    therapistId: therapist.therapist_id,
+    therapistName: therapist.therapist_name,
+    completedTreatments: therapist.completed_treatments,
+    totalKm: therapist.total_km,
+    claimsSubmitted: therapist.claims_submitted,
+  })),
+  recentActivity: response.recent_activity.map((activity) => ({
+    id: activity.id,
+    activityType: activity.activity_type,
+    therapistName: activity.therapist_name,
+    occurredAt: activity.occurred_at,
+    status: activity.status,
+    amount: activity.amount,
+    description: activity.description,
+  })),
+  insights: response.insights.map((insight) => ({
+    key: insight.key,
+    title: insight.title,
+    value: insight.value,
+    detail: insight.detail,
+    direction: insight.direction,
+    changePercent: insight.change_percent,
+  })),
+});
 
-  if (schedule.schedule_type === "one_time") {
-    return Boolean(
-      schedule.treatment_date &&
-        dateMatchesFilters(schedule.treatment_date, filters)
+export const getAdminReportSummary = async (
+  filters: AdminReportFilters = {
+    fromDate: null,
+    status: "all",
+    therapistId: null,
+    therapistName: null,
+    toDate: null,
+  }
+): Promise<AdminReportSummary> => {
+  try {
+    const headers = await getAuthHeaders();
+    const response = await api.get<AdminReportOverviewResponse>(
+      "/admin-reports/overview",
+      {
+        headers,
+        params: {
+          from_date: filters.fromDate ?? undefined,
+          status:
+            filters.status === "all" ? undefined : filters.status,
+          therapist_id: filters.therapistId ?? undefined,
+          to_date: filters.toDate ?? undefined,
+        },
+      }
     );
-  }
 
-  if (!schedule.start_date || !schedule.end_date) {
-    return false;
+    return normalizeOverview(response.data);
+  } catch (error) {
+    throw normalizeError(error);
   }
-
-  return (
-    (!filters.toDate || schedule.start_date <= filters.toDate) &&
-    (!filters.fromDate || schedule.end_date >= filters.fromDate)
-  );
 };
-
-const scheduleOccursOn = (
-  schedule: ScheduleResponse,
-  date: string
-): boolean => {
-  if (schedule.schedule_type === "one_time") {
-    return schedule.treatment_date === date;
-  }
-
-  return Boolean(
-    schedule.start_date &&
-      schedule.end_date &&
-      schedule.start_date <= date &&
-      schedule.end_date >= date
-  );
-};
-
-export const getAdminReportSummary =
-  async (
-    filters: AdminReportFilters = {
-      fromDate: null,
-      status: "all",
-      therapistId: null,
-      therapistName: null,
-      toDate: null,
-    }
-  ): Promise<AdminReportSummary> => {
-    try {
-      const headers = await getAuthHeaders();
-      const [
-        dashboardResponse,
-        travelsResponse,
-        claimsResponse,
-        schedulesResponse,
-      ] = await Promise.all([
-          api.get<AdminDashboardSummary>("/admin-dashboard/summary", {
-            headers,
-          }),
-          api.get<TravelResponse[]>("/travel/all", { headers }),
-          api.get<ClaimResponse[]>("/claims/all", { headers }),
-          api.get<ScheduleResponse[]>("/schedule/all", { headers }),
-        ]);
-
-      const filteredSchedules = schedulesResponse.data.filter(
-        (schedule) =>
-          (filters.therapistId === null ||
-            schedule.therapist_id === filters.therapistId) &&
-          scheduleMatchesDateRange(schedule, filters)
-      );
-      const schedulesById = new Map(
-        schedulesResponse.data.map((schedule) => [
-          schedule.id,
-          schedule,
-        ])
-      );
-      const filteredTravels = travelsResponse.data.filter((travel) => {
-        const matchesDate = dateMatchesFilters(
-          travel.travel_date,
-          filters
-        );
-
-        if (!matchesDate) {
-          return false;
-        }
-
-        if (filters.therapistId === null) {
-          return true;
-        }
-
-        if (travel.schedule_id === null) {
-          return false;
-        }
-
-        return (
-          schedulesById.get(travel.schedule_id)?.therapist_id ===
-          filters.therapistId
-        );
-      });
-      const filteredClaims = filterClaims(
-        claimsResponse.data,
-        filters
-      );
-      const totalKm = filteredTravels.reduce(
-        (total, travel) => total + travel.total_km,
-        0
-      );
-      const hasTreatmentFilters = Boolean(
-        filters.fromDate ||
-          filters.toDate ||
-          filters.therapistId !== null
-      );
-      const today = getLocalDateKey();
-
-      return {
-        todaysTreatments: hasTreatmentFilters
-          ? filteredSchedules.filter(
-              (schedule) =>
-                schedule.status === "scheduled" &&
-                scheduleOccursOn(schedule, today)
-            ).length
-          : dashboardResponse.data.todays_schedules,
-        totalKm,
-        totalClaims: filteredClaims.length,
-        pendingClaims: filteredClaims.filter(
-          (claim) => claim.status.toLocaleLowerCase() === "pending"
-        ).length,
-        completedTreatments: hasTreatmentFilters
-          ? filteredSchedules.filter(
-              (schedule) => schedule.status === "completed"
-            ).length
-          : dashboardResponse.data.completed_treatments,
-      };
-    } catch (error) {
-      throw normalizeError(error);
-    }
-  };
 
 export const getAdminReportClaims = async (
   filters: AdminReportFilters

@@ -78,7 +78,6 @@ class TreatmentPlanScheduleCreate(BaseModel):
     out_time: time
     priority: str
     instructions: str
-    transport_mode: str
 
     @model_validator(mode="after")
     def validate_session_date(self):

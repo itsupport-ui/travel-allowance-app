@@ -5,10 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -17,6 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { FormScrollView } from "../../src/components/layout/FormScrollView";
 import { queryClient } from "../../src/query/queryClient";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
 import { deactivatePushToken } from "../../src/services/notificationService";
@@ -225,13 +223,9 @@ export default function AdminSettingsScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={styles.safeArea}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.flex}
-      >
-        <ScrollView
+      <View style={styles.flex}>
+        <FormScrollView
           contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
               colors={[PRIMARY]}
@@ -418,8 +412,8 @@ export default function AdminSettingsScreen() {
               {loggingOut ? "Signing Out..." : "Log Out"}
             </Text>
           </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
+      </View>
     </SafeAreaView>
   );
 }

@@ -15,19 +15,24 @@ export const DEFAULT_SCHEDULE_INSTRUCTIONS =
 export const createInitialScheduleForm = (): ScheduleFormState => ({
   doctorId: null,
   endDate: null,
+  estimatedDurationMinutes: 60,
   inTime: null,
   instructions: DEFAULT_SCHEDULE_INSTRUCTIONS,
+  clinicalNotes: "",
   medicines: "",
   outTime: null,
   patientAddress: "",
   patientName: "",
+  patientPhone: "",
+  patientReferenceId: "",
+  precautions: "",
   priority: "normal",
   scheduleType: "one_time",
   startDate: null,
   therapistId: null,
   treatmentDate: null,
   treatmentName: "",
-  transportMode: "vehicle",
+  visitType: "home_visit",
 });
 
 export const startOfDay = (value: Date): Date =>
@@ -75,23 +80,37 @@ const parseScheduleTime = (value: string): Date | null => {
 
 export const scheduleResponseToForm = (
   schedule: ScheduleResponse
-): ScheduleFormState => ({
+): ScheduleFormState => {
+  const inTime = parseScheduleTime(schedule.in_time);
+  const outTime = parseScheduleTime(schedule.out_time);
+  const estimatedDurationMinutes =
+    inTime && outTime
+      ? Math.max(15, getMinutes(outTime) - getMinutes(inTime))
+      : 60;
+
+  return {
   doctorId: schedule.doctor_id,
   endDate: parseScheduleDate(schedule.end_date),
-  inTime: parseScheduleTime(schedule.in_time),
+  estimatedDurationMinutes,
+  inTime,
   instructions: schedule.instructions,
+  clinicalNotes: schedule.clinical_notes ?? "",
   medicines: schedule.medicines ?? "",
-  outTime: parseScheduleTime(schedule.out_time),
+  outTime,
   patientAddress: schedule.patient_address,
   patientName: schedule.patient_name,
+  patientPhone: schedule.patient_phone ?? "",
+  patientReferenceId: schedule.patient_reference_id ?? "",
+  precautions: schedule.precautions ?? "",
   priority: schedule.priority,
   scheduleType: schedule.schedule_type,
   startDate: parseScheduleDate(schedule.start_date),
   therapistId: schedule.therapist_id,
   treatmentDate: parseScheduleDate(schedule.treatment_date),
   treatmentName: schedule.treatment_name,
-  transportMode: schedule.transport_mode ?? "vehicle",
-});
+  visitType: schedule.visit_type,
+  };
+};
 
 const getMinutes = (value: Date): number =>
   value.getHours() * 60 + value.getMinutes();
@@ -113,6 +132,14 @@ export const validateScheduleForm = (
 
   if (!form.patientAddress.trim()) {
     errors.patientAddress = "Patient address is required.";
+  }
+
+  const normalizedPhone = form.patientPhone.replace(/\s/g, "");
+  if (
+    normalizedPhone &&
+    !/^[+]?[\d()-]{7,20}$/.test(normalizedPhone)
+  ) {
+    errors.patientPhone = "Enter a valid phone number.";
   }
 
   if (form.doctorId === null) {
@@ -204,10 +231,14 @@ export const buildCreateScheduleRequest = (
         : null,
     in_time: formatScheduleTime(form.inTime),
     instructions: form.instructions.trim(),
+    clinical_notes: form.clinicalNotes.trim() || null,
     medicines: form.medicines.trim() || null,
     out_time: formatScheduleTime(form.outTime),
     patient_address: form.patientAddress.trim(),
     patient_name: form.patientName.trim(),
+    patient_phone: form.patientPhone.trim() || null,
+    patient_reference_id: form.patientReferenceId.trim() || null,
+    precautions: form.precautions.trim() || null,
     priority: form.priority,
     schedule_type: form.scheduleType,
     start_date:
@@ -220,7 +251,7 @@ export const buildCreateScheduleRequest = (
         ? formatScheduleDate(form.treatmentDate)
         : null,
     treatment_name: form.treatmentName.trim(),
-    transport_mode: form.transportMode,
+    visit_type: form.visitType,
   };
 };
 

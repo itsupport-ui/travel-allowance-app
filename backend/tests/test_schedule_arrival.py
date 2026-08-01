@@ -53,14 +53,24 @@ class ScheduleArrivalApiTests(unittest.TestCase):
             is_active=True,
             base_location="Therapist origin",
         )
+        self.doctor_user = User(
+            username="Doctor User",
+            email="doctor-user@example.com",
+            password_hash="not-used",
+            role="doctor",
+            is_active=True,
+        )
+        self.db.add_all([self.admin, self.therapist, self.doctor_user])
+        self.db.flush()
         self.doctor = Doctor(
+            user_id=self.doctor_user.id,
             name="Doctor",
             specialization="General",
             phone="1234567890",
         )
         self.settings = Settings(per_km_rate=8, daily_allowance=150)
         self.db.add_all(
-            [self.admin, self.therapist, self.doctor, self.settings]
+            [self.doctor, self.settings]
         )
         self.db.commit()
 

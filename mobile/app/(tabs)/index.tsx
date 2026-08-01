@@ -6,7 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { router, type ErrorBoundaryProps, type Href } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -25,6 +25,7 @@ import { reverseGeocode } from "../../src/services/mapsService";
 import { getCurrentUser } from "../../src/services/userService";
 import type { TherapistDashboardSummary } from "../../src/types/dashboard";
 import {
+  endWorkday,
   getTodayWorkday,
   startWorkday,
   type TodayWorkdayResponse,
@@ -133,7 +134,7 @@ export function ErrorBoundary({
 const toStoredWorkday = (
   workday: TodayWorkdayResponse
 ): StoredWorkdayState | null => {
-  if (!workday.started || !workday.workday_id) {
+  if (!workday.started || !workday.workday_id || !workday.is_active) {
     return null;
   }
 
@@ -199,6 +200,8 @@ function MetricCard({ metric }: { metric: DashboardMetric }) {
 export default function DashboardScreen() {
   const queryClient = useQueryClient();
   const startingRef = useRef(false);
+  const endingRef = useRef(false);
+  const endPromptShownRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [cachedWorkday, setCachedWorkday] =
     useState<StoredWorkdayState | null>(null);
@@ -310,6 +313,145 @@ export default function DashboardScreen() {
     startMutation.mutate();
   };
 
+  const endMutation = useMutation({
+    mutationFn: async () => {
+      await requestLocationPermission();
+      const coordinates = await getCurrentLocation();
+      return endWorkday({
+        end_latitude: coordinates.latitude,
+        end_longitude: coordinates.longitude,
+        device_timestamp: new Date().toISOString(),
+      });
+    },
+    onSuccess: async (response) => {
+      await clearAuthSession();
+      queryClient.clear();
+      Alert.alert(
+        "Workday Ended",
+        [
+          `Duration: ${Math.floor(response.total_work_minutes / 60)}h ${
+            response.total_work_minutes % 60
+          }m`,
+          `Completed: ${response.completed_schedules_count}`,
+          `Pending: ${response.pending_schedules_count}`,
+          `Missed: ${response.missed_schedules_count}`,
+        ].join("\n"),
+        [
+          {
+            text: "OK",
+            onPress: () => router.replace("/(auth)/login"),
+          },
+        ]
+      );
+    },
+    onError: (error) => {
+      Alert.alert(
+        "Unable to End Workday",
+        getApiErrorMessage(error, "Unable to end your workday.")
+      );
+    },
+    onSettled: () => {
+      endingRef.current = false;
+    },
+  });
+  const endWorkdayPending = endMutation.isPending;
+  const mutateEndWorkday = endMutation.mutate;
+
+  const executeEndWorkday = useCallback(() => {
+    if (
+      endingRef.current ||
+      endWorkdayPending ||
+      !workdayQuery.data?.can_end_workday
+    ) {
+      return;
+    }
+
+    endingRef.current = true;
+    mutateEndWorkday();
+  }, [
+    endWorkdayPending,
+    mutateEndWorkday,
+    workdayQuery.data?.can_end_workday,
+  ]);
+
+  const confirmEndWorkday = useCallback(() => {
+    if (
+      endingRef.current ||
+      endWorkdayPending ||
+      !workdayQuery.data?.can_end_workday
+    ) {
+      return;
+    }
+
+    Alert.alert(
+      "End Workday",
+      "Your attendance will be closed and you will be logged out.",
+      [
+        { style: "cancel", text: "Cancel" },
+        {
+          style: "destructive",
+          text: "End Workday",
+          onPress: executeEndWorkday,
+        },
+      ]
+    );
+  }, [
+    endWorkdayPending,
+    executeEndWorkday,
+    workdayQuery.data?.can_end_workday,
+  ]);
+
+  useEffect(() => {
+    const workday = workdayQuery.data;
+    if (
+      !workday?.is_active ||
+      !workday.should_prompt_end ||
+      endPromptShownRef.current
+    ) {
+      return;
+    }
+
+    endPromptShownRef.current = true;
+    Alert.alert(
+      "Your workday has ended",
+      "Please end your workday.",
+      [
+        { style: "cancel", text: "Cancel" },
+        {
+          text: "End Workday",
+          onPress: executeEndWorkday,
+        },
+      ]
+    );
+  }, [
+    executeEndWorkday,
+    workdayQuery.data,
+    workdayQuery.data?.is_active,
+    workdayQuery.data?.should_prompt_end,
+  ]);
+
+  useEffect(() => {
+    const workday = workdayQuery.data;
+    if (
+      !workday?.is_active ||
+      !workday.auto_logout_enabled ||
+      !workday.should_prompt_end
+    ) {
+      return;
+    }
+    const timeout = setTimeout(() => {
+      executeEndWorkday();
+    }, workday.auto_logout_grace_minutes * 60_000);
+    return () => clearTimeout(timeout);
+  }, [
+    executeEndWorkday,
+    workdayQuery.data,
+    workdayQuery.data?.auto_logout_enabled,
+    workdayQuery.data?.auto_logout_grace_minutes,
+    workdayQuery.data?.is_active,
+    workdayQuery.data?.should_prompt_end,
+  ]);
+
   const handleRefresh = async () => {
     setRefreshing(true);
 
@@ -381,7 +523,10 @@ export default function DashboardScreen() {
 
   const summary = normalizeSummary(summaryQuery.data);
   const workdayStarted =
+    workdayQuery.data?.is_active ?? cachedWorkday !== null;
+  const hasWorkday =
     workdayQuery.data?.started ?? cachedWorkday !== null;
+  const workdayClosed = hasWorkday && !workdayStarted;
   const startedAt =
     workdayQuery.data?.started_at ??
     cachedWorkday?.startedAt ??
@@ -524,7 +669,7 @@ export default function DashboardScreen() {
           <View
             style={[
               styles.statusBadge,
-              workdayStarted
+              workdayStarted || workdayClosed
                 ? styles.startedBadge
                 : styles.notStartedBadge,
             ]}
@@ -532,12 +677,16 @@ export default function DashboardScreen() {
             <Text
               style={[
                 styles.statusText,
-                workdayStarted
+                workdayStarted || workdayClosed
                   ? styles.startedText
                   : styles.notStartedText,
               ]}
             >
-              {workdayStarted ? "Started" : "Not Started"}
+              {workdayClosed
+                ? "Ended"
+                : workdayStarted
+                  ? "Started"
+                  : "Not Started"}
             </Text>
           </View>
         </View>
@@ -549,6 +698,15 @@ export default function DashboardScreen() {
           </Text>
         </View>
 
+        {workdayQuery.data?.ended_at ? (
+          <View style={styles.workdayDetails}>
+            <Text style={styles.detailLabel}>Ended At (IST)</Text>
+            <Text style={styles.detailValue}>
+              {formatStartedAt(workdayQuery.data.ended_at)}
+            </Text>
+          </View>
+        ) : null}
+
         {workdayQuery.error ? (
           <Text style={styles.workdayWarning}>
             Showing the last saved workday status. Pull to refresh when
@@ -559,13 +717,13 @@ export default function DashboardScreen() {
         <TouchableOpacity
           accessibilityRole="button"
           accessibilityState={{
-            disabled: workdayStarted || startMutation.isPending,
+            disabled: hasWorkday || startMutation.isPending,
           }}
           activeOpacity={0.85}
-          disabled={workdayStarted || startMutation.isPending}
+          disabled={hasWorkday || startMutation.isPending}
           style={[
             styles.startButton,
-            (workdayStarted || startMutation.isPending) &&
+            (hasWorkday || startMutation.isPending) &&
               styles.disabledButton,
           ]}
           onPress={handleStartDay}
@@ -575,18 +733,53 @@ export default function DashboardScreen() {
           ) : (
             <Ionicons
               color={colors.surface}
-              name={workdayStarted ? "checkmark-circle" : "play-circle"}
+              name={hasWorkday ? "checkmark-circle" : "play-circle"}
               size={21}
             />
           )}
           <Text style={styles.startButtonText}>
             {startMutation.isPending
               ? "Starting..."
-              : workdayStarted
-                ? "Workday Started"
+              : hasWorkday
+                ? workdayClosed
+                  ? "Workday Ended"
+                  : "Workday Started"
                 : "Start Day"}
           </Text>
         </TouchableOpacity>
+
+        {workdayStarted && workdayQuery.data?.can_end_workday ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            activeOpacity={0.85}
+            disabled={endWorkdayPending}
+            style={[
+              styles.endButton,
+              endWorkdayPending && styles.disabledButton,
+            ]}
+            onPress={confirmEndWorkday}
+          >
+            {endWorkdayPending ? (
+              <ActivityIndicator color={colors.surface} size="small" />
+            ) : (
+              <Ionicons
+                color={colors.surface}
+                name="stop-circle-outline"
+                size={21}
+              />
+            )}
+            <Text style={styles.startButtonText}>
+              {endWorkdayPending ? "Ending..." : "End Workday"}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {workdayStarted && !workdayQuery.data?.can_end_workday ? (
+          <Text style={styles.workdayPolicy}>
+            End Workday becomes available at{" "}
+            {workdayQuery.data?.workday_end_time ?? "18:00"}.
+          </Text>
+        ) : null}
       </View>
     </ScrollView>
   );
@@ -862,6 +1055,24 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
     minHeight: 52,
     paddingHorizontal: spacing.xl,
+  },
+  endButton: {
+    alignItems: "center",
+    backgroundColor: colors.danger,
+    borderRadius: radius.control,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "center",
+    marginTop: spacing.lg,
+    minHeight: 52,
+    paddingHorizontal: spacing.xl,
+  },
+  workdayPolicy: {
+    color: colors.textMuted,
+    fontSize: typography.size.smallLarge,
+    lineHeight: typography.lineHeight.s19,
+    marginTop: spacing.lg,
+    textAlign: "center",
   },
   disabledButton: {
     opacity: 0.65,

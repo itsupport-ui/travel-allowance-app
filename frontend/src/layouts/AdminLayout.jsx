@@ -5,15 +5,14 @@ import {
   FaCog,
   FaClipboardList,
   FaSignOutAlt,
-  FaUserPlus,
-  FaHistory,
   FaBars,
   FaTimes,
   FaPlus,
-  FaTasks,
   FaPhoneAlt,
   FaFileMedical,
-  FaFileInvoiceDollar
+  FaFileInvoiceDollar,
+  FaChartBar,
+  FaUsers,
 } from "react-icons/fa";
 import {
   hasAnyPermission,
@@ -109,15 +108,21 @@ function AdminLayout({ children }) {
             </Link>
           )}
 
-          {hasPermission("claims.view") && (
-            <Link to="/admin/pending-claims" onClick={closeSidebar} className={getNavLinkClass("/admin/pending-claims")}>
-              <FaClipboardList className="text-base" /> Pending Claims
+          {canManageUsers && (
+            <Link to="/admin/staff" onClick={closeSidebar} className={getNavLinkClass("/admin/staff")}>
+              <FaUsers className="text-base" /> Clinical Staff
             </Link>
           )}
 
           {hasPermission("claims.view") && (
-            <Link to="/admin/history" onClick={closeSidebar} className={getNavLinkClass("/admin/history")}>
-              <FaHistory className="text-base" /> History
+            <Link to="/admin/claims" onClick={closeSidebar} className={getNavLinkClass("/admin/claims")}>
+              <FaClipboardList className="text-base" /> Claims
+            </Link>
+          )}
+
+          {hasPermission("dashboards.view") && (
+            <Link to="/admin/reports" onClick={closeSidebar} className={getNavLinkClass("/admin/reports")}>
+              <FaChartBar className="text-base" /> Reports
             </Link>
           )}
 
@@ -148,8 +153,8 @@ function AdminLayout({ children }) {
           )}
 
           {hasPermission("dashboards.view") && (
-            <Link to="/admin/schedule/today" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/today")}>
-              <FaClipboardList className="text-base" /> Today's Schedule
+            <Link to="/admin/schedules" onClick={closeSidebar} className={getNavLinkClass("/admin/schedules")}>
+              <FaClipboardList className="text-base" /> Schedule Operations
             </Link>
           )}
 
@@ -159,22 +164,6 @@ function AdminLayout({ children }) {
             </Link>
           )}
 
-          {hasPermission("dashboards.view") && (
-            <>
-              <Link to="/admin/schedule/pending" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/pending")}>
-                <FaTasks className="text-base" /> Pending Schedules
-              </Link>
-
-              <Link to="/admin/schedule/completed" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/completed")}>
-                <FaTasks className="text-base" /> Completed Schedules
-              </Link>
-
-              <Link to="/admin/schedule/missed" onClick={closeSidebar} className={getNavLinkClass("/admin/schedule/missed")}>
-                <FaTasks className="text-base" /> Missed Schedules
-              </Link>
-            </>
-          )}
-          
           {canManageUsers && (
             <>
               <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Management</div>
@@ -183,9 +172,6 @@ function AdminLayout({ children }) {
                 <FaCog className="text-base" /> Settings
               </Link>
 
-              <Link to="/admin/register" onClick={closeSidebar} className={getNavLinkClass("/admin/register")}>
-                <FaUserPlus className="text-base" /> Add User
-              </Link>
             </>
           )}
         </nav>

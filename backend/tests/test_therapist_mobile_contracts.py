@@ -49,7 +49,13 @@ class TherapistMobileContractTests(unittest.TestCase):
             "admin@example.com",
             "admin",
         )
+        self.doctor_user = self.create_user(
+            "Doctor User",
+            "doctor-user@example.com",
+            "doctor",
+        )
         self.doctor = Doctor(
+            user_id=self.doctor_user.id,
             name="Doctor One",
             specialization="General",
             phone="1234567890",

@@ -20,6 +20,8 @@ import type {
   DoctorExpense,
   DoctorProofAsset,
   DoctorVisit,
+  DoctorVisitExpenseOption,
+  DoctorVisitSession,
   DoctorVisitDashboard,
   SaveDoctorExpenseRequest,
   TreatmentPlan,
@@ -228,6 +230,70 @@ export const updateDoctorVisitStatus = async (
   return response.data;
 };
 
+export const getDoctorVisitSession = async (
+  visitId: number,
+  latitude?: number,
+  longitude?: number
+): Promise<DoctorVisitSession> => {
+  const response = await api.get<DoctorVisitSession>(
+    `/doctor-visits/${visitId}/session`,
+    {
+      headers: await getAuthHeaders(),
+      params:
+        latitude === undefined || longitude === undefined
+          ? undefined
+          : { latitude, longitude },
+    }
+  );
+  return response.data;
+};
+
+export const punchInDoctorVisit = async (
+  visitId: number,
+  latitude: number,
+  longitude: number
+): Promise<DoctorVisitSession> => {
+  const response = await api.post<DoctorVisitSession>(
+    `/doctor-visits/${visitId}/punch-in`,
+    {
+      device_timestamp: new Date().toISOString(),
+      latitude,
+      longitude,
+    },
+    { headers: await getAuthHeaders() }
+  );
+  return response.data;
+};
+
+export const punchOutDoctorVisit = async (
+  visitId: number,
+  request: {
+    latitude: number;
+    longitude: number;
+    remarks: string | null;
+  }
+): Promise<DoctorVisitSession> => {
+  const response = await api.post<DoctorVisitSession>(
+    `/doctor-visits/${visitId}/punch-out`,
+    {
+      ...request,
+      device_timestamp: new Date().toISOString(),
+    },
+    { headers: await getAuthHeaders() }
+  );
+  return response.data;
+};
+
+export const getTodayCompletedDoctorVisits = async (): Promise<
+  DoctorVisitExpenseOption[]
+> => {
+  const response = await api.get<DoctorVisitExpenseOption[]>(
+    "/doctor-visits/today/completed",
+    { headers: await getAuthHeaders() }
+  );
+  return response.data;
+};
+
 export const createTreatmentPlan = async (
   request: CreateTreatmentPlanRequest
 ): Promise<TreatmentPlan> => {
@@ -329,8 +395,15 @@ const buildExpenseFormData = (
 ): FormData => {
   const formData = new FormData();
   formData.append("expense_date", request.expense_date);
-  formData.append("from_location", request.from_location);
-  formData.append("to_location", request.to_location);
+  if (request.visit_id !== null) {
+    formData.append("visit_id", String(request.visit_id));
+  }
+  if (request.from_location) {
+    formData.append("from_location", request.from_location);
+  }
+  if (request.to_location) {
+    formData.append("to_location", request.to_location);
+  }
   formData.append("transport_mode", request.transport_mode);
   formData.append("fare", String(request.fare));
   formData.append("remarks", request.remarks);

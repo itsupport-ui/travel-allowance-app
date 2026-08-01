@@ -3,6 +3,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -27,6 +28,8 @@ class DoctorVisit(Base):
     patient_name = Column(String(255), nullable=False)
     patient_phone = Column(String(20), nullable=False)
     patient_address = Column(String(255), nullable=True)
+    patient_latitude = Column(Float, nullable=True)
+    patient_longitude = Column(Float, nullable=True)
     doctor_id = Column(Integer, ForeignKey('doctors.id'), nullable=False)
     visit_date = Column(Date, nullable=False)
     visit_time = Column(Time, nullable=False)
@@ -37,6 +40,20 @@ class DoctorVisit(Base):
     consultation_id = Column(Integer, ForeignKey('doctor_consultations.id'), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
+    punch_in_time = Column(DateTime(timezone=True), nullable=True)
+    punch_out_time = Column(DateTime(timezone=True), nullable=True)
+    punch_in_latitude = Column(Float, nullable=True)
+    punch_in_longitude = Column(Float, nullable=True)
+    punch_out_latitude = Column(Float, nullable=True)
+    punch_out_longitude = Column(Float, nullable=True)
+    treatment_duration = Column(Integer, nullable=True)
+    session_status = Column(
+        String,
+        nullable=False,
+        default="NOT_STARTED",
+        server_default="NOT_STARTED",
+        index=True,
+    )
 
     doctor = relationship('Doctor', back_populates='visits')
     creator = relationship('User', back_populates='created_visits')

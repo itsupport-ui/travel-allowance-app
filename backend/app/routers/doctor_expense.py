@@ -16,6 +16,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.doctor import Doctor
 from app.models.doctor_expense import DoctorExpense
+from app.models.doctor_travel_waypoint import DoctorTravelWaypoint
+from app.models.doctor_visit import DoctorVisit
+from app.models.doctor_workday import DoctorWorkDay
 from app.models.user import User
 from app.schemas.doctor_expense import (
     DoctorExpenseCreate,
@@ -27,6 +30,11 @@ from app.utils.uploads import (
     delete_stored_upload,
     store_validated_upload,
 )
+from app.services.doctor_attendance_service import (
+    previous_waypoint,
+    route_distance_km,
+)
+from app.services.maps_service import MapsServiceError
 
 
 router = APIRouter(
@@ -95,8 +103,9 @@ def _get_editable_doctor_expense(
 )
 def create_doctor_expense(
     expense_date: date = Form(...),
-    from_location: str = Form(...),
-    to_location: str = Form(...),
+    from_location: str | None = Form(None),
+    to_location: str | None = Form(None),
+    visit_id: int | None = Form(None),
     transport_mode: str = Form(...),
     fare: float = Form(..., gt=0),
     remarks: str | None = Form(None),
@@ -109,6 +118,7 @@ def create_doctor_expense(
         expense_date=expense_date,
         from_location=from_location,
         to_location=to_location,
+        visit_id=visit_id,
         transport_mode=transport_mode,
         fare=fare,
         remarks=remarks,
@@ -116,6 +126,100 @@ def create_doctor_expense(
     saved_proof_path = None
 
     try:
+        route_values = {}
+        if expense_data.visit_id is not None:
+            today = date.today()
+            visit = (
+                db.query(DoctorVisit)
+                .filter(
+                    DoctorVisit.id == expense_data.visit_id,
+                    DoctorVisit.doctor_id == doctor.id,
+                    DoctorVisit.visit_date == today,
+                    DoctorVisit.status.in_(
+                        ["visited", "treatment_plan_submitted"]
+                    ),
+                    DoctorVisit.session_status == "COMPLETED",
+                )
+                .first()
+            )
+            if visit is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Select a completed patient visit from today."
+                    ),
+                )
+            existing_expense = (
+                db.query(DoctorExpense.id)
+                .filter(DoctorExpense.visit_id == visit.id)
+                .first()
+            )
+            if existing_expense is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="An expense already exists for this visit.",
+                )
+            workday = (
+                db.query(DoctorWorkDay)
+                .filter(
+                    DoctorWorkDay.doctor_id == doctor.id,
+                    DoctorWorkDay.work_date == today,
+                )
+                .first()
+            )
+            if workday is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Start Work Day is required before expenses.",
+                )
+            destination = (
+                db.query(DoctorTravelWaypoint)
+                .filter(
+                    DoctorTravelWaypoint.workday_id == workday.id,
+                    DoctorTravelWaypoint.visit_id == visit.id,
+                )
+                .first()
+            )
+            if destination is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Travel route was not recorded for this visit.",
+                )
+            origin = previous_waypoint(db, destination)
+            if origin is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Travel route origin is unavailable.",
+                )
+            try:
+                distance_km = route_distance_km(origin, destination)
+            except MapsServiceError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(error),
+                ) from error
+            route_values = {
+                "expense_date": today,
+                "workday_id": workday.id,
+                "visit_id": visit.id,
+                "from_waypoint_id": origin.id,
+                "to_waypoint_id": destination.id,
+                "from_location": origin.address or "Starting location",
+                "to_location": (
+                    destination.address or visit.patient_address
+                ),
+                "from_latitude": origin.latitude,
+                "from_longitude": origin.longitude,
+                "to_latitude": destination.latitude,
+                "to_longitude": destination.longitude,
+                "distance_km": distance_km,
+            }
+        elif not expense_data.from_location or not expense_data.to_location:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="From and to locations are required.",
+            )
+
         if proof_file is not None:
             saved_proof_path = store_validated_upload(
                 proof_file,
@@ -124,9 +228,18 @@ def create_doctor_expense(
 
         expense = DoctorExpense(
             doctor_id=doctor.id,
-            expense_date=expense_data.expense_date,
-            from_location=expense_data.from_location,
-            to_location=expense_data.to_location,
+            expense_date=route_values.get(
+                "expense_date",
+                expense_data.expense_date,
+            ),
+            from_location=route_values.get(
+                "from_location",
+                expense_data.from_location,
+            ),
+            to_location=route_values.get(
+                "to_location",
+                expense_data.to_location,
+            ),
             transport_mode=expense_data.transport_mode,
             fare=expense_data.fare,
             proof_file=(
@@ -137,6 +250,12 @@ def create_doctor_expense(
             remarks=expense_data.remarks,
             status="draft",
             claim_id=None,
+            **{
+                key: value
+                for key, value in route_values.items()
+                if key
+                not in {"expense_date", "from_location", "to_location"}
+            },
         )
 
         db.add(expense)
@@ -151,6 +270,10 @@ def create_doctor_expense(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(error),
         ) from error
+    except HTTPException:
+        db.rollback()
+        _remove_proof_file(saved_proof_path)
+        raise
     except Exception as error:
         db.rollback()
         _remove_proof_file(saved_proof_path)

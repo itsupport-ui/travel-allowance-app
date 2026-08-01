@@ -3,12 +3,15 @@ from datetime import date, time, datetime
 
 class TreatmentScheduleCreate(BaseModel):
     patient_name: str
+    patient_reference_id: str | None = None
+    patient_phone: str | None = None
 
     doctor_id: int
 
     therapist_id: int
 
     treatment_name: str
+    visit_type: str = "home_visit"
 
     medicines: str | None = None
 
@@ -30,10 +33,10 @@ class TreatmentScheduleCreate(BaseModel):
         "Wear face mask "
         "and cap during treatment"
     )
+    clinical_notes: str | None = None
+    precautions: str | None = None
 
     priority: str = "normal"
-
-    transport_mode: str = "vehicle"
 
 class TreatmentScheduleResponse(BaseModel):
 
@@ -42,6 +45,8 @@ class TreatmentScheduleResponse(BaseModel):
     treatment_plan_id: int | None = None
 
     patient_name: str    
+    patient_reference_id: str | None = None
+    patient_phone: str | None = None
 
     doctor_name: str | None = None
     
@@ -52,6 +57,7 @@ class TreatmentScheduleResponse(BaseModel):
     therapist_id: int
 
     treatment_name: str
+    visit_type: str = "home_visit"
 
     medicines: str | None
 
@@ -74,6 +80,8 @@ class TreatmentScheduleResponse(BaseModel):
     out_time: time
 
     instructions: str
+    clinical_notes: str | None = None
+    precautions: str | None = None
 
     priority: str
 
@@ -87,7 +95,14 @@ class TreatmentScheduleResponse(BaseModel):
 
     missed_reason: str | None
 
-    transport_mode: str | None = None
+    punch_in_time: datetime | None = None
+    punch_out_time: datetime | None = None
+    punch_in_latitude: float | None = None
+    punch_in_longitude: float | None = None
+    punch_out_latitude: float | None = None
+    punch_out_longitude: float | None = None
+    treatment_duration: int | None = None
+    session_status: str = "NOT_STARTED"
 
     arrival_warning: str | None = None
 
@@ -105,12 +120,15 @@ class MissedTreatmentRequest(BaseModel):
 
 class TreatmentScheduleUpdate(BaseModel):
     patient_name: str
+    patient_reference_id: str | None = None
+    patient_phone: str | None = None
 
     doctor_id: int
 
     therapist_id: int
 
     treatment_name: str
+    visit_type: str = "home_visit"
 
     medicines: str | None = None
 
@@ -129,7 +147,7 @@ class TreatmentScheduleUpdate(BaseModel):
     out_time: time
 
     instructions: str
+    clinical_notes: str | None = None
+    precautions: str | None = None
 
     priority: str
-
-    transport_mode: str | None = None

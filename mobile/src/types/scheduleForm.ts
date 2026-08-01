@@ -1,25 +1,30 @@
 import type {
   SchedulePriority,
-  ScheduleTransportMode,
   ScheduleType,
+  ScheduleVisitType,
 } from "./schedule";
 
 export interface ScheduleFormState {
   doctorId: number | null;
   endDate: Date | null;
+  estimatedDurationMinutes: number;
   inTime: Date | null;
   instructions: string;
+  clinicalNotes: string;
   medicines: string;
   outTime: Date | null;
   patientAddress: string;
   patientName: string;
+  patientPhone: string;
+  patientReferenceId: string;
+  precautions: string;
   priority: SchedulePriority;
   scheduleType: ScheduleType;
   startDate: Date | null;
   therapistId: number | null;
   treatmentDate: Date | null;
   treatmentName: string;
-  transportMode: ScheduleTransportMode;
+  visitType: ScheduleVisitType;
 }
 
 export type ScheduleFormField =
@@ -30,6 +35,7 @@ export type ScheduleFormField =
   | "outTime"
   | "patientAddress"
   | "patientName"
+  | "patientPhone"
   | "scheduleType"
   | "startDate"
   | "therapistId"

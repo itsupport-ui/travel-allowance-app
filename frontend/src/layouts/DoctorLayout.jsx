@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 import {
   FaBars,
@@ -10,9 +10,20 @@ import {
   FaSignOutAlt,
   FaStethoscope,
   FaTimes,
+  FaPlay,
+  FaStopCircle,
   FaUserMd,
+  FaUserCircle,
 } from "react-icons/fa"
 import { hasPermission } from "../utils/permissions"
+import toast from "react-hot-toast"
+import ConfirmDialog from "../components/ui/ConfirmDialog"
+import { reverseGeocode } from "../services/mapsService"
+import {
+  endDoctorWorkDay,
+  getTodayDoctorWorkDay,
+  startDoctorWorkDay,
+} from "../services/workdayService"
 
 const navigationItems = [
   { path: "/doctor", label: "Dashboard", icon: FaHome },
@@ -46,21 +57,157 @@ const navigationItems = [
     icon: FaFileInvoiceDollar,
     permission: "doctor_claims.submit",
   },
+  {
+    path: "/doctor/profile",
+    label: "Profile",
+    icon: FaUserCircle,
+  },
 ]
 
 function DoctorLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
+  const [workday, setWorkday] = useState(null)
+  const [startingDay, setStartingDay] = useState(false)
+  const [endingDay, setEndingDay] = useState(false)
+  const [confirmingEnd, setConfirmingEnd] = useState(false)
+
+  const captureLocation = useCallback(
+    () =>
+      new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error("Location is not supported by this browser"))
+          return
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        })
+      }),
+    []
+  )
+
+  const loadWorkday = useCallback(async () => {
+    try {
+      const data = await getTodayDoctorWorkDay(
+        localStorage.getItem("token")
+      )
+      setWorkday(data)
+      if (data.is_active && data.should_prompt_end) {
+        setConfirmingEnd(true)
+      }
+    } catch (error) {
+      console.error("Unable to load doctor workday:", error)
+    }
+  }, [])
+
+  useEffect(() => {
+    // Synchronize the server-owned attendance state when the shell mounts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadWorkday()
+  }, [loadWorkday])
 
   const closeSidebar = () => setSidebarOpen(false)
 
   const handleLogout = () => {
+    if (workday?.is_active && workday.can_end_workday) {
+      setConfirmingEnd(true)
+      return
+    }
     localStorage.removeItem("token")
     localStorage.removeItem("role")
     localStorage.removeItem("permissions")
     navigate("/")
   }
+
+  const handleStartDay = async () => {
+    try {
+      setStartingDay(true)
+      const position = await captureLocation()
+      const token = localStorage.getItem("token")
+      let address =
+        `${position.coords.latitude}, ${position.coords.longitude}`
+      try {
+        const result = await reverseGeocode(
+          position.coords.latitude,
+          position.coords.longitude,
+          token
+        )
+        address = result.address || address
+      } catch {
+        // Coordinates remain the attendance source of truth.
+      }
+      await startDoctorWorkDay(token, {
+        start_address: address,
+        start_latitude: position.coords.latitude,
+        start_longitude: position.coords.longitude,
+      })
+      await loadWorkday()
+      toast.success("Doctor workday started")
+    } catch (error) {
+      toast.error(error.message || "Unable to start workday")
+    } finally {
+      setStartingDay(false)
+    }
+  }
+
+  const handleEndDay = useCallback(async () => {
+    try {
+      setEndingDay(true)
+      const position = await captureLocation()
+      const token = localStorage.getItem("token")
+      let endAddress
+      try {
+        const result = await reverseGeocode(
+          position.coords.latitude,
+          position.coords.longitude,
+          token
+        )
+        endAddress = result.address
+      } catch {
+        endAddress = undefined
+      }
+      const result = await endDoctorWorkDay(token, {
+        end_address: endAddress,
+        end_latitude: position.coords.latitude,
+        end_longitude: position.coords.longitude,
+      })
+      toast.success(
+        `Workday ended: ${result.completed_visits_count} completed, ${result.pending_visits_count} pending`
+      )
+      localStorage.removeItem("token")
+      localStorage.removeItem("role")
+      localStorage.removeItem("permissions")
+      navigate("/")
+    } catch (error) {
+      toast.error(error.message || "Unable to end workday")
+    } finally {
+      setEndingDay(false)
+    }
+  }, [captureLocation, navigate])
+
+  useEffect(() => {
+    if (
+      !workday?.is_active ||
+      !workday.auto_logout_enabled ||
+      !workday.should_prompt_end
+    ) {
+      return undefined
+    }
+    const timeout = window.setTimeout(
+      () => void handleEndDay(),
+      workday.auto_logout_grace_minutes * 60_000
+    )
+    return () => window.clearTimeout(timeout)
+  }, [
+    handleEndDay,
+    workday?.auto_logout_enabled,
+    workday?.auto_logout_grace_minutes,
+    workday?.is_active,
+    workday?.should_prompt_end,
+  ])
 
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans antialiased">
@@ -184,8 +331,61 @@ function DoctorLayout({ children }) {
       </aside>
 
       <main className="flex min-h-screen w-full max-w-full flex-1 flex-col overflow-x-hidden p-4 pt-20 md:p-8">
+        <div className="mb-5 flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-bold text-slate-900">
+              Doctor attendance
+            </p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {workday?.is_active
+                ? `Active since ${new Date(
+                    workday.started_at
+                  ).toLocaleTimeString("en-IN", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}`
+                : workday?.started
+                  ? "Workday completed"
+                  : "Workday not started"}
+              {workday?.is_active && !workday.can_end_workday
+                ? ` · End available at ${workday.workday_end_time}`
+                : ""}
+            </p>
+          </div>
+          {!workday?.started ? (
+            <button
+              type="button"
+              disabled={startingDay}
+              onClick={handleStartDay}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+            >
+              <FaPlay />
+              {startingDay ? "Starting..." : "Start Work Day"}
+            </button>
+          ) : workday.is_active && workday.can_end_workday ? (
+            <button
+              type="button"
+              disabled={endingDay}
+              onClick={() => setConfirmingEnd(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-rose-700 px-4 py-2 text-xs font-bold text-white transition hover:bg-rose-800 disabled:opacity-50"
+            >
+              <FaStopCircle />
+              {endingDay ? "Ending..." : "End Work Day"}
+            </button>
+          ) : null}
+        </div>
         <div className="h-full w-full flex-1">{children}</div>
       </main>
+      <ConfirmDialog
+        open={confirmingEnd}
+        title="Your workday has ended"
+        message="End attendance and log out. Active visits must be punched out first."
+        confirmLabel="End Work Day"
+        destructive
+        busy={endingDay}
+        onClose={() => setConfirmingEnd(false)}
+        onConfirm={handleEndDay}
+      />
     </div>
   )
 }

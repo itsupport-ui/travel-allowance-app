@@ -282,6 +282,7 @@ export default function AdminDoctorsScreen() {
         data={error ? [] : filteredDoctors}
         initialNumToRender={8}
         ItemSeparatorComponent={ListSeparator}
+        keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         keyExtractor={keyExtractor}
         ListEmptyComponent={

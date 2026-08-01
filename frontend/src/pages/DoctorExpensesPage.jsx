@@ -20,6 +20,7 @@ import {
   getTodayDoctorExpenses,
   updateDoctorExpense,
 } from "../services/doctorExpenseService"
+import { getTodayCompletedDoctorVisits } from "../services/doctorVisitService"
 
 
 const inputClass =
@@ -45,6 +46,7 @@ const createInitialForm = () => ({
   transport_mode: "",
   fare: "",
   remarks: "",
+  visit_id: "",
 })
 
 
@@ -184,6 +186,8 @@ function DoctorExpensesPage() {
   const [selectedExpense, setSelectedExpense] = useState(null)
   const [expenseForm, setExpenseForm] = useState(createInitialForm)
   const [proofFile, setProofFile] = useState(null)
+  const [visitOptions, setVisitOptions] = useState([])
+  const [visitSearch, setVisitSearch] = useState("")
 
   const loadExpenses = async () => {
     const token = localStorage.getItem("token")
@@ -193,6 +197,8 @@ function DoctorExpensesPage() {
     ])
     setTodayExpenses(todayData || [])
     setAllExpenses(allData || [])
+    const options = await getTodayCompletedDoctorVisits(token)
+    setVisitOptions(options || [])
   }
 
   useEffect(() => {
@@ -201,10 +207,12 @@ function DoctorExpensesPage() {
     Promise.all([
       getTodayDoctorExpenses(token),
       getMyDoctorExpenses(token),
+      getTodayCompletedDoctorVisits(token),
     ])
-      .then(([todayData, allData]) => {
+      .then(([todayData, allData, options]) => {
         setTodayExpenses(todayData || [])
         setAllExpenses(allData || [])
+        setVisitOptions(options || [])
       })
       .catch((error) => {
         toast.error(
@@ -227,6 +235,29 @@ function DoctorExpensesPage() {
 
   const visibleExpenses =
     activeTab === "today" ? todayExpenses : allExpenses
+  const availableVisitOptions = useMemo(
+    () =>
+      visitOptions.filter(
+        (option) =>
+          option.expense_id == null ||
+          option.visit_id === selectedExpense?.visit_id
+      ),
+    [selectedExpense?.visit_id, visitOptions]
+  )
+  const filteredVisitOptions = useMemo(() => {
+    const search = visitSearch.trim().toLowerCase()
+    if (!search) return availableVisitOptions
+    return availableVisitOptions.filter(
+      (option) =>
+        option.patient_name.toLowerCase().includes(search) ||
+        option.patient_address.toLowerCase().includes(search)
+    )
+  }, [availableVisitOptions, visitSearch])
+  const selectedVisitOption =
+    availableVisitOptions.find(
+      (option) =>
+        String(option.visit_id) === String(expenseForm.visit_id)
+    ) || null
 
   const closeModal = () => {
     if (actionId !== null) return
@@ -234,6 +265,7 @@ function DoctorExpensesPage() {
     setSelectedExpense(null)
     setExpenseForm(createInitialForm())
     setProofFile(null)
+    setVisitSearch("")
   }
 
   const openCreateModal = () => {
@@ -252,12 +284,25 @@ function DoctorExpensesPage() {
       transport_mode: expense.transport_mode,
       fare: String(expense.fare),
       remarks: expense.remarks || "",
+      visit_id: expense.visit_id ? String(expense.visit_id) : "",
     })
     setProofFile(null)
     setModal("expense")
   }
 
   const handleFormChange = (event) => {
+    if (event.target.name === "visit_id") {
+      const option = availableVisitOptions.find(
+        (item) => String(item.visit_id) === event.target.value
+      )
+      setExpenseForm((current) => ({
+        ...current,
+        visit_id: event.target.value,
+        from_location: option?.from_location || "",
+        to_location: option?.to_location || "",
+      }))
+      return
+    }
     setExpenseForm((current) => ({
       ...current,
       [event.target.name]: event.target.value,
@@ -276,6 +321,13 @@ function DoctorExpensesPage() {
         fare: Number(expenseForm.fare),
         remarks: expenseForm.remarks.trim(),
         proof_file: proofFile,
+        visit_id: expenseForm.visit_id
+          ? Number(expenseForm.visit_id)
+          : null,
+      }
+      if (!isEditing || selectedExpense?.visit_id != null) {
+        delete payload.from_location
+        delete payload.to_location
       }
 
       if (isEditing) {
@@ -609,31 +661,102 @@ function DoctorExpensesPage() {
                 name="expense_date"
                 value={expenseForm.expense_date}
                 onChange={handleFormChange}
+                readOnly={!selectedExpense || selectedExpense.visit_id != null}
                 className={inputClass}
               />
             </div>
 
+            {!selectedExpense && (
+              <div className="space-y-2">
+                <label className={labelClass}>
+                  Completed patient visit
+                </label>
+                {availableVisitOptions.length === 0 ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                    No completed patient visits available for today&apos;s
+                    expenses.
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      type="search"
+                      value={visitSearch}
+                      onChange={(event) =>
+                        setVisitSearch(event.target.value)
+                      }
+                      placeholder="Search patient or address"
+                      className={inputClass}
+                    />
+                    <select
+                      required
+                      name="visit_id"
+                      value={expenseForm.visit_id}
+                      onChange={handleFormChange}
+                      className={inputClass}
+                    >
+                      <option value="">Select completed visit</option>
+                      {filteredVisitOptions.map((option) => (
+                        <option
+                          key={option.visit_id}
+                          value={option.visit_id}
+                        >
+                          {option.patient_name} ·{" "}
+                          {option.patient_address} ·{" "}
+                          {option.visit_time.slice(0, 5)}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <label className={labelClass}>From location</label>
+                <label className={labelClass}>Travel from</label>
                 <input
                   required
                   name="from_location"
                   value={expenseForm.from_location}
                   onChange={handleFormChange}
+                  readOnly={
+                    !selectedExpense || selectedExpense.visit_id != null
+                  }
                   className={inputClass}
                 />
               </div>
               <div>
-                <label className={labelClass}>To location</label>
+                <label className={labelClass}>Travel to</label>
                 <input
                   required
                   name="to_location"
                   value={expenseForm.to_location}
                   onChange={handleFormChange}
+                  readOnly={
+                    !selectedExpense || selectedExpense.visit_id != null
+                  }
                   className={inputClass}
                 />
               </div>
+            </div>
+
+            <div>
+              <label className={labelClass}>Distance</label>
+              <input
+                readOnly
+                value={
+                  selectedVisitOption?.distance_km == null
+                    ? selectedExpense?.distance_km == null
+                      ? "Calculated on submission"
+                      : `${Number(
+                          selectedExpense.distance_km
+                        ).toFixed(2)} km`
+                    : `${Number(
+                        selectedVisitOption.distance_km
+                      ).toFixed(2)} km`
+                }
+                className={inputClass}
+              />
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -695,10 +818,11 @@ function DoctorExpensesPage() {
             <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
               <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
                 <FaBus />
-                Actual fare only
+                Route verified
               </span>
               <p className="mt-1">
-                Distance and kilometre calculations are not required.
+                Locations and distance are derived from attendance and
+                patient visit GPS. Enter only the actual fare paid.
               </p>
             </div>
 
@@ -712,7 +836,11 @@ function DoctorExpensesPage() {
               </button>
               <button
                 type="submit"
-                disabled={actionId !== null}
+                disabled={
+                  actionId !== null ||
+                  (!selectedExpense &&
+                    availableVisitOptions.length === 0)
+                }
                 className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <FaFileInvoice />

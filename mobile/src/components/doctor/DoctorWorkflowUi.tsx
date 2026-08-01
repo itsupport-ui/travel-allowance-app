@@ -19,7 +19,7 @@ interface DoctorStatusBadgeProps {
 
 const getStatusTone = (
   status: string
-): "danger" | "info" | "neutral" | "success" | "warning" => {
+): "danger" | "info" | "neutral" | "purple" | "success" | "teal" | "warning" => {
   if (
     ["approved", "completed", "confirmed", "visited"].includes(status)
   ) {
@@ -30,8 +30,16 @@ const getStatusTone = (
     return "danger";
   }
 
-  if (["scheduled", "submitted"].includes(status)) {
+  if (status === "scheduled") {
     return "info";
+  }
+
+  if (status === "submitted") {
+    return "purple";
+  }
+
+  if (status === "paid") {
+    return "teal";
   }
 
   if (["draft", "follow_up", "pending"].includes(status)) {
@@ -298,6 +306,18 @@ const styles = StyleSheet.create({
   },
   infoText: {
     color: colors.blueDark,
+  },
+  purpleBadge: {
+    backgroundColor: colors.purpleSurface,
+  },
+  purpleText: {
+    color: colors.purple,
+  },
+  tealBadge: {
+    backgroundColor: colors.tealSurface,
+  },
+  tealText: {
+    color: colors.teal,
   },
   warningBadge: {
     backgroundColor: colors.warningSurface,

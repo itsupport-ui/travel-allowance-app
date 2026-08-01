@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, field_validator
 
@@ -25,19 +25,25 @@ class ClaimResponse(BaseModel):
 
 class ClaimDetailsClaimResponse(BaseModel):
     id: int
+    therapist_id: int
     therapist_name: str | None = None
+    therapist_role: str | None = None
     claim_date: date
+    submitted_at: datetime | None = None
     total_km: float
     per_km_rate: float | None = 0
     travel_total: float
     daily_allowance: float
     grand_total: float
     status: str
+    notes: str | None = None
+    patient_count: int = 0
 
 
 class ClaimTravelEntryResponse(BaseModel):
     id: int
     travel_date: date
+    travel_timestamp: datetime | None = None
     patient_name: str | None = None
     transport_mode: str
     bill_amount: float | None = None

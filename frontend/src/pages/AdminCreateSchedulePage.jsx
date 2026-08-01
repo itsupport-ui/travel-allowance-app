@@ -1,377 +1,407 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import toast from "react-hot-toast"
-
 import AdminLayout from "../layouts/AdminLayout"
-
+import StatusBadge from "../components/ui/StatusBadge"
 import {
-  getDoctors,
-  getTherapists,
-  createSchedule
-} from "../services/scheduleService"
+  getScheduleFormOptions,
+  getTherapistAvailability,
+} from "../services/adminOperationsService"
+import { createSchedule } from "../services/scheduleService"
+import { getErrorMessage } from "../services/http"
+import { isEndAfterStart, isValidPhone } from "../utils/validation"
+
+const initialForm = {
+  patient_name: "",
+  patient_reference_id: "",
+  patient_phone: "",
+  patient_address: "",
+  treatment_name: "",
+  medicines: "",
+  visit_type: "home_visit",
+  doctor_id: "",
+  therapist_id: "",
+  priority: "normal",
+  schedule_type: "one_time",
+  treatment_date: "",
+  start_date: "",
+  end_date: "",
+  in_time: "",
+  out_time: "",
+  instructions: "",
+  clinical_notes: "",
+  precautions: "",
+}
+
+const inputClass =
+  "mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+const labelClass = "text-xs font-bold text-slate-600"
+
+function Section({ title, description, children }) {
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="border-b border-slate-100 pb-3">
+        <h2 className="text-sm font-black text-slate-900">{title}</h2>
+        <p className="mt-1 text-xs text-slate-500">{description}</p>
+      </div>
+      <div className="mt-4">{children}</div>
+    </section>
+  )
+}
 
 function AdminCreateSchedulePage() {
   const navigate = useNavigate()
-
-  const [loading, setLoading] = useState(false)
-  const [doctors, setDoctors] = useState([])
-  const [therapists, setTherapists] = useState([])
-
-  const [formData, setFormData] = useState({
-    patient_name: "",
-    doctor_id: "",
-    therapist_id: "",
-    treatment_name: "",
-    medicines: "",
-    patient_address: "",
-    schedule_type: "one_time",
-    treatment_date: "",
-    start_date: "",
-    end_date: "",
-    in_time: "",
-    out_time: "",
-    instructions: "",
-    priority: "normal"
-  })
+  const [form, setForm] = useState(initialForm)
+  const [options, setOptions] = useState({ patients: [], doctors: [], therapists: [] })
+  const [loadingOptions, setLoadingOptions] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [availability, setAvailability] = useState(null)
+  const [checkingAvailability, setCheckingAvailability] = useState(false)
+  const isDirty = useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(initialForm),
+    [form],
+  )
 
   useEffect(() => {
-    loadDropdowns()
+    getScheduleFormOptions()
+      .then(setOptions)
+      .catch((error) => toast.error(getErrorMessage(error, "Failed to load form options")))
+      .finally(() => setLoadingOptions(false))
   }, [])
 
-  const loadDropdowns = async () => {
-    try {
-      const token = localStorage.getItem("token")
-      const doctorData = await getDoctors(token)
-      const therapistData = await getTherapists(token)
-
-      setDoctors(doctorData)
-      setTherapists(therapistData)
-    } catch (error) {
-      console.error(error)
-      toast.error("Failed to load dropdowns")
+  useEffect(() => {
+    const warn = (event) => {
+      if (!isDirty) return
+      event.preventDefault()
+      event.returnValue = ""
     }
-  }
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [isDirty])
 
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    })
-  }
+  useEffect(() => {
+    const hasDates =
+      form.schedule_type === "one_time"
+        ? Boolean(form.treatment_date)
+        : Boolean(form.start_date && form.end_date)
+    if (
+      !form.therapist_id ||
+      !hasDates ||
+      !isEndAfterStart(form.in_time, form.out_time)
+    ) {
+      // Clear a prior result when the availability query is incomplete.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAvailability(null)
+      return
+    }
 
-  const resetForm = () => {
-    setFormData({
-      patient_name: "",
-      doctor_id: "",
-      therapist_id: "",
-      treatment_name: "",
-      medicines: "",
-      patient_address: "",
-      schedule_type: "one_time",
-      treatment_date: "",
-      start_date: "",
-      end_date: "",
-      in_time: "",
-      out_time: "",
-      instructions: "",
-      priority: "normal"
-    })
-  }
-
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-
-    try {
-      setLoading(true)
-      const token = localStorage.getItem("token")
-
-      const payload = {
-        ...formData,
-        doctor_id: Number(formData.doctor_id),
-        therapist_id: Number(formData.therapist_id),
-        start_date: formData.schedule_type === "recurring" ? formData.start_date : null,
-        end_date: formData.schedule_type === "recurring" ? formData.end_date : null,
-        treatment_date: formData.schedule_type === "one_time" ? formData.treatment_date : null
+    const timer = window.setTimeout(async () => {
+      setCheckingAvailability(true)
+      try {
+        setAvailability(
+          await getTherapistAvailability({
+            therapist_id: form.therapist_id,
+            schedule_type: form.schedule_type,
+            treatment_date:
+              form.schedule_type === "one_time" ? form.treatment_date : undefined,
+            start_date:
+              form.schedule_type === "recurring" ? form.start_date : undefined,
+            end_date:
+              form.schedule_type === "recurring" ? form.end_date : undefined,
+            start_time: form.in_time,
+            expected_end_time: form.out_time,
+          }),
+        )
+      } catch (error) {
+        setAvailability(null)
+        toast.error(getErrorMessage(error, "Unable to check therapist availability"))
+      } finally {
+        setCheckingAvailability(false)
       }
+    }, 350)
 
-      await createSchedule(payload, token)
-      toast.success("Schedule created successfully")
-      resetForm()
-      navigate("/admin/schedule/today")
-    } catch (error) {
-      console.error(error)
-      toast.error("Failed to create schedule")
-    } finally {
-      setLoading(false)
-    }
+    return () => window.clearTimeout(timer)
+  }, [
+    form.end_date,
+    form.in_time,
+    form.out_time,
+    form.schedule_type,
+    form.start_date,
+    form.therapist_id,
+    form.treatment_date,
+  ])
+
+  const change = (name, value) => {
+    setForm((current) => ({ ...current, [name]: value }))
   }
 
-  const inputClasses = "w-full border border-gray-200 bg-white rounded-xl px-4 py-2.5 text-gray-800 placeholder-gray-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none text-sm font-medium shadow-sm"
-  const labelClasses = "block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 pl-0.5"
+  const selectPatient = (name) => {
+    const patient = options.patients.find(
+      (item) => item.name.toLowerCase() === name.trim().toLowerCase(),
+    )
+    setForm((current) => ({
+      ...current,
+      patient_name: name,
+      ...(patient
+        ? {
+            patient_reference_id: patient.reference_id || "",
+            patient_phone: patient.phone || "",
+            patient_address: patient.address || "",
+          }
+        : {}),
+    }))
+  }
+
+  const validate = () => {
+    if (!form.patient_name.trim() || !form.patient_address.trim()) {
+      return "Patient name and address are required."
+    }
+    if (!isValidPhone(form.patient_phone)) {
+      return "Enter a valid patient phone number."
+    }
+    if (!form.doctor_id || !form.therapist_id || !form.treatment_name.trim()) {
+      return "Treatment, doctor, and therapist are required."
+    }
+    if (!isEndAfterStart(form.in_time, form.out_time)) {
+      return "Expected end time must be after the start time."
+    }
+    if (
+      form.schedule_type === "recurring" &&
+      (!form.start_date || !form.end_date || form.end_date < form.start_date)
+    ) {
+      return "Recurring schedules require a valid date range."
+    }
+    if (form.schedule_type === "one_time" && !form.treatment_date) {
+      return "Treatment date is required."
+    }
+    if (availability && !availability.available) {
+      return "Resolve the therapist scheduling conflict before creating this appointment."
+    }
+    return ""
+  }
+
+  const submit = async (event) => {
+    event.preventDefault()
+    const validationError = validate()
+    if (validationError) {
+      toast.error(validationError)
+      return
+    }
+
+    setSaving(true)
+    try {
+      await createSchedule(
+        {
+          ...form,
+          patient_reference_id: form.patient_reference_id.trim() || null,
+          patient_phone: form.patient_phone.trim() || null,
+          medicines: form.medicines.trim() || null,
+          clinical_notes: form.clinical_notes.trim() || null,
+          precautions: form.precautions.trim() || null,
+          doctor_id: Number(form.doctor_id),
+          therapist_id: Number(form.therapist_id),
+          treatment_date:
+            form.schedule_type === "one_time" ? form.treatment_date : null,
+          start_date:
+            form.schedule_type === "recurring" ? form.start_date : null,
+          end_date:
+            form.schedule_type === "recurring" ? form.end_date : null,
+        },
+        localStorage.getItem("token"),
+      )
+      toast.success("Schedule created successfully")
+      setForm(initialForm)
+      navigate("/admin/schedules?view=today")
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to create schedule"))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <AdminLayout>
-      <div className="w-full max-w-4xl mx-auto px-1 sm:px-4 py-2">
-        
-        {/* Page Header Header Terminal Block */}
-        <div className="mb-6">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 tracking-tight">
-            Create Schedule
-          </h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">
-            Assign treatments, set logistics, and route clinical staff schedules.
+      <div className="mx-auto w-full max-w-5xl">
+        <header className="mb-5">
+          <h1 className="text-2xl font-black text-slate-900">Create Schedule</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Assign a clinical visit. Travel mode is selected by the therapist only when filing a claim.
           </p>
-        </div>
+        </header>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-
-          {/* Card 1: Patient & Case Context Information */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-6 space-y-4">
-            <h2 className="text-sm font-bold text-gray-800 border-b border-gray-50 pb-2.5 flex items-center gap-2">
-              <span className="w-1.5 h-4 bg-blue-500 rounded-sm inline-block"></span>
-              Case Assignment Details
-            </h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className={labelClasses}>Patient Name</label>
+        <form onSubmit={submit} className="space-y-5">
+          <Section title="Patient Information" description="Search an existing patient or enter a new visit location.">
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className={labelClass}>
+                Patient name
                 <input
-                  type="text"
-                  name="patient_name"
-                  placeholder="Enter full name"
-                  value={formData.patient_name}
-                  onChange={handleChange}
-                  className={inputClasses}
+                  list="known-patients"
+                  value={form.patient_name}
+                  onChange={(event) => selectPatient(event.target.value)}
+                  className={inputClass}
+                  disabled={loadingOptions}
                   required
                 />
-              </div>
-
-              <div>
-                <label className={labelClasses}>Treatment Name</label>
-                <input
-                  type="text"
-                  name="treatment_name"
-                  placeholder="e.g. Physiotherapy Session"
-                  value={formData.treatment_name}
-                  onChange={handleChange}
-                  className={inputClasses}
-                  required
-                />
-              </div>
+                <datalist id="known-patients">
+                  {options.patients.map((patient) => (
+                    <option key={`${patient.name}-${patient.reference_id || ""}`} value={patient.name} />
+                  ))}
+                </datalist>
+              </label>
+              <label className={labelClass}>
+                Patient ID
+                <input value={form.patient_reference_id} onChange={(event) => change("patient_reference_id", event.target.value)} className={inputClass} />
+              </label>
+              <label className={labelClass}>
+                Phone number (optional)
+                <input type="tel" value={form.patient_phone} onChange={(event) => change("patient_phone", event.target.value)} className={inputClass} />
+              </label>
+              <label className={`${labelClass} md:col-span-2`}>
+                Patient address
+                <textarea rows="2" value={form.patient_address} onChange={(event) => change("patient_address", event.target.value)} className={inputClass} required />
+              </label>
             </div>
+          </Section>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className={labelClasses}>Assigned Doctor</label>
-                <select
-                  name="doctor_id"
-                  value={formData.doctor_id}
-                  onChange={handleChange}
-                  className={inputClasses}
-                  required
-                >
-                  <option value="">Select Doctor</option>
-                  {doctors.map((doctor) => (
+          <Section title="Treatment Information" description="Define the clinical purpose and expected visit format.">
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className={labelClass}>
+                Treatment name
+                <input value={form.treatment_name} onChange={(event) => change("treatment_name", event.target.value)} className={inputClass} required />
+              </label>
+              <label className={labelClass}>
+                Visit type
+                <select value={form.visit_type} onChange={(event) => change("visit_type", event.target.value)} className={inputClass}>
+                  <option value="home_visit">Home visit</option>
+                  <option value="clinic_visit">Clinic visit</option>
+                  <option value="follow_up">Follow-up</option>
+                  <option value="assessment">Assessment</option>
+                </select>
+              </label>
+              <label className={`${labelClass} md:col-span-2`}>
+                Medicines
+                <textarea rows="2" value={form.medicines} onChange={(event) => change("medicines", event.target.value)} className={inputClass} />
+              </label>
+            </div>
+          </Section>
+
+          <Section title="Clinical Assignment" description="Assign accountable clinical staff and review workload before saving.">
+            <div className="grid gap-4 md:grid-cols-3">
+              <label className={labelClass}>
+                Doctor
+                <select value={form.doctor_id} onChange={(event) => change("doctor_id", event.target.value)} className={inputClass} required>
+                  <option value="">Select doctor</option>
+                  {options.doctors.map((doctor) => (
                     <option key={doctor.id} value={doctor.id}>
-                      {doctor.name}
+                      {doctor.name}{doctor.specialization ? ` - ${doctor.specialization}` : ""}
                     </option>
                   ))}
                 </select>
-              </div>
-
-              <div>
-                <label className={labelClasses}>Assigned Therapist</label>
-                <select
-                  name="therapist_id"
-                  value={formData.therapist_id}
-                  onChange={handleChange}
-                  className={inputClasses}
-                  required
-                >
-                  <option value="">Select Therapist</option>
-                  {therapists.map((therapist) => (
+              </label>
+              <label className={labelClass}>
+                Therapist
+                <select value={form.therapist_id} onChange={(event) => change("therapist_id", event.target.value)} className={inputClass} required>
+                  <option value="">Select therapist</option>
+                  {options.therapists.map((therapist) => (
                     <option key={therapist.id} value={therapist.id}>
-                      {therapist.username || therapist.name}
+                      {therapist.name} ({therapist.today_appointments} today)
                     </option>
                   ))}
                 </select>
-              </div>
-            </div>
-
-            <div>
-              <label className={labelClasses}>Patient Address</label>
-              <textarea
-                rows="2"
-                name="patient_address"
-                placeholder="Enter complete residential routing address"
-                value={formData.patient_address}
-                onChange={handleChange}
-                className={`${inputClasses} resize-none`}
-              />
-            </div>
-          </div>
-
-
-          {/* Card 2: Schedule, Timing, and Logistics Block */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-6 space-y-4">
-            <h2 className="text-sm font-bold text-gray-800 border-b border-gray-50 pb-2.5 flex items-center gap-2">
-              <span className="w-1.5 h-4 bg-indigo-500 rounded-sm inline-block"></span>
-              Logistics &amp; Scheduling
-            </h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className={labelClasses}>Schedule Configuration</label>
-                <select
-                  name="schedule_type"
-                  value={formData.schedule_type}
-                  onChange={handleChange}
-                  className={inputClasses}
-                >
-                  <option value="one_time">One Time Visit</option>
-                  <option value="recurring">Recurring Schedule Range</option>
+              </label>
+              <label className={labelClass}>
+                Priority
+                <select value={form.priority} onChange={(event) => change("priority", event.target.value)} className={inputClass}>
+                  <option value="normal">Normal</option>
+                  <option value="high">High</option>
                 </select>
-              </div>
-
-              {/* Dynamic rendering matching split column frameworks */}
-              {formData.schedule_type === "one_time" ? (
-                <div>
-                  <label className={labelClasses}>Treatment Date</label>
-                  <input
-                    type="date"
-                    name="treatment_date"
-                    value={formData.treatment_date}
-                    onChange={handleChange}
-                    className={inputClasses}
-                    required
-                  />
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className={labelClasses}>Start Date</label>
-                    <input
-                      type="date"
-                      name="start_date"
-                      value={formData.start_date}
-                      onChange={handleChange}
-                      className={inputClasses}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className={labelClasses}>End Date</label>
-                    <input
-                      type="date"
-                      name="end_date"
-                      value={formData.end_date}
-                      onChange={handleChange}
-                      className={inputClasses}
-                      required
-                    />
-                  </div>
-                </div>
-              )}
+              </label>
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className={labelClasses}>Expected In-Time</label>
-                <input
-                  type="time"
-                  name="in_time"
-                  value={formData.in_time}
-                  onChange={handleChange}
-                  className={inputClasses}
-                  required
-                />
+            {(checkingAvailability || availability) && (
+              <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs">
+                {checkingAvailability ? (
+                  <span className="text-slate-500">Checking therapist availability...</span>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={availability.available ? "active" : "high"} label={availability.available ? "Available" : "Conflict"} />
+                    <span className="text-slate-600">{availability.today_appointments} appointment(s) today</span>
+                    {!availability.available && (
+                      <span className="font-semibold text-rose-700">
+                        Overlaps {availability.conflicts.map((item) => item.patient_name).join(", ")}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
+            )}
+          </Section>
 
-              <div>
-                <label className={labelClasses}>Expected Out-Time</label>
-                <input
-                  type="time"
-                  name="out_time"
-                  value={formData.out_time}
-                  onChange={handleChange}
-                  className={inputClasses}
-                  required
-                />
-              </div>
-            </div>
-          </div>
-
-
-          {/* Card 3: Clinical Care Notes & Priority Handling */}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-6 space-y-4">
-            <h2 className="text-sm font-bold text-gray-800 border-b border-gray-50 pb-2.5 flex items-center gap-2">
-              <span className="w-1.5 h-4 bg-emerald-500 rounded-sm inline-block"></span>
-              Clinical Requirements
-            </h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-2">
-                <label className={labelClasses}>Prescribed Medicines</label>
-                <input
-                  type="text"
-                  name="medicines"
-                  placeholder="List critical medicines if any"
-                  value={formData.medicines}
-                  onChange={handleChange}
-                  className={inputClasses}
-                />
-              </div>
-
-              <div>
-                <label className={labelClasses}>Routing Priority</label>
-                <select
-                  name="priority"
-                  value={formData.priority}
-                  onChange={handleChange}
-                  className={`${inputClasses} font-semibold ${
-                    formData.priority === "important" ? "text-amber-700 bg-amber-50/50" : "text-gray-800"
-                  }`}
-                >
-                  <option value="normal">Normal Priority</option>
-                  <option value="important">⚠️ High Priority / Critical</option>
+          <Section title="Schedule" description="Choose one visit or a recurring treatment window.">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <label className={labelClass}>
+                Schedule type
+                <select value={form.schedule_type} onChange={(event) => change("schedule_type", event.target.value)} className={inputClass}>
+                  <option value="one_time">One time</option>
+                  <option value="recurring">Recurring</option>
                 </select>
-              </div>
-            </div>
-
-            <div>
-              <label className={labelClasses}>Special Care Instructions</label>
-              <textarea
-                rows="3"
-                name="instructions"
-                placeholder="Note down operational variables, medical background parameters, or routing directive markers..."
-                value={formData.instructions}
-                onChange={handleChange}
-                className={`${inputClasses} resize-none`}
-              />
-            </div>
-          </div>
-
-          {/* Action Submission Bar Terminal Block */}
-          <div className="flex flex-col sm:flex-row justify-end gap-3 pt-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full sm:w-48 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold px-6 py-3 rounded-xl transition-all shadow-md active:scale-[0.99] text-sm tracking-wide flex justify-center items-center h-11"
-            >
-              {loading ? (
-                <span className="inline-flex items-center gap-2">
-                  <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Processing...
-                </span>
+              </label>
+              {form.schedule_type === "one_time" ? (
+                <label className={labelClass}>
+                  Date
+                  <input type="date" value={form.treatment_date} onChange={(event) => change("treatment_date", event.target.value)} className={inputClass} required />
+                </label>
               ) : (
-                "Create Schedule"
+                <>
+                  <label className={labelClass}>
+                    Start date
+                    <input type="date" value={form.start_date} onChange={(event) => change("start_date", event.target.value)} className={inputClass} required />
+                  </label>
+                  <label className={labelClass}>
+                    End date
+                    <input type="date" min={form.start_date} value={form.end_date} onChange={(event) => change("end_date", event.target.value)} className={inputClass} required />
+                  </label>
+                </>
               )}
+              <label className={labelClass}>
+                Start time
+                <input type="time" value={form.in_time} onChange={(event) => change("in_time", event.target.value)} className={inputClass} required />
+              </label>
+              <label className={labelClass}>
+                Expected end time
+                <input type="time" min={form.in_time} value={form.out_time} onChange={(event) => change("out_time", event.target.value)} className={inputClass} required />
+              </label>
+            </div>
+          </Section>
+
+          <details className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <summary className="cursor-pointer text-sm font-black text-slate-900">
+              Visit Notes
+              <span className="ml-2 text-xs font-normal text-slate-500">Instructions, clinical notes, and precautions</span>
+            </summary>
+            <div className="mt-4 grid gap-4">
+              <label className={labelClass}>
+                Instructions
+                <textarea rows="3" value={form.instructions} onChange={(event) => change("instructions", event.target.value)} className={inputClass} />
+              </label>
+              <label className={labelClass}>
+                Clinical notes
+                <textarea rows="3" value={form.clinical_notes} onChange={(event) => change("clinical_notes", event.target.value)} className={inputClass} />
+              </label>
+              <label className={labelClass}>
+                Precautions
+                <textarea rows="2" value={form.precautions} onChange={(event) => change("precautions", event.target.value)} className={inputClass} />
+              </label>
+            </div>
+          </details>
+
+          <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row">
+            <button type="button" onClick={() => navigate(-1)} className="rounded-md border border-slate-300 px-5 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50">
+              Cancel
+            </button>
+            <button disabled={saving || checkingAvailability} className="rounded-md bg-blue-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-60">
+              {saving ? "Creating..." : "Create schedule"}
             </button>
           </div>
-
         </form>
       </div>
     </AdminLayout>

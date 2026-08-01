@@ -5,9 +5,6 @@ import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,6 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { FormScrollView } from "../../src/components/layout/FormScrollView";
 import {
   createTherapist,
   TherapistServiceError,
@@ -175,13 +173,9 @@ export default function TherapistCreateScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={styles.safeArea}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.keyboardView}
-      >
-        <ScrollView
+      <View style={styles.keyboardView}>
+        <FormScrollView
           contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.pageHeader}>
@@ -349,8 +343,8 @@ export default function TherapistCreateScreen() {
               )}
             </TouchableOpacity>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
+      </View>
     </SafeAreaView>
   );
 }

@@ -57,6 +57,8 @@ export interface DoctorVisit {
   patient_name: string;
   patient_phone: string;
   patient_address: string;
+  patient_latitude: number | null;
+  patient_longitude: number | null;
   doctor_id: number;
   doctor_name: string | null;
   visit_date: string;
@@ -67,6 +69,14 @@ export interface DoctorVisit {
   created_by: number | null;
   created_at: string;
   completed_at: string | null;
+  punch_in_time: string | null;
+  punch_out_time: string | null;
+  punch_in_latitude: number | null;
+  punch_in_longitude: number | null;
+  punch_out_latitude: number | null;
+  punch_out_longitude: number | null;
+  treatment_duration: number | null;
+  session_status: "COMPLETED" | "IN_PROGRESS" | "NOT_STARTED";
 }
 
 export interface DoctorVisitDashboard {
@@ -164,15 +174,23 @@ export interface TreatmentPlanScheduleRequest {
   out_time: string;
   priority: string;
   instructions: string;
-  transport_mode: string;
 }
 
 export interface DoctorExpense {
   id: number;
   doctor_id: number;
   expense_date: string;
+  workday_id: number | null;
+  visit_id: number | null;
+  from_waypoint_id: number | null;
+  to_waypoint_id: number | null;
   from_location: string;
   to_location: string;
+  from_latitude: number | null;
+  from_longitude: number | null;
+  to_latitude: number | null;
+  to_longitude: number | null;
+  distance_km: number | null;
   transport_mode: string;
   fare: number;
   proof_file: string | null;
@@ -191,12 +209,70 @@ export interface DoctorProofAsset {
 
 export interface SaveDoctorExpenseRequest {
   expense_date: string;
-  from_location: string;
-  to_location: string;
+  visit_id: number | null;
+  from_location?: string;
+  to_location?: string;
   transport_mode: string;
   fare: number;
   remarks: string;
   proof_file: DoctorProofAsset | null;
+}
+
+export interface DoctorVisitSession {
+  visit_id: number;
+  consultation_id: number | null;
+  doctor_id: number;
+  visit_status: string;
+  session_status: "COMPLETED" | "IN_PROGRESS" | "NOT_STARTED";
+  punch_in_time: string | null;
+  punch_out_time: string | null;
+  treatment_duration: number | null;
+  elapsed_seconds: number;
+  workday_started: boolean;
+  location_verified: boolean | null;
+  can_punch_in: boolean;
+  can_punch_out: boolean;
+  eligibility_message: string | null;
+}
+
+export interface DoctorVisitExpenseOption {
+  visit_id: number;
+  patient_name: string;
+  patient_address: string;
+  visit_time: string;
+  status: string;
+  punch_in_time: string | null;
+  punch_out_time: string | null;
+  from_location: string;
+  to_location: string;
+  from_latitude: number;
+  from_longitude: number;
+  to_latitude: number;
+  to_longitude: number;
+  distance_km: number | null;
+  expense_id: number | null;
+}
+
+export interface DoctorTodayWorkday {
+  started: boolean;
+  workday_id: number | null;
+  work_date: string;
+  started_at: string | null;
+  start_address: string | null;
+  start_latitude: number | null;
+  start_longitude: number | null;
+  is_active: boolean;
+  ended_at: string | null;
+  total_work_minutes: number | null;
+  total_visits_count: number | null;
+  completed_visits_count: number | null;
+  pending_visits_count: number | null;
+  total_distance_km: number | null;
+  workday_end_time: string;
+  can_end_workday: boolean;
+  should_prompt_end: boolean;
+  auto_logout_enabled: boolean;
+  auto_logout_grace_minutes: number;
 }
 
 export interface DoctorClaim {

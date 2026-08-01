@@ -7,9 +7,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -18,6 +15,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppDatePickerField } from "../../src/components/common/AppDatePickerField";
+import { FormScrollView } from "../../src/components/layout/FormScrollView";
 import {
   DoctorBackHeader,
   DoctorChoiceChips,
@@ -28,11 +26,15 @@ import {
 import { queryKeys } from "../../src/query/queryKeys";
 import {
   createDoctorExpense,
+  getTodayCompletedDoctorVisits,
   getMyDoctorExpenses,
   updateDoctorExpense,
 } from "../../src/services/doctorWorkflowService";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
-import type { DoctorProofAsset } from "../../src/types/doctorWorkflow";
+import type {
+  DoctorProofAsset,
+  DoctorVisitExpenseOption,
+} from "../../src/types/doctorWorkflow";
 import {
   getLocalIsoDate,
   parsePositiveId,
@@ -71,6 +73,41 @@ const isValidDate = (value: string): boolean => {
   );
 };
 
+function VisitOption({
+  onPress,
+  option,
+  selected,
+}: {
+  onPress: () => void;
+  option: DoctorVisitExpenseOption;
+  selected: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      style={[styles.visitOption, selected && styles.selectedVisitOption]}
+      onPress={onPress}
+    >
+      <View style={styles.visitOptionText}>
+        <Text style={styles.visitPatient}>{option.patient_name}</Text>
+        <Text style={styles.visitMeta}>
+          {option.patient_address} · {option.visit_time.slice(0, 5)}
+        </Text>
+        <Text style={styles.visitRoute}>
+          {option.from_location} to {option.to_location}
+        </Text>
+      </View>
+      <Ionicons
+        color={selected ? colors.primary : colors.textSubtle}
+        name={
+          selected ? "checkmark-circle" : "radio-button-off-outline"
+        }
+        size={22}
+      />
+    </TouchableOpacity>
+  );
+}
+
 export default function DoctorExpenseFormScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const rawId = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -87,6 +124,7 @@ export default function DoctorExpenseFormScreen() {
     useState<DoctorProofAsset | null>(null);
   const [remarks, setRemarks] = useState("");
   const [toLocation, setToLocation] = useState("");
+  const [visitId, setVisitId] = useState<number | null>(null);
   const [transportMode, setTransportMode] =
     useState<TransportMode>("");
   const expensesQuery = useQuery({
@@ -97,6 +135,24 @@ export default function DoctorExpenseFormScreen() {
   const expense = editing
     ? expensesQuery.data?.find((item) => item.id === expenseId)
     : undefined;
+  const visitOptionsQuery = useQuery({
+    enabled: !editing,
+    queryFn: getTodayCompletedDoctorVisits,
+    queryKey: queryKeys.doctor.visits.completedToday,
+  });
+  const availableVisits = useMemo(
+    () =>
+      (visitOptionsQuery.data ?? []).filter(
+        (option) => option.expense_id === null
+      ),
+    [visitOptionsQuery.data]
+  );
+  const selectedVisit = useMemo(
+    () =>
+      availableVisits.find((option) => option.visit_id === visitId) ??
+      null,
+    [availableVisits, visitId]
+  );
 
   useEffect(() => {
     if (!expense || initializedRef.current) {
@@ -109,6 +165,7 @@ export default function DoctorExpenseFormScreen() {
     setFromLocation(expense.from_location);
     setRemarks(expense.remarks ?? "");
     setToLocation(expense.to_location);
+    setVisitId(expense.visit_id);
     setTransportMode(expense.transport_mode as TransportMode);
   }, [expense]);
 
@@ -117,11 +174,18 @@ export default function DoctorExpenseFormScreen() {
       const request = {
         expense_date: expenseDate.trim(),
         fare: Number(fare),
-        from_location: fromLocation.trim(),
+        from_location:
+          editing && expense?.visit_id === null
+            ? fromLocation.trim()
+            : undefined,
         proof_file: proofFile,
         remarks: remarks.trim(),
-        to_location: toLocation.trim(),
+        to_location:
+          editing && expense?.visit_id === null
+            ? toLocation.trim()
+            : undefined,
         transport_mode: transportMode,
+        visit_id: editing ? (expense?.visit_id ?? null) : visitId,
       };
 
       if (editing) {
@@ -212,7 +276,15 @@ export default function DoctorExpenseFormScreen() {
       setFormError("Select a valid expense date.");
       return;
     }
-    if (!fromLocation.trim() || !toLocation.trim()) {
+    if (!editing && visitId === null) {
+      setFormError("Select a completed patient visit.");
+      return;
+    }
+    if (
+      editing &&
+      expense?.visit_id === null &&
+      (!fromLocation.trim() || !toLocation.trim())
+    ) {
       setFormError("From and to locations are required.");
       return;
     }
@@ -299,56 +371,104 @@ export default function DoctorExpenseFormScreen() {
         onBack={goBack}
         title={editing ? "Edit Expense" : "Add Expense"}
       />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.flex}
-      >
-        <ScrollView
+      <View style={styles.flex}>
+        <FormScrollView
           contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
         >
-          <AppDatePickerField
-            error={
-              formError ===
-              "Select a valid expense date."
-                ? formError
-                : null
-            }
-            label="Expense date"
-            required
-            value={expenseDate}
-            onChange={(value) => {
-              setExpenseDate(value);
-              setFormError(null);
-            }}
-          />
+          {editing ? (
+            <AppDatePickerField
+              error={
+                formError === "Select a valid expense date."
+                  ? formError
+                  : null
+              }
+              label="Expense date"
+              required
+              value={expenseDate}
+              onChange={(value) => {
+                setExpenseDate(value);
+                setFormError(null);
+              }}
+            />
+          ) : (
+            <DoctorField
+              editable={false}
+              label="Expense date"
+              value={expenseDate}
+            />
+          )}
+
+          {!editing ? (
+            <>
+              <Text style={styles.sectionLabel}>
+                Completed patient visit *
+              </Text>
+              {visitOptionsQuery.isPending ? (
+                <ActivityIndicator
+                  color={colors.primary}
+                  style={styles.optionLoader}
+                />
+              ) : availableVisits.length === 0 ? (
+                <View style={styles.noVisits}>
+                  <Text style={styles.noVisitsTitle}>
+                    No completed patient visits available for today&apos;s
+                    expenses.
+                  </Text>
+                  <Text style={styles.noVisitsText}>
+                    Start your workday and Punch Out from a patient visit
+                    before creating an expense.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.visitOptions}>
+                  {availableVisits.map((option) => (
+                    <VisitOption
+                      key={option.visit_id}
+                      onPress={() => {
+                        setVisitId(option.visit_id);
+                        setFromLocation(option.from_location);
+                        setToLocation(option.to_location);
+                        setFormError(null);
+                      }}
+                      option={option}
+                      selected={visitId === option.visit_id}
+                    />
+                  ))}
+                </View>
+              )}
+              {formError === "Select a completed patient visit." ? (
+                <Text style={styles.choiceError}>{formError}</Text>
+              ) : null}
+            </>
+          ) : null}
+
           <DoctorField
+            editable={editing && expense?.visit_id === null}
             error={
               formError === "From and to locations are required."
                 ? formError
                 : null
             }
-            label="From location"
-            required
-            value={fromLocation}
-            onChangeText={(value) => {
-              setFromLocation(value);
-              setFormError(null);
-            }}
+            label="Travel from"
+            value={selectedVisit?.from_location ?? fromLocation}
+            onChangeText={setFromLocation}
           />
           <DoctorField
-            error={
-              formError === "From and to locations are required."
-                ? formError
-                : null
+            editable={editing && expense?.visit_id === null}
+            label="Travel to"
+            value={selectedVisit?.to_location ?? toLocation}
+            onChangeText={setToLocation}
+          />
+          <DoctorField
+            editable={false}
+            label="Distance"
+            value={
+              selectedVisit?.distance_km == null
+                ? expense?.distance_km == null
+                  ? "Calculated on submission"
+                  : `${expense.distance_km.toFixed(2)} km`
+                : `${selectedVisit.distance_km.toFixed(2)} km`
             }
-            label="To location"
-            required
-            value={toLocation}
-            onChangeText={(value) => {
-              setToLocation(value);
-              setFormError(null);
-            }}
           />
 
           <Text style={styles.sectionLabel}>Transport mode *</Text>
@@ -422,19 +542,29 @@ export default function DoctorExpenseFormScreen() {
           />
 
           <View style={styles.notice}>
-            <Text style={styles.noticeTitle}>Actual fare only</Text>
+            <Text style={styles.noticeTitle}>Route verified</Text>
             <Text style={styles.noticeText}>
-              Distance and kilometre calculations are not required.
+              Locations and distance come from attendance and patient
+              visit GPS. Enter only the actual fare paid.
             </Text>
           </View>
 
           <TouchableOpacity
             accessibilityRole="button"
-            accessibilityState={{ disabled: mutation.isPending }}
-            disabled={mutation.isPending}
+            accessibilityState={{
+              disabled:
+                mutation.isPending ||
+                (!editing && availableVisits.length === 0),
+            }}
+            disabled={
+              mutation.isPending ||
+              (!editing && availableVisits.length === 0)
+            }
             style={[
               styles.submitButton,
-              mutation.isPending && styles.disabledButton,
+              (mutation.isPending ||
+                (!editing && availableVisits.length === 0)) &&
+                styles.disabledButton,
             ]}
             onPress={submit}
           >
@@ -449,8 +579,8 @@ export default function DoctorExpenseFormScreen() {
                   : "Add Expense"}
             </Text>
           </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -478,6 +608,62 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: typography.size.small,
     marginBottom: spacing.xl,
+    marginTop: spacing.sm,
+  },
+  optionLoader: {
+    marginVertical: spacing.xl,
+  },
+  noVisits: {
+    backgroundColor: colors.warningSurface,
+    borderRadius: radius.control,
+    marginBottom: spacing.xl,
+    padding: spacing.lg,
+  },
+  noVisitsTitle: {
+    color: colors.warningDark,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  noVisitsText: {
+    color: colors.textMutedDark,
+    fontSize: typography.size.small,
+    lineHeight: typography.lineHeight.smallRelaxed,
+    marginTop: spacing.sm,
+  },
+  visitOptions: {
+    gap: spacing.md,
+    marginBottom: spacing.xl,
+  },
+  visitOption: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.inputBorder,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
+  selectedVisitOption: {
+    backgroundColor: colors.primarySurface,
+    borderColor: colors.primary,
+  },
+  visitOptionText: {
+    flex: 1,
+  },
+  visitPatient: {
+    color: colors.textStrong,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  visitMeta: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    marginTop: spacing.xs,
+  },
+  visitRoute: {
+    color: colors.primary,
+    fontSize: typography.size.small,
     marginTop: spacing.sm,
   },
   uploadCard: {

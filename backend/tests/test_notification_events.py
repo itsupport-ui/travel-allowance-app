@@ -58,20 +58,30 @@ class NotificationEventTests(unittest.TestCase):
             role="therapist",
             is_active=True,
         )
-        self.doctor = Doctor(
-            name="Doctor",
-            specialization="General",
-            phone="1234567890",
-            active=True,
+        self.doctor_user = User(
+            username="Doctor User",
+            email="doctor@example.com",
+            password_hash="unused",
+            role="doctor",
+            is_active=True,
         )
         self.db.add_all(
             [
                 self.admin,
                 self.therapist,
                 self.other_therapist,
-                self.doctor,
+                self.doctor_user,
             ]
         )
+        self.db.flush()
+        self.doctor = Doctor(
+            user_id=self.doctor_user.id,
+            name="Doctor",
+            specialization="General",
+            phone="1234567890",
+            active=True,
+        )
+        self.db.add(self.doctor)
         self.db.commit()
 
     def tearDown(self):
@@ -149,7 +159,7 @@ class NotificationEventTests(unittest.TestCase):
             status="pending",
         )
         rejected_claim = Claim(
-            therapist_id=self.therapist.id,
+            therapist_id=self.other_therapist.id,
             claim_date=date.today(),
             status="pending",
         )
@@ -182,7 +192,7 @@ class NotificationEventTests(unittest.TestCase):
         self.assertEqual(
             reject_tasks.tasks[0].args,
             (
-                self.therapist.id,
+                self.other_therapist.id,
                 rejected_claim.id,
                 "rejected",
             ),

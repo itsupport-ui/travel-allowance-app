@@ -11,9 +11,6 @@ import {
   ActivityIndicator,
   Alert,
   Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -22,6 +19,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { FormScrollView } from "../../src/components/layout/FormScrollView";
 import {
   createDoctorWithLogin,
   DoctorServiceError,
@@ -218,10 +216,7 @@ export default function DoctorCreateScreen() {
 
   return (
     <SafeAreaView edges={["top"]} style={styles.safeArea}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.keyboardView}
-      >
+      <View style={styles.keyboardView}>
         <View style={styles.header}>
           <TouchableOpacity
             accessibilityLabel="Cancel doctor creation"
@@ -240,9 +235,8 @@ export default function DoctorCreateScreen() {
           </View>
         </View>
 
-        <ScrollView
+        <FormScrollView
           contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.introRow}>
@@ -516,8 +510,8 @@ export default function DoctorCreateScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </FormScrollView>
+      </View>
     </SafeAreaView>
   );
 }

@@ -37,3 +37,10 @@ class TherapistWorkDay(Base):
     )
 
     is_active = Column(Boolean, default=True)
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    end_latitude = Column(Float, nullable=True)
+    end_longitude = Column(Float, nullable=True)
+    total_work_minutes = Column(Integer, nullable=True)
+    pending_schedules_count = Column(Integer, nullable=True)
+    completed_schedules_count = Column(Integer, nullable=True)
+    missed_schedules_count = Column(Integer, nullable=True)

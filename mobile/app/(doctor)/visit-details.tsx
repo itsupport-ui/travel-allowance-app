@@ -2,11 +2,10 @@ import { colors, radius, spacing, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router, type Href, useLocalSearchParams } from "expo-router";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -14,6 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { FormScrollView } from "../../src/components/layout/FormScrollView";
 import {
   DoctorBackHeader,
   DoctorDetailRow,
@@ -25,6 +25,9 @@ import {
 import { queryKeys } from "../../src/query/queryKeys";
 import {
   getDoctorVisit,
+  getDoctorVisitSession,
+  punchInDoctorVisit,
+  punchOutDoctorVisit,
   updateDoctorVisitStatus,
 } from "../../src/services/doctorWorkflowService";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
@@ -34,8 +37,30 @@ import {
   formatDoctorDateTime,
   parsePositiveId,
 } from "../../src/utils/doctorWorkflow";
+import {
+  getCurrentLocation,
+  requestLocationPermission,
+} from "../../src/utils/location";
 
-type VisitAction = "cancelled" | "visited";
+type VisitAction = "cancelled";
+
+const formatSessionTime = (value: string | null | undefined): string =>
+  value
+    ? new Date(value).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "Not recorded";
+
+const formatDuration = (seconds: number): string => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes}m ${remainingSeconds}s`;
+};
 
 export default function DoctorVisitDetailsScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -43,6 +68,12 @@ export default function DoctorVisitDetailsScreen() {
   const queryClient = useQueryClient();
   const actionRef = useRef<VisitAction | null>(null);
   const [remarks, setRemarks] = useState("");
+  const [coordinates, setCoordinates] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [elapsedTick, setElapsedTick] = useState(0);
   const visitQuery = useQuery({
     enabled: visitId !== null,
     queryFn: () => getDoctorVisit(visitId ?? 0),
@@ -52,15 +83,102 @@ export default function DoctorVisitDetailsScreen() {
         : queryKeys.doctor.visits.detail(visitId),
   });
   const visit = visitQuery.data;
-  const mutation = useMutation({
-    mutationFn: async (status: VisitAction) => {
+  const sessionQuery = useQuery({
+    enabled:
+      visitId !== null &&
+      visit?.status === "scheduled" &&
+      (coordinates !== null || visit.session_status === "IN_PROGRESS"),
+    queryFn: () =>
+      getDoctorVisitSession(
+        visitId ?? 0,
+        coordinates?.latitude,
+        coordinates?.longitude
+      ),
+    queryKey:
+      visitId === null
+        ? ["doctor", "visits", "session", "invalid"]
+        : queryKeys.doctor.visits.session(
+            visitId,
+            coordinates?.latitude,
+            coordinates?.longitude
+          ),
+  });
+
+  useEffect(() => {
+    if (
+      !visit ||
+      visit.status !== "scheduled" ||
+      visit.session_status !== "NOT_STARTED"
+    ) {
+      return;
+    }
+    let active = true;
+    const capture = async () => {
+      try {
+        await requestLocationPermission();
+        const current = await getCurrentLocation();
+        if (active) {
+          setCoordinates(current);
+          setLocationError(null);
+        }
+      } catch (error) {
+        if (active) {
+          setLocationError(
+            getApiErrorMessage(
+              error,
+              "Unable to capture current location."
+            )
+          );
+        }
+      }
+    };
+    void capture();
+    return () => {
+      active = false;
+    };
+  }, [visit]);
+
+  useEffect(() => {
+    if (sessionQuery.data?.session_status !== "IN_PROGRESS") {
+      return;
+    }
+    const timer = setInterval(
+      () => setElapsedTick((value) => value + 1),
+      1000
+    );
+    return () => clearInterval(timer);
+  }, [sessionQuery.data?.session_status]);
+
+  const invalidateVisitData = async () => {
+    if (visitId !== null) {
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.doctor.visits.detail(visitId),
+      });
+    }
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.doctor.visits.all,
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.doctor.visits.dashboard,
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.doctor.visits.completedToday,
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.doctor.workday.route,
+      }),
+    ]);
+  };
+  const cancelMutation = useMutation({
+    mutationFn: async () => {
       if (!visit) {
         throw new Error("Visit is not loaded.");
       }
-      actionRef.current = status;
+      actionRef.current = "cancelled";
       return updateDoctorVisitStatus(visit.id, {
         remarks: remarks.trim() || null,
-        status,
+        status: "cancelled",
       });
     },
     onError: (error) => {
@@ -74,21 +192,67 @@ export default function DoctorVisitDetailsScreen() {
         queryKeys.doctor.visits.detail(updatedVisit.id),
         updatedVisit
       );
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.doctor.visits.all,
-        }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.doctor.visits.dashboard,
-        }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.doctor.treatmentPlans.visits,
-        }),
-      ]);
-      Alert.alert("Visit Updated", "The visit status has been updated.");
+      await invalidateVisitData();
+      Alert.alert("Visit Cancelled", "The visit has been cancelled.");
     },
     onSettled: () => {
       actionRef.current = null;
+    },
+  });
+  const punchInMutation = useMutation({
+    mutationFn: async () => {
+      if (visitId === null) {
+        throw new Error("A valid visit ID is required.");
+      }
+      await requestLocationPermission();
+      const current = await getCurrentLocation();
+      return punchInDoctorVisit(
+        visitId,
+        current.latitude,
+        current.longitude
+      );
+    },
+    onError: (error) => {
+      Alert.alert(
+        "Unable to Punch In",
+        getApiErrorMessage(error, "Unable to start this visit.")
+      );
+    },
+    onSuccess: async (session) => {
+      queryClient.setQueryData(
+        queryKeys.doctor.visits.session(
+          session.visit_id,
+          coordinates?.latitude,
+          coordinates?.longitude
+        ),
+        session
+      );
+      await invalidateVisitData();
+      Alert.alert("Treatment Started", "Punch In was recorded.");
+    },
+  });
+  const punchOutMutation = useMutation({
+    mutationFn: async () => {
+      if (visitId === null) {
+        throw new Error("A valid visit ID is required.");
+      }
+      await requestLocationPermission();
+      const current = await getCurrentLocation();
+      return punchOutDoctorVisit(visitId, {
+        latitude: current.latitude,
+        longitude: current.longitude,
+        remarks: remarks.trim() || null,
+      });
+    },
+    onError: (error) => {
+      Alert.alert(
+        "Unable to Punch Out",
+        getApiErrorMessage(error, "Unable to complete this visit.")
+      );
+    },
+    onSuccess: async () => {
+      await invalidateVisitData();
+      Alert.alert("Visit Completed", "Punch Out was recorded.");
     },
   });
   const goBack = () => {
@@ -98,26 +262,60 @@ export default function DoctorVisitDetailsScreen() {
       router.replace("/(doctor)/(tabs)/visits" as Href);
     }
   };
-  const confirmStatus = (status: VisitAction) => {
-    if (!visit || mutation.isPending) {
+  const confirmCancel = () => {
+    if (!visit || cancelMutation.isPending) {
       return;
     }
-
-    const isVisited = status === "visited";
     Alert.alert(
-      isVisited ? "Mark Visit as Visited?" : "Cancel Visit?",
-      isVisited
-        ? `Confirm that the visit for ${visit.patient_name} is complete.`
-        : `Cancel the scheduled visit for ${visit.patient_name}?`,
+      "Cancel Visit?",
+      `Cancel the scheduled visit for ${visit.patient_name}?`,
       [
         { style: "cancel", text: "Back" },
         {
-          onPress: () => mutation.mutate(status),
-          style: isVisited ? "default" : "destructive",
-          text: isVisited ? "Mark Visited" : "Cancel Visit",
+          onPress: () => cancelMutation.mutate(),
+          style: "destructive",
+          text: "Cancel Visit",
         },
       ]
     );
+  };
+  const confirmPunchIn = () => {
+    Alert.alert(
+      "Punch In?",
+      `Start the visit for ${visit?.patient_name ?? "this patient"}?`,
+      [
+        { style: "cancel", text: "Cancel" },
+        {
+          onPress: () => punchInMutation.mutate(),
+          text: "Punch In",
+        },
+      ]
+    );
+  };
+  const confirmPunchOut = () => {
+    Alert.alert(
+      "Punch Out?",
+      "This completes the visit and records the treatment duration.",
+      [
+        { style: "cancel", text: "Cancel" },
+        {
+          onPress: () => punchOutMutation.mutate(),
+          text: "Punch Out",
+        },
+      ]
+    );
+  };
+  const refreshLocation = async () => {
+    try {
+      await requestLocationPermission();
+      const current = await getCurrentLocation();
+      setCoordinates(current);
+      setLocationError(null);
+    } catch (error) {
+      setLocationError(
+        getApiErrorMessage(error, "Unable to capture current location.")
+      );
+    }
   };
 
   if (visitId === null) {
@@ -153,10 +351,27 @@ export default function DoctorVisitDetailsScreen() {
     );
   }
 
+  const session = sessionQuery.data;
+  const elapsedSeconds =
+    session?.session_status === "IN_PROGRESS" && session.punch_in_time
+      ? Math.max(
+          session.elapsed_seconds,
+          Math.floor(
+            (Date.now() - new Date(session.punch_in_time).getTime()) /
+              1000
+          )
+        )
+      : (session?.treatment_duration ?? 0);
+  void elapsedTick;
+  const actionBusy =
+    cancelMutation.isPending ||
+    punchInMutation.isPending ||
+    punchOutMutation.isPending;
+
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
       <DoctorBackHeader onBack={goBack} title="Visit Details" />
-      <ScrollView contentContainerStyle={styles.content}>
+      <FormScrollView contentContainerStyle={styles.content}>
         {visit ? (
           <>
             <View style={styles.headerCard}>
@@ -202,6 +417,58 @@ export default function DoctorVisitDetailsScreen() {
 
             {visit.status === "scheduled" ? (
               <View style={styles.actionCard}>
+                <Text style={styles.sessionTitle}>Visit Session</Text>
+                {sessionQuery.isPending && !session ? (
+                  <ActivityIndicator
+                    color={colors.primary}
+                    style={styles.sessionLoader}
+                  />
+                ) : (
+                  <>
+                    <DoctorDetailRow
+                      label="Session status"
+                      value={
+                        session?.session_status ??
+                        visit.session_status
+                      }
+                    />
+                    <DoctorDetailRow
+                      label="Punch In"
+                      value={formatSessionTime(
+                        session?.punch_in_time ??
+                          visit.punch_in_time
+                      )}
+                    />
+                    {(session?.session_status ??
+                      visit.session_status) !== "NOT_STARTED" ? (
+                      <DoctorDetailRow
+                        label={
+                          session?.session_status === "IN_PROGRESS"
+                            ? "Elapsed"
+                            : "Duration"
+                        }
+                        value={formatDuration(elapsedSeconds)}
+                      />
+                    ) : null}
+                  </>
+                )}
+                {session?.eligibility_message ? (
+                  <Text style={styles.eligibilityText}>
+                    {session.eligibility_message}
+                  </Text>
+                ) : null}
+                {locationError ? (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    style={styles.locationRetry}
+                    onPress={() => void refreshLocation()}
+                  >
+                    <Text style={styles.locationError}>
+                      {locationError}
+                    </Text>
+                    <Text style={styles.retryText}>Retry location</Text>
+                  </TouchableOpacity>
+                ) : null}
                 <DoctorField
                   label="Remarks"
                   multiline
@@ -212,15 +479,19 @@ export default function DoctorVisitDetailsScreen() {
                 <View style={styles.actions}>
                   <TouchableOpacity
                     accessibilityRole="button"
-                    disabled={mutation.isPending}
+                    disabled={
+                      actionBusy ||
+                      (session?.session_status ??
+                        visit.session_status) === "IN_PROGRESS"
+                    }
                     style={[
                       styles.actionButton,
                       styles.cancelButton,
-                      mutation.isPending && styles.disabledButton,
+                      actionBusy && styles.disabledButton,
                     ]}
-                    onPress={() => confirmStatus("cancelled")}
+                    onPress={confirmCancel}
                   >
-                    {mutation.isPending &&
+                    {cancelMutation.isPending &&
                     actionRef.current === "cancelled" ? (
                       <ActivityIndicator
                         color={colors.danger}
@@ -236,37 +507,64 @@ export default function DoctorVisitDetailsScreen() {
                     <Text style={styles.cancelText}>Cancel</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    disabled={mutation.isPending}
-                    style={[
-                      styles.actionButton,
-                      styles.visitedButton,
-                      mutation.isPending && styles.disabledButton,
-                    ]}
-                    onPress={() => confirmStatus("visited")}
-                  >
-                    {mutation.isPending &&
-                    actionRef.current === "visited" ? (
-                      <ActivityIndicator
-                        color={colors.surface}
-                        size="small"
-                      />
-                    ) : (
-                      <Ionicons
-                        color={colors.surface}
-                        name="checkmark-circle-outline"
-                        size={18}
-                      />
-                    )}
-                    <Text style={styles.visitedText}>Mark Visited</Text>
-                  </TouchableOpacity>
+                  {session?.can_punch_in ? (
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      disabled={actionBusy}
+                      style={[
+                        styles.actionButton,
+                        styles.visitedButton,
+                        actionBusy && styles.disabledButton,
+                      ]}
+                      onPress={confirmPunchIn}
+                    >
+                      {punchInMutation.isPending ? (
+                        <ActivityIndicator
+                          color={colors.surface}
+                          size="small"
+                        />
+                      ) : (
+                        <Ionicons
+                          color={colors.surface}
+                          name="log-in-outline"
+                          size={18}
+                        />
+                      )}
+                      <Text style={styles.visitedText}>Punch In</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  {session?.can_punch_out ? (
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      disabled={actionBusy}
+                      style={[
+                        styles.actionButton,
+                        styles.visitedButton,
+                        actionBusy && styles.disabledButton,
+                      ]}
+                      onPress={confirmPunchOut}
+                    >
+                      {punchOutMutation.isPending ? (
+                        <ActivityIndicator
+                          color={colors.surface}
+                          size="small"
+                        />
+                      ) : (
+                        <Ionicons
+                          color={colors.surface}
+                          name="log-out-outline"
+                          size={18}
+                        />
+                      )}
+                      <Text style={styles.visitedText}>Punch Out</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               </View>
             ) : null}
           </>
         ) : null}
-      </ScrollView>
+      </FormScrollView>
     </SafeAreaView>
   );
 }
@@ -320,6 +618,39 @@ const styles = StyleSheet.create({
     borderRadius: radius.control,
     marginTop: spacing.lgPlus,
     padding: spacing.xl,
+  },
+  sessionTitle: {
+    color: colors.textStrong,
+    fontSize: typography.size.body,
+    fontWeight: typography.weight.extrabold,
+    marginBottom: spacing.sm,
+  },
+  sessionLoader: {
+    marginVertical: spacing.xl,
+  },
+  eligibilityText: {
+    color: colors.textMuted,
+    fontSize: typography.size.smallLarge,
+    lineHeight: typography.lineHeight.bodyRelaxed,
+    marginBottom: spacing.lg,
+    marginTop: spacing.md,
+  },
+  locationRetry: {
+    backgroundColor: colors.dangerSurface,
+    borderRadius: radius.control,
+    marginBottom: spacing.lg,
+    padding: spacing.lg,
+  },
+  locationError: {
+    color: colors.danger,
+    fontSize: typography.size.small,
+    lineHeight: typography.lineHeight.smallRelaxed,
+  },
+  retryText: {
+    color: colors.primary,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.extrabold,
+    marginTop: spacing.sm,
   },
   actions: {
     flexDirection: "row",

@@ -7,8 +7,9 @@ from app.utils.uploads import public_upload_name
 
 class DoctorExpenseCreate(BaseModel):
     expense_date: date
-    from_location: str
-    to_location: str
+    from_location: str | None = None
+    to_location: str | None = None
+    visit_id: int | None = None
     transport_mode: str
     fare: float = Field(gt=0)
     remarks: str | None = None
@@ -20,8 +21,17 @@ class DoctorExpenseResponse(BaseModel):
     id: int
     doctor_id: int
     expense_date: date
+    workday_id: int | None = None
+    visit_id: int | None = None
+    from_waypoint_id: int | None = None
+    to_waypoint_id: int | None = None
     from_location: str
     to_location: str
+    from_latitude: float | None = None
+    from_longitude: float | None = None
+    to_latitude: float | None = None
+    to_longitude: float | None = None
+    distance_km: float | None = None
     transport_mode: str
     fare: float
     proof_file: str | None = None

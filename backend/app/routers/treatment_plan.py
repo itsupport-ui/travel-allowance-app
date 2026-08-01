@@ -10,6 +10,7 @@ from app.models.doctor import Doctor
 from app.models.doctor_visit import DoctorVisit
 from app.models.treatment_plan import TreatmentPlan
 from app.models.treatment_schedule import TreatmentSchedule
+from app.services.schedule_conflict_service import find_schedule_conflicts
 from app.models.user import User
 from app.schemas.treatment_plan import (
     TreatmentPlanCreate,
@@ -390,6 +391,25 @@ async def create_treatment_schedule(
         first_session_date = (
             schedule_data.treatment_date or schedule_data.start_date
         )
+        for index in range(schedule_data.number_of_sessions):
+            session_date = first_session_date + timedelta(days=index)
+            if find_schedule_conflicts(
+                db,
+                therapist_id=therapist.id,
+                schedule_type="one_time",
+                treatment_date=session_date,
+                start_date=None,
+                end_date=None,
+                in_time=schedule_data.in_time,
+                out_time=schedule_data.out_time,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "The selected therapist has an overlapping "
+                        f"appointment on {session_date.isoformat()}."
+                    ),
+                )
         schedules = [
             TreatmentSchedule(
                 treatment_plan_id=plan.id,
@@ -405,7 +425,6 @@ async def create_treatment_schedule(
                 out_time=schedule_data.out_time,
                 priority=schedule_data.priority,
                 instructions=schedule_data.instructions,
-                transport_mode=schedule_data.transport_mode,
                 status="scheduled",
             )
             for index in range(schedule_data.number_of_sessions)

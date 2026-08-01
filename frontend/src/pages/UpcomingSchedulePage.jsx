@@ -1,56 +1,29 @@
 import { useEffect, useState } from "react"
 import toast from "react-hot-toast"
 import TherapistLayout from "../layouts/TherapistLayout"
-import {
-  getUpcomingSchedules,
-  completeSchedule,
-  missedSchedule
-} from "../services/scheduleService"
+import { getUpcomingSchedules } from "../services/scheduleService"
 
 function UpcomingSchedulePage() {
   const [schedules, setSchedules] = useState([])
 
   useEffect(() => {
+    let active = true
+
+    async function fetchSchedules() {
+      try {
+        const token = localStorage.getItem("token")
+        const data = await getUpcomingSchedules(token)
+        if (active) setSchedules(data)
+      } catch {
+        toast.error("Failed to load schedules")
+      }
+    }
+
     fetchSchedules()
+    return () => {
+      active = false
+    }
   }, [])
-
-  const fetchSchedules = async () => {
-    try {
-      const token = localStorage.getItem("token")
-      const data = await getUpcomingSchedules(token)
-      setSchedules(data)
-    } catch {
-      toast.error("Failed to load schedules")
-    }
-  }
-
-  const handleComplete = async (id) => {
-    const notes = prompt("Completion notes")
-    if (notes === null) return // Stop execution if prompt modal is canceled
-
-    try {
-      const token = localStorage.getItem("token")
-      await completeSchedule(id, notes, token)
-      toast.success("Treatment completed")
-      fetchSchedules()
-    } catch {
-      toast.error("Failed to complete")
-    }
-  }
-
-  const handleMissed = async (id) => {
-    const reason = prompt("Missed reason")
-    if (reason === null) return // Stop execution if prompt modal is canceled
-
-    try {
-      const token = localStorage.getItem("token")
-      await missedSchedule(id, reason, token)
-      toast.success("Marked as missed")
-      fetchSchedules()
-    } catch {
-      toast.error("Failed to update")
-    }
-  }
 
   // Dynamic visual status styling badge helper
   const getPriorityBadge = (priority) => {
@@ -133,21 +106,8 @@ function UpcomingSchedulePage() {
                   </p>
                 </div>
 
-                {/* Touch Action Row: Stretches full-width natively on smaller mobile devices */}
-                <div className="grid grid-cols-2 gap-3 mt-5 pt-3 border-t border-gray-50">
-                  <button
-                    onClick={() => handleComplete(schedule.id)}
-                    className="w-full bg-green-600 hover:bg-green-700 active:scale-[0.99] text-white py-3 px-4 rounded-xl text-sm font-semibold transition-all shadow-sm shadow-green-600/10 text-center"
-                  >
-                    Complete
-                  </button>
-
-                  <button
-                    onClick={() => handleMissed(schedule.id)}
-                    className="w-full bg-red-50 hover:bg-red-100 active:scale-[0.99] text-red-600 py-3 px-4 rounded-xl text-sm font-semibold transition-all text-center"
-                  >
-                    Missed
-                  </button>
+                <div className="mt-5 border-t border-gray-100 pt-3 text-xs font-semibold text-gray-500">
+                  Completion and missed actions become available on the scheduled visit date.
                 </div>
 
               </div>

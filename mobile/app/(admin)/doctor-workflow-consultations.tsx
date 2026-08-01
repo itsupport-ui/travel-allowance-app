@@ -2,11 +2,10 @@ import { colors, radius, shadows, spacing, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
+  FlatList,
   Modal,
   Platform,
   RefreshControl,
@@ -19,23 +18,24 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppDatePickerField } from "../../src/components/common/AppDatePickerField";
+import { FormScrollView } from "../../src/components/layout/FormScrollView";
+import {
+  AdminConsultationCard,
+  ConsultationEmptyState,
+  ConsultationSearchBar,
+  ConsultationSkeletonCard,
+} from "../../src/components/doctor/AdminConsultationUi";
 import {
   DoctorBackHeader,
   DoctorChoiceChips,
-  DoctorEmptyState,
   DoctorErrorState,
   DoctorField,
-  DoctorLoadingState,
-  DoctorStatusBadge,
 } from "../../src/components/doctor/DoctorWorkflowUi";
 import { queryKeys } from "../../src/query/queryKeys";
 import {
-  confirmDoctorConsultation,
   createDoctorConsultation,
-  createVisitFromConsultation,
   getAdminDoctorConsultations,
   getConsultationDoctors,
-  rejectDoctorConsultation,
 } from "../../src/services/doctorWorkflowService";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
 import type {
@@ -44,13 +44,9 @@ import type {
   DoctorConsultationFilters,
 } from "../../src/types/doctorWorkflow";
 import type { Doctor } from "../../src/types/doctor";
-import {
-  formatDoctorDate,
-  getLocalIsoDate,
-  nullableDoctorText,
-} from "../../src/utils/doctorWorkflow";
+import { getLocalIsoDate, nullableDoctorText } from "../../src/utils/doctorWorkflow";
 
-type ActivePanel = "create" | "reject" | "visit" | null;
+type Panel = "create" | null;
 
 const emptyConsultationForm = {
   doctor_id: "",
@@ -63,19 +59,13 @@ const emptyConsultationForm = {
   scheduled_time: "",
 };
 
-const emptyFilters = {
+const emptyFilters: DoctorConsultationFilters = {
   doctor_id: "",
   from_date: "",
   patient_decision: "",
   status: "",
   to_date: "",
 };
-
-const isIsoDate = (value: string): boolean =>
-  !value || /^\d{4}-\d{2}-\d{2}$/.test(value);
-
-const isTime = (value: string): boolean =>
-  /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 
 const statusFilters = [
   { label: "All", value: "" },
@@ -92,49 +82,31 @@ const decisionFilters = [
   { label: "Follow up", value: "follow_up" },
 ] as const;
 
-const actionablePatientDecisions = new Set(["pending", "follow_up"]);
-
-const getConsultationVisitId = (
-  consultation: DoctorConsultation
-): number | null =>
-  consultation.visit_id ?? consultation.doctor_visit_id ?? null;
-
-const isConsultationConverted = (
-  consultation: DoctorConsultation
-): boolean =>
-  Boolean(consultation.has_visit) ||
-  Boolean(getConsultationVisitId(consultation));
-
 const EMPTY_CONSULTATIONS: DoctorConsultation[] = [];
 const EMPTY_DOCTORS: Doctor[] = [];
-const DOCTOR_WORKFLOW_ROUTE = "/(admin)/doctor-workflow" as const;
 
-const goToDoctorWorkflow = () => {
-  router.replace(DOCTOR_WORKFLOW_ROUTE);
-};
+const isIsoDate = (value: string): boolean =>
+  !value || /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+const isTime = (value: string): boolean =>
+  /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+
+const normalize = (value: string | null | undefined): string =>
+  value?.trim().toLowerCase() ?? "";
 
 export default function AdminDoctorConsultationsScreen() {
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<DoctorConsultationFilters>(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState<DoctorConsultationFilters>(emptyFilters);
+  const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
-  const [panel, setPanel] = useState<ActivePanel>(null);
-  const [selectedConsultation, setSelectedConsultation] = useState<DoctorConsultation | null>(null);
+  const [panel, setPanel] = useState<Panel>(null);
   const [consultationForm, setConsultationForm] = useState(emptyConsultationForm);
-  const [rejectionReason, setRejectionReason] = useState("");
-  const [visitForm, setVisitForm] = useState({
-    remarks: "",
-    visit_date: getLocalIsoDate(),
-    visit_time: "",
-  });
   const [formError, setFormError] = useState<string | null>(null);
 
   const consultationsQuery = useQuery({
     queryFn: () => getAdminDoctorConsultations(appliedFilters),
-    queryKey: [
-      ...queryKeys.adminDoctorWorkflow.consultations,
-      appliedFilters,
-    ],
+    queryKey: [...queryKeys.adminDoctorWorkflow.consultations, appliedFilters],
   });
   const doctorsQuery = useQuery({
     queryFn: getConsultationDoctors,
@@ -147,12 +119,27 @@ export default function AdminDoctorConsultationsScreen() {
     () => new Map(doctors.map((doctor) => [doctor.id, doctor.name])),
     [doctors]
   );
-
-  const invalidate = async () => {
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.adminDoctorWorkflow.consultations,
+  const searchTerm = normalize(search);
+  const visibleConsultations = useMemo(() => {
+    if (!searchTerm) return consultations;
+    return consultations.filter((consultation) => {
+      const doctorName = doctorNameById.get(consultation.doctor_id) ?? "";
+      return [
+        consultation.patient_name,
+        consultation.patient_phone,
+        doctorName,
+        consultation.purpose,
+      ].some((value) => normalize(value).includes(searchTerm));
     });
-  };
+  }, [consultations, doctorNameById, searchTerm]);
+
+  const invalidate = useCallback(
+    () =>
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.adminDoctorWorkflow.consultations,
+      }),
+    [queryClient]
+  );
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -169,119 +156,35 @@ export default function AdminDoctorConsultationsScreen() {
       return createDoctorConsultation(payload);
     },
     onError: (error) => {
-      Alert.alert(
-        "Unable to Schedule Consultation",
-        getApiErrorMessage(error, "Unable to schedule this consultation.")
-      );
+      setFormError(getApiErrorMessage(error, "Unable to schedule this consultation."));
     },
     onSuccess: async () => {
       await invalidate();
       setPanel(null);
       setConsultationForm(emptyConsultationForm);
-      Alert.alert("Consultation Scheduled", "The consultation was created.");
     },
   });
 
-  const confirmMutation = useMutation({
-    mutationFn: confirmDoctorConsultation,
-    onError: (error) => {
-      Alert.alert(
-        "Unable to Confirm",
-        getApiErrorMessage(error, "Unable to confirm this consultation.")
-      );
-    },
-    onSuccess: async () => {
-      await invalidate();
-      Alert.alert("Consultation Confirmed", "Patient decision was confirmed.");
-    },
-  });
-
-  const rejectMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedConsultation) {
-        throw new Error("Select a consultation first.");
-      }
-      return rejectDoctorConsultation(
-        selectedConsultation.id,
-        rejectionReason.trim()
-      );
-    },
-    onError: (error) => {
-      Alert.alert(
-        "Unable to Reject",
-        getApiErrorMessage(error, "Unable to reject this consultation.")
-      );
-    },
-    onSuccess: async () => {
-      await invalidate();
-      setPanel(null);
-      setSelectedConsultation(null);
-      setRejectionReason("");
-      Alert.alert("Consultation Rejected", "Rejection reason was saved.");
-    },
-  });
-
-  const createVisitMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedConsultation) {
-        throw new Error("Select a consultation first.");
-      }
-      return createVisitFromConsultation(selectedConsultation.id, {
-        remarks: nullableDoctorText(visitForm.remarks),
-        visit_date: visitForm.visit_date.trim(),
-        visit_time: visitForm.visit_time.trim(),
-      });
-    },
-    onError: (error) => {
-      Alert.alert(
-        "Unable to Create Visit",
-        getApiErrorMessage(error, "Unable to create a visit from this consultation.")
-      );
-    },
-    onSuccess: async (visit) => {
-      await invalidate();
-      setPanel(null);
-      setSelectedConsultation(null);
-      setVisitForm({
-        remarks: "",
-        visit_date: getLocalIsoDate(),
-        visit_time: "",
-      });
-      Alert.alert("Visit Created", `Doctor visit #${visit.id} was created.`);
-    },
-  });
-
-  const openCreate = () => {
+  const openCreate = useCallback(() => {
     setFormError(null);
-    setSelectedConsultation(null);
     setConsultationForm(emptyConsultationForm);
     setPanel("create");
-  };
+  }, []);
 
-  const openReject = (consultation: DoctorConsultation) => {
-    setFormError(null);
-    setSelectedConsultation(consultation);
-    setRejectionReason("");
-    setPanel("reject");
-  };
+  const openDetails = useCallback((consultation: DoctorConsultation) => {
+    router.push(`./doctor-workflow-consultation-details?id=${consultation.id}`);
+  }, []);
 
-  const openVisit = (consultation: DoctorConsultation) => {
-    if (isConsultationConverted(consultation)) {
-      Alert.alert(
-        "Visit already created",
-        "This consultation has already been converted to a doctor visit."
-      );
-      return;
-    }
-    setFormError(null);
-    setSelectedConsultation(consultation);
-    setVisitForm({
-      remarks: "",
-      visit_date: getLocalIsoDate(),
-      visit_time: "",
-    });
-    setPanel("visit");
-  };
+  const renderItem = useCallback(
+    ({ item }: { item: DoctorConsultation }) => (
+      <AdminConsultationCard
+        consultation={item}
+        doctorName={doctorNameById.get(item.doctor_id) ?? `Doctor #${item.doctor_id}`}
+        onPress={openDetails}
+      />
+    ),
+    [doctorNameById, openDetails]
+  );
 
   const submitCreate = () => {
     if (
@@ -312,64 +215,11 @@ export default function AdminDoctorConsultationsScreen() {
     createMutation.mutate();
   };
 
-  const submitReject = () => {
-    if (!rejectionReason.trim()) {
-      setFormError("Rejection reason is required.");
-      return;
-    }
-    setFormError(null);
-    rejectMutation.mutate();
-  };
-
-  const submitVisit = () => {
-    if (selectedConsultation && isConsultationConverted(selectedConsultation)) {
-      Alert.alert(
-        "Visit already created",
-        "This consultation has already been converted to a doctor visit."
-      );
-      setPanel(null);
-      setSelectedConsultation(null);
-      return;
-    }
-    if (!visitForm.visit_date.trim() || !visitForm.visit_time.trim()) {
-      setFormError("Visit date and time are required.");
-      return;
-    }
-    if (!isIsoDate(visitForm.visit_date)) {
-      setFormError("Select a valid visit date.");
-      return;
-    }
-    if (visitForm.visit_date < getLocalIsoDate()) {
-      setFormError("Visit date cannot be in the past.");
-      return;
-    }
-    if (!isTime(visitForm.visit_time)) {
-      setFormError("Visit time must use HH:MM 24-hour format.");
-      return;
-    }
-    setFormError(null);
-    createVisitMutation.mutate();
-  };
-
-  const confirmConsultation = (consultation: DoctorConsultation) => {
-    Alert.alert(
-      "Confirm Consultation?",
-      `Confirm the patient decision for ${consultation.patient_name}?`,
-      [
-        { style: "cancel", text: "Cancel" },
-        {
-          onPress: () => confirmMutation.mutate(consultation.id),
-          text: "Confirm",
-        },
-      ]
-    );
-  };
-
   if (
     (consultationsQuery.isPending && !consultationsQuery.data) ||
     (doctorsQuery.isPending && !doctorsQuery.data)
   ) {
-    return <DoctorLoadingState label="Loading doctor consultations..." />;
+    return <ConsultationLoadingState />;
   }
 
   if (
@@ -380,21 +230,15 @@ export default function AdminDoctorConsultationsScreen() {
     return (
       <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
         <DoctorBackHeader
-          onBack={goToDoctorWorkflow}
-          title="Doctor Consultations"
+          onBack={() => router.replace("/(admin)/doctor-workflow")}
+          title="Consultations"
         />
         <DoctorErrorState
-          message={getApiErrorMessage(
-            error,
-            "Unable to load doctor consultations."
-          )}
+          message={getApiErrorMessage(error, "Unable to load consultations.")}
           onRetry={() =>
-            void Promise.all([
-              consultationsQuery.refetch(),
-              doctorsQuery.refetch(),
-            ])
+            void Promise.all([consultationsQuery.refetch(), doctorsQuery.refetch()])
           }
-          title="Consultations unavailable"
+          title="Unable to load consultations"
         />
       </SafeAreaView>
     );
@@ -403,268 +247,133 @@ export default function AdminDoctorConsultationsScreen() {
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
       <DoctorBackHeader
-        action={
-          <TouchableOpacity
-            accessibilityRole="button"
-            style={styles.headerButton}
-            onPress={openCreate}
-          >
-            <Ionicons color={colors.primary} name="add" size={24} />
-          </TouchableOpacity>
-        }
-        onBack={goToDoctorWorkflow}
+        onBack={() => router.replace("/(admin)/doctor-workflow")}
         title="Consultations"
       />
-
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={styles.flex}
-      >
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={
-            <RefreshControl
-              colors={[colors.primary]}
-              refreshing={consultationsQuery.isRefetching}
-              tintColor={colors.primary}
-              onRefresh={() => void consultationsQuery.refetch()}
-            />
-          }
-        >
-          <View style={styles.pageHeader}>
-            <View>
-              <Text style={styles.eyebrow}>Doctor Workflow</Text>
-              <Text style={styles.title}>All Consultations</Text>
-              <Text style={styles.subtitle}>
-                {consultations.length} total records found.
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.filterToggleButton, showFilters && styles.filterToggleActive]}
-              onPress={() => setShowFilters(!showFilters)}
-            >
-              <Ionicons name="options-outline" size={20} color={showFilters ? colors.surface : colors.primary} />
-              <Text style={[styles.filterToggleText, showFilters && styles.filterToggleTextActive]}>Filters</Text>
-            </TouchableOpacity>
-          </View>
-
-          {showFilters && (
-            <FilterCard
-              doctors={doctors}
-              filters={filters}
-              onApply={() => {
-                setAppliedFilters(filters);
-                setShowFilters(false);
-              }}
-              onClear={() => {
-                setFilters(emptyFilters);
-                setAppliedFilters(emptyFilters);
-              }}
-              onChange={setFilters}
-            />
-          )}
-
-          {consultations.length === 0 ? (
-            <DoctorEmptyState
-              description="No consultations match the selected filters."
-              icon="call-outline"
-              title="No consultations"
-            />
-          ) : (
-            consultations.map((consultation) => (
-              <ConsultationCard
-                busy={
-                  confirmMutation.isPending ||
-                  rejectMutation.isPending ||
-                  createVisitMutation.isPending
-                }
-                consultation={consultation}
-                doctorName={
-                  doctorNameById.get(consultation.doctor_id) ??
-                  `Doctor #${consultation.doctor_id}`
-                }
-                key={consultation.id}
-                onConfirm={confirmConsultation}
-                onReject={openReject}
-                onVisit={openVisit}
-              />
-            ))
-          )}
-        </ScrollView>
-      </KeyboardAvoidingView>
-
-      {/* MODALS */}
-
-      {/* 1. Schedule Consultation Modal */}
-      <Modal visible={panel === "create"} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setPanel(null)}>
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Schedule Consultation</Text>
-            <TouchableOpacity onPress={() => setPanel(null)}>
-              <Ionicons name="close" size={28} color={colors.textPrimary} />
-            </TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
-            <DoctorField
-              label="Patient name"
-              required
-              value={consultationForm.patient_name}
-              onChangeText={(value) =>
-                setConsultationForm((current) => ({ ...current, patient_name: value }))
-              }
-            />
-            <DoctorField
-              keyboardType="phone-pad"
-              label="Patient phone"
-              required
-              value={consultationForm.patient_phone}
-              onChangeText={(value) =>
-                setConsultationForm((current) => ({ ...current, patient_phone: value }))
-              }
-            />
-            <DoctorField
-              label="Patient address"
-              multiline
-              required
-              value={consultationForm.patient_address}
-              onChangeText={(value) =>
-                setConsultationForm((current) => ({ ...current, patient_address: value }))
-              }
-            />
-            <DoctorSelectList
-              doctors={doctors}
-              selectedId={consultationForm.doctor_id}
-              onSelect={(doctorId) =>
-                setConsultationForm((current) => ({ ...current, doctor_id: doctorId }))
-              }
-            />
-            <AppDatePickerField
-              label="Scheduled date"
-              required
-              value={consultationForm.scheduled_date}
-              onChange={(value) =>
-                setConsultationForm((current) => ({ ...current, scheduled_date: value }))
-              }
-            />
-            <DoctorField
-              label="Scheduled time"
-              placeholder="HH:MM"
-              required
-              value={consultationForm.scheduled_time}
-              onChangeText={(value) =>
-                setConsultationForm((current) => ({ ...current, scheduled_time: value }))
-              }
-            />
-            <DoctorField
-              label="Purpose"
-              multiline
-              required
-              value={consultationForm.purpose}
-              onChangeText={(value) =>
-                setConsultationForm((current) => ({ ...current, purpose: value }))
-              }
-            />
-            <DoctorField
-              label="Notes"
-              multiline
-              value={consultationForm.notes}
-              onChangeText={(value) =>
-                setConsultationForm((current) => ({ ...current, notes: value }))
-              }
-            />
-            <View style={{ marginTop: spacing.md }}>
-              <PanelActions
-                busy={createMutation.isPending}
-                error={formError}
-                primaryLabel="Schedule"
-                onCancel={goToDoctorWorkflow}
-                onSubmit={submitCreate}
-              />
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
-
-      {/* 2. Reject Consultation Modal */}
-      <Modal visible={panel === "reject"} animationType="slide" transparent={true} onRequestClose={() => setPanel(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
-          <View style={styles.bottomSheet}>
-             <Text style={styles.modalTitle}>Reject Consultation</Text>
-             <Text style={styles.panelSubtitle}>{selectedConsultation?.patient_name}</Text>
-             <DoctorField
-                label="Rejection reason"
-                multiline
-                required
-                value={rejectionReason}
-                onChangeText={setRejectionReason}
-              />
-              <View style={{ marginTop: spacing.md }}>
-                <PanelActions
-                  busy={rejectMutation.isPending}
-                  destructive
-                  error={formError}
-                  primaryLabel="Reject"
-                  onCancel={goToDoctorWorkflow}
-                  onSubmit={submitReject}
-                />
+      <FlatList
+        contentContainerStyle={styles.listContent}
+        data={visibleConsultations}
+        initialNumToRender={8}
+        keyboardShouldPersistTaps="handled"
+        keyExtractor={(item) => String(item.id)}
+        ListEmptyComponent={
+          <ConsultationEmptyState
+            description={
+              searchTerm || appliedFilterCount(appliedFilters) > 0
+                ? "Try changing your search or filters."
+                : "Schedule a consultation to begin the doctor workflow."
+            }
+            onCreate={openCreate}
+            searchActive={Boolean(searchTerm)}
+          />
+        }
+        ListFooterComponent={<View style={styles.listFooter} />}
+        ListHeaderComponent={
+          <View>
+            <View style={styles.pageHeader}>
+              <View style={styles.headerCopy}>
+                <Text style={styles.eyebrow}>Doctor Workflow</Text>
+                <Text style={styles.title}>Consultations</Text>
+                <Text style={styles.subtitle}>
+                  {visibleConsultations.length} of {consultations.length} records
+                </Text>
               </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* 3. Create Visit Modal */}
-      <Modal visible={panel === "visit"} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setPanel(null)}>
-        <SafeAreaView style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Create Doctor Visit</Text>
-            <TouchableOpacity onPress={() => setPanel(null)}>
-              <Ionicons name="close" size={28} color={colors.textPrimary} />
-            </TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
-            <Text style={styles.panelSubtitle}>
-              {selectedConsultation?.patient_name}
-            </Text>
-            <AppDatePickerField
-              label="Visit date"
-              required
-              value={visitForm.visit_date}
-              onChange={(value) =>
-                setVisitForm((current) => ({ ...current, visit_date: value }))
-              }
-            />
-            <DoctorField
-              label="Visit time"
-              placeholder="HH:MM"
-              required
-              value={visitForm.visit_time}
-              onChangeText={(value) =>
-                setVisitForm((current) => ({ ...current, visit_time: value }))
-              }
-            />
-            <DoctorField
-              label="Remarks"
-              multiline
-              value={visitForm.remarks}
-              onChangeText={(value) =>
-                setVisitForm((current) => ({ ...current, remarks: value }))
-              }
-            />
-            <View style={{ marginTop: spacing.md }}>
-              <PanelActions
-                busy={createVisitMutation.isPending}
-                error={formError}
-                primaryLabel="Create Visit"
-                onCancel={goToDoctorWorkflow}
-                onSubmit={submitVisit}
-              />
+              <TouchableOpacity
+                accessibilityLabel={showFilters ? "Hide filters" : "Show filters"}
+                accessibilityRole="button"
+                style={[styles.filterButton, showFilters && styles.filterButtonActive]}
+                onPress={() => setShowFilters((current) => !current)}
+              >
+                <Ionicons
+                  color={showFilters ? colors.surface : colors.primary}
+                  name="options-outline"
+                  size={19}
+                />
+                <Text style={[styles.filterButtonText, showFilters && styles.filterButtonTextActive]}>
+                  Filters
+                </Text>
+              </TouchableOpacity>
             </View>
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
+            <ConsultationSearchBar value={search} onChangeText={setSearch} />
+            {showFilters ? (
+              <FilterCard
+                doctors={doctors}
+                filters={filters}
+                onApply={() => {
+                  setAppliedFilters(filters);
+                  setShowFilters(false);
+                }}
+                onClear={() => {
+                  setFilters(emptyFilters);
+                  setAppliedFilters(emptyFilters);
+                }}
+                onChange={setFilters}
+              />
+            ) : null}
+            <View style={styles.listHeadingRow}>
+              <Text style={styles.sectionTitle}>All consultations</Text>
+              {appliedFilterCount(appliedFilters) > 0 ? (
+                <Text style={styles.filterCountText}>
+                  {appliedFilterCount(appliedFilters)} filters active
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        }
+        refreshControl={
+          <RefreshControl
+            colors={[colors.primary]}
+            refreshing={consultationsQuery.isRefetching}
+            tintColor={colors.primary}
+            onRefresh={() => void consultationsQuery.refetch()}
+          />
+        }
+        renderItem={renderItem}
+        showsVerticalScrollIndicator={false}
+      />
+      <TouchableOpacity
+        accessibilityLabel="Create consultation"
+        accessibilityRole="button"
+        activeOpacity={0.86}
+        style={styles.fab}
+        onPress={openCreate}
+      >
+        <Ionicons color={colors.surface} name="add" size={28} />
+      </TouchableOpacity>
+      <CreateConsultationModal
+        doctors={doctors}
+        error={formError}
+        form={consultationForm}
+        saving={createMutation.isPending}
+        visible={panel === "create"}
+        onChange={setConsultationForm}
+        onClose={() => setPanel(null)}
+        onSubmit={submitCreate}
+      />
+    </SafeAreaView>
+  );
+}
 
+function appliedFilterCount(filters: DoctorConsultationFilters): number {
+  return Object.values(filters).filter((value) => Boolean(value?.trim())).length;
+}
+
+function ConsultationLoadingState() {
+  return (
+    <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
+      <DoctorBackHeader
+        onBack={() => router.replace("/(admin)/doctor-workflow")}
+        title="Consultations"
+      />
+      <ScrollView contentContainerStyle={styles.loadingContent}>
+        <View style={styles.loadingHeader}>
+          <View style={styles.loadingTitle} />
+          <View style={styles.loadingFilter} />
+        </View>
+        {Array.from({ length: 6 }, (_, index) => (
+          <ConsultationSkeletonCard key={index} />
+        ))}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -684,59 +393,54 @@ function FilterCard({
 }) {
   const doctorOptions = [
     { label: "All doctors", value: "" },
-    ...doctors.map((doctor) => ({
-      label: doctor.name,
-      value: String(doctor.id),
-    })),
+    ...doctors.map((doctor) => ({ label: doctor.name, value: String(doctor.id) })),
   ];
 
   return (
     <View style={styles.filterCard}>
-      <Text style={styles.filterLabel}>Status</Text>
+      <Text style={styles.filterLabel}>Consultation status</Text>
       <DoctorChoiceChips
         onChange={(value) => onChange({ ...filters, status: value })}
         options={statusFilters}
-        value={(filters.status ?? "") as (typeof statusFilters)[number]["value"]}
+        value={filters.status ?? ""}
       />
       <Text style={styles.filterLabel}>Patient decision</Text>
       <DoctorChoiceChips
         onChange={(value) => onChange({ ...filters, patient_decision: value })}
         options={decisionFilters}
-        value={(filters.patient_decision ?? "") as (typeof decisionFilters)[number]["value"]}
+        value={filters.patient_decision ?? ""}
       />
       <WorkflowDropdown
-        label="Doctor"
+        label="Assigned doctor"
         options={doctorOptions}
         placeholder="All doctors"
         value={filters.doctor_id ?? ""}
         onChange={(value) => onChange({ ...filters, doctor_id: value })}
       />
-      <AppDatePickerField
-        allowClear
-        label="From date"
-        value={filters.from_date ?? ""}
-        onChange={(value) => onChange({ ...filters, from_date: value })}
-      />
-      <AppDatePickerField
-        allowClear
-        label="To date"
-        value={filters.to_date ?? ""}
-        onChange={(value) => onChange({ ...filters, to_date: value })}
-      />
+      <View style={styles.dateFilterRow}>
+        <View style={styles.dateFilterItem}>
+          <AppDatePickerField
+            allowClear
+            label="From date"
+            value={filters.from_date ?? ""}
+            onChange={(value) => onChange({ ...filters, from_date: value })}
+          />
+        </View>
+        <View style={styles.dateFilterItem}>
+          <AppDatePickerField
+            allowClear
+            label="To date"
+            value={filters.to_date ?? ""}
+            onChange={(value) => onChange({ ...filters, to_date: value })}
+          />
+        </View>
+      </View>
       <View style={styles.filterActions}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          style={styles.secondaryButton}
-          onPress={onClear}
-        >
+        <TouchableOpacity accessibilityRole="button" style={styles.secondaryButton} onPress={onClear}>
           <Text style={styles.secondaryButtonText}>Clear</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          accessibilityRole="button"
-          style={styles.darkButton}
-          onPress={onApply}
-        >
-          <Text style={styles.darkButtonText}>Apply Filters</Text>
+        <TouchableOpacity accessibilityRole="button" style={styles.darkButton} onPress={onApply}>
+          <Text style={styles.darkButtonText}>Apply filters</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -762,40 +466,15 @@ function WorkflowDropdown({
   return (
     <View>
       <Text style={styles.filterLabel}>{label}</Text>
-      <TouchableOpacity
-        accessibilityRole="button"
-        activeOpacity={0.82}
-        style={styles.dropdownButton}
-        onPress={() => setOpen(true)}
-      >
-        <Text
-          numberOfLines={1}
-          style={[
-            styles.dropdownButtonText,
-            !selected && styles.dropdownPlaceholderText,
-          ]}
-        >
+      <TouchableOpacity accessibilityRole="button" style={styles.dropdownButton} onPress={() => setOpen(true)}>
+        <Text numberOfLines={1} style={[styles.dropdownText, !selected && styles.dropdownPlaceholder]}>
           {selected?.label ?? placeholder}
         </Text>
-        <Ionicons
-          color={colors.textMuted}
-          name="chevron-down"
-          size={19}
-        />
+        <Ionicons color={colors.textMuted} name="chevron-down" size={18} />
       </TouchableOpacity>
-
-      <Modal
-        animationType="fade"
-        transparent
-        visible={open}
-        onRequestClose={() => setOpen(false)}
-      >
+      <Modal animationType="fade" transparent visible={open} onRequestClose={() => setOpen(false)}>
         <View style={styles.dropdownOverlay}>
-          <TouchableOpacity
-            activeOpacity={1}
-            style={StyleSheet.absoluteFill}
-            onPress={() => setOpen(false)}
-          />
+          <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFill} onPress={() => setOpen(false)} />
           <View style={styles.dropdownSheet}>
             <Text style={styles.dropdownTitle}>{label}</Text>
             <ScrollView style={styles.dropdownOptions}>
@@ -805,31 +484,16 @@ function WorkflowDropdown({
                   <TouchableOpacity
                     accessibilityRole="button"
                     key={`${label}-${option.value || "all"}`}
-                    style={[
-                      styles.dropdownOption,
-                      selectedOption && styles.dropdownOptionSelected,
-                    ]}
+                    style={[styles.dropdownOption, selectedOption && styles.dropdownOptionSelected]}
                     onPress={() => {
                       onChange(option.value);
                       setOpen(false);
                     }}
                   >
-                    <Text
-                      style={[
-                        styles.dropdownOptionText,
-                        selectedOption &&
-                          styles.dropdownOptionSelectedText,
-                      ]}
-                    >
+                    <Text style={[styles.dropdownOptionText, selectedOption && styles.dropdownOptionSelectedText]}>
                       {option.label}
                     </Text>
-                    {selectedOption ? (
-                      <Ionicons
-                        color={colors.primary}
-                        name="checkmark"
-                        size={19}
-                      />
-                    ) : null}
+                    {selectedOption ? <Ionicons color={colors.primary} name="checkmark" size={19} /> : null}
                   </TouchableOpacity>
                 );
               })}
@@ -838,6 +502,114 @@ function WorkflowDropdown({
         </View>
       </Modal>
     </View>
+  );
+}
+
+type ConsultationForm = typeof emptyConsultationForm;
+
+function CreateConsultationModal({
+  doctors,
+  error,
+  form,
+  saving,
+  visible,
+  onChange,
+  onClose,
+  onSubmit,
+}: {
+  doctors: Doctor[];
+  error: string | null;
+  form: ConsultationForm;
+  saving: boolean;
+  visible: boolean;
+  onChange: React.Dispatch<React.SetStateAction<ConsultationForm>>;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Modal
+      animationType="slide"
+      presentationStyle="pageSheet"
+      visible={visible}
+      onRequestClose={onClose}
+    >
+      <SafeAreaView style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <View>
+            <Text style={styles.modalEyebrow}>Doctor workflow</Text>
+            <Text style={styles.modalTitle}>Schedule consultation</Text>
+          </View>
+          <TouchableOpacity accessibilityLabel="Close schedule consultation" accessibilityRole="button" style={styles.closeButton} onPress={onClose}>
+            <Ionicons color={colors.textPrimary} name="close" size={26} />
+          </TouchableOpacity>
+        </View>
+        <FormScrollView contentContainerStyle={styles.modalContent}>
+          <Text style={styles.formSectionTitle}>Patient information</Text>
+          <DoctorField
+            label="Patient name"
+            required
+            value={form.patient_name}
+            onChangeText={(value) => onChange((current) => ({ ...current, patient_name: value }))}
+          />
+          <DoctorField
+            keyboardType="phone-pad"
+            label="Patient phone"
+            required
+            value={form.patient_phone}
+            onChangeText={(value) => onChange((current) => ({ ...current, patient_phone: value }))}
+          />
+          <DoctorField
+            label="Patient address"
+            multiline
+            required
+            value={form.patient_address}
+            onChangeText={(value) => onChange((current) => ({ ...current, patient_address: value }))}
+          />
+
+          <Text style={styles.formSectionTitle}>Assignment and schedule</Text>
+          <DoctorSelectList
+            doctors={doctors}
+            selectedId={form.doctor_id}
+            onSelect={(value) => onChange((current) => ({ ...current, doctor_id: value }))}
+          />
+          <AppDatePickerField
+            label="Scheduled date"
+            required
+            value={form.scheduled_date}
+            onChange={(value) => onChange((current) => ({ ...current, scheduled_date: value }))}
+          />
+          <DoctorField
+            label="Scheduled time"
+            placeholder="HH:MM"
+            required
+            value={form.scheduled_time}
+            onChangeText={(value) => onChange((current) => ({ ...current, scheduled_time: value }))}
+          />
+
+          <Text style={styles.formSectionTitle}>Consultation notes</Text>
+          <DoctorField
+            label="Purpose"
+            multiline
+            required
+            value={form.purpose}
+            onChangeText={(value) => onChange((current) => ({ ...current, purpose: value }))}
+          />
+          <DoctorField
+            label="Notes"
+            multiline
+            value={form.notes}
+            onChangeText={(value) => onChange((current) => ({ ...current, notes: value }))}
+          />
+          <PanelActions
+            busy={saving}
+            error={error}
+            primaryLabel="Schedule consultation"
+            onCancel={onClose}
+            onSubmit={onSubmit}
+          />
+        </FormScrollView>
+      </SafeAreaView>
+    </Modal>
   );
 }
 
@@ -850,15 +622,10 @@ function DoctorSelectList({
   onSelect: (doctorId: string) => void;
   selectedId: string;
 }) {
-  const doctorOptions = doctors.map((doctor) => ({
-    label: doctor.name,
-    value: String(doctor.id),
-  }));
-
   return (
     <WorkflowDropdown
-      label="Assigned doctor *"
-      options={doctorOptions}
+      label="Assigned doctor"
+      options={doctors.map((doctor) => ({ label: doctor.name, value: String(doctor.id) }))}
       placeholder="Select doctor"
       value={selectedId}
       onChange={onSelect}
@@ -868,610 +635,85 @@ function DoctorSelectList({
 
 function PanelActions({
   busy,
-  destructive = false,
   error,
   onCancel,
   onSubmit,
   primaryLabel,
 }: {
   busy: boolean;
-  destructive?: boolean;
   error: string | null;
   onCancel: () => void;
   onSubmit: () => void;
   primaryLabel: string;
 }) {
   return (
-    <>
+    <View style={styles.panelActionsContainer}>
       {error ? <Text style={styles.formError}>{error}</Text> : null}
       <View style={styles.panelActions}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          disabled={busy}
-          style={styles.secondaryButton}
-          onPress={onCancel}
-        >
+        <TouchableOpacity accessibilityRole="button" disabled={busy} style={styles.secondaryButton} onPress={onCancel}>
           <Text style={styles.secondaryButtonText}>Cancel</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          accessibilityRole="button"
-          disabled={busy}
-          style={[
-            styles.submitButton,
-            destructive && styles.destructiveButton,
-            busy && styles.disabledButton,
-          ]}
-          onPress={onSubmit}
-        >
-          {busy ? (
-            <ActivityIndicator color={colors.surface} size="small" />
-          ) : null}
-          <Text style={styles.submitButtonText}>
-            {busy ? "Saving..." : primaryLabel}
-          </Text>
+        <TouchableOpacity accessibilityRole="button" disabled={busy} style={[styles.submitButton, busy && styles.disabledButton]} onPress={onSubmit}>
+          {busy ? <ActivityIndicator color={colors.surface} size="small" /> : null}
+          <Text style={styles.submitButtonText}>{busy ? "Saving..." : primaryLabel}</Text>
         </TouchableOpacity>
       </View>
-    </>
-  );
-}
-
-function ConsultationCard({
-  busy,
-  consultation,
-  doctorName,
-  onConfirm,
-  onReject,
-  onVisit,
-}: {
-  busy: boolean;
-  consultation: DoctorConsultation;
-  doctorName: string;
-  onConfirm: (consultation: DoctorConsultation) => void;
-  onReject: (consultation: DoctorConsultation) => void;
-  onVisit: (consultation: DoctorConsultation) => void;
-}) {
-  const visitId = getConsultationVisitId(consultation);
-  const converted = isConsultationConverted(consultation);
-  const canUpdateDecision =
-    consultation.status === "completed" &&
-    !converted &&
-    actionablePatientDecisions.has(consultation.patient_decision);
-  const canConfirm = canUpdateDecision;
-  const canReject = canUpdateDecision;
-  const canCreateVisit = consultation.patient_decision === "confirmed";
-
-  return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.cardTitleBlock}>
-          <Text style={styles.patientName}>{consultation.patient_name}</Text>
-          <Text style={styles.mutedText}>{consultation.patient_phone}</Text>
-        </View>
-        <DoctorStatusBadge status={consultation.status} />
-      </View>
-
-      <View style={styles.metaRow}>
-        <View style={styles.metaBlock}>
-          <Text style={styles.metaLabel}>Doctor</Text>
-          <Text style={styles.metaValue}>{doctorName}</Text>
-        </View>
-        <View style={styles.metaBlock}>
-          <Text style={styles.metaLabel}>Schedule</Text>
-          <Text style={styles.metaValue}>
-            {formatDoctorDate(consultation.scheduled_date)} • {consultation.scheduled_time?.slice(0, 5)}
-          </Text>
-        </View>
-      </View>
-
-      <Text style={styles.metaLabel}>Purpose</Text>
-      <Text style={styles.bodyText}>{consultation.purpose}</Text>
-
-      <View style={styles.decisionRow}>
-        <Text style={styles.metaLabel}>Patient decision</Text>
-        <DoctorStatusBadge status={consultation.patient_decision} />
-      </View>
-
-      {converted && (
-        <View style={styles.workflowNotice}>
-          <Ionicons name="checkmark-circle" size={16} color={colors.textMutedDark} style={{ marginRight: spacing.xs }} />
-          <Text style={styles.workflowNoticeText}>
-            Visit created {visitId ? `(#${visitId})` : ""}
-          </Text>
-        </View>
-      )}
-
-      {(canConfirm || canReject || canCreateVisit) && (
-        <View style={styles.cardActions}>
-          {canConfirm && canReject ? (
-            <View style={{ flexDirection: 'row', gap: spacing.md, width: '100%' }}>
-              <TouchableOpacity
-                disabled={busy}
-                style={[styles.smallButton, styles.rejectButton, { flex: 1 }]}
-                onPress={() => onReject(consultation)}
-              >
-                <Text style={styles.rejectButtonText}>Reject</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                disabled={busy}
-                style={[styles.smallButton, styles.approveButton, { flex: 1 }]}
-                onPress={() => onConfirm(consultation)}
-              >
-                <Text style={styles.approveButtonText}>Confirm</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {canCreateVisit && (
-            <TouchableOpacity
-              disabled={busy || converted}
-              style={[styles.smallButton, styles.visitButton, (busy || converted) && styles.disabledButton, { width: '100%' }]}
-              onPress={() => onVisit(consultation)}
-            >
-              <Text style={styles.visitButtonText}>
-                {converted ? "Visit already created" : "Create Visit Form"}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-  flex: {
-    flex: 1,
-  },
-  headerButton: {
-    alignItems: "center",
-    height: 44,
-    justifyContent: "center",
-    width: 44,
-  },
-  content: {
-    padding: spacing.xl,
-    paddingBottom: spacing.sectionLg,
-  },
-  pageHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing.xl,
-  },
-  eyebrow: {
-    color: colors.primary,
-    fontSize: typography.size.small,
-    fontWeight: typography.weight.extrabold,
-    textTransform: "uppercase",
-  },
-  title: {
-    color: colors.textPrimary,
-    fontSize: typography.size.size27,
-    fontWeight: typography.weight.extrabold,
-    marginTop: spacing.xs,
-  },
-  subtitle: {
-    color: colors.textMuted,
-    fontSize: typography.size.bodySmall,
-    lineHeight: typography.lineHeight.bodyRelaxed,
-    marginTop: spacing.s5,
-  },
-  filterToggleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    marginTop: spacing.md,
-  },
-  filterToggleActive: {
-    backgroundColor: colors.primary,
-  },
-  filterToggleText: {
-    color: colors.primary,
-    fontWeight: typography.weight.bold,
-    fontSize: typography.size.small,
-  },
-  filterToggleTextActive: {
-    color: colors.surface,
-  },
-  filterCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.control,
-    gap: spacing.md,
-    marginBottom: spacing.xl,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  filterLabel: {
-    color: colors.textMutedDark,
-    fontSize: typography.size.small,
-    fontWeight: typography.weight.extrabold,
-    marginTop: spacing.sm,
-    textTransform: "uppercase",
-  },
-  chipList: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.md,
-  },
-  chip: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    minHeight: 40,
-    justifyContent: "center",
-    paddingHorizontal: spacing.lgPlus,
-    paddingVertical: spacing.md,
-  },
-  selectedChip: {
-    backgroundColor: colors.primarySurface,
-    borderColor: colors.primary,
-  },
-  chipText: {
-    color: colors.textMutedDark,
-    fontSize: typography.size.smallLarge,
-    fontWeight: typography.weight.bold,
-  },
-  selectedChipText: {
-    color: colors.primary,
-  },
-  dropdownButton: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.control,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: spacing.md,
-    justifyContent: "space-between",
-    minHeight: 48,
-    paddingHorizontal: spacing.lg,
-  },
-  dropdownButtonText: {
-    color: colors.textPrimary,
-    flex: 1,
-    fontSize: typography.size.bodySmall,
-    fontWeight: typography.weight.bold,
-  },
-  dropdownPlaceholderText: {
-    color: colors.textSubtle,
-  },
-  dropdownOverlay: {
-    backgroundColor: "rgba(0,0,0,0.35)",
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-  dropdownSheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    maxHeight: "70%",
-    padding: spacing.xl,
-  },
-  dropdownTitle: {
-    color: colors.textPrimary,
-    fontSize: typography.size.subtitle,
-    fontWeight: typography.weight.extrabold,
-    marginBottom: spacing.md,
-  },
-  dropdownOptions: {
-    maxHeight: 360,
-  },
-  dropdownOption: {
-    alignItems: "center",
-    borderBottomColor: colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    minHeight: 48,
-    paddingVertical: spacing.md,
-  },
-  dropdownOptionSelected: {
-    backgroundColor: colors.primarySurface,
-    borderRadius: radius.control,
-    paddingHorizontal: spacing.md,
-  },
-  dropdownOptionText: {
-    color: colors.textPrimary,
-    flex: 1,
-    fontSize: typography.size.bodySmall,
-    fontWeight: typography.weight.bold,
-  },
-  dropdownOptionSelectedText: {
-    color: colors.primary,
-  },
-  dateInputRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  dateButton: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.control,
-    borderWidth: 1,
-    flex: 1,
-    flexDirection: "row",
-    gap: spacing.md,
-    minHeight: 48,
-    paddingHorizontal: spacing.lg,
-  },
-  dateButtonText: {
-    color: colors.textPrimary,
-    flex: 1,
-    fontSize: typography.size.bodySmall,
-    fontWeight: typography.weight.bold,
-  },
-  dateClearButton: {
-    alignItems: "center",
-    backgroundColor: colors.neutral100,
-    borderColor: colors.border,
-    borderRadius: radius.control,
-    borderWidth: 1,
-    height: 48,
-    justifyContent: "center",
-    width: 48,
-  },
-  datePickerSheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    padding: spacing.xl,
-  },
-  datePickerActions: {
-    flexDirection: "row",
-    gap: spacing.md,
-    marginTop: spacing.md,
-  },
-  filterActions: {
-    flexDirection: "row",
-    gap: spacing.md,
-    marginTop: spacing.sm,
-  },
-
-  // Modal Styles
-  modalContainer: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
-  bottomSheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    padding: spacing.xl,
-    paddingBottom: Platform.OS === 'ios' ? 40 : spacing.xl,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: spacing.xl,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  modalContent: {
-    padding: spacing.xl,
-    paddingBottom: Platform.OS === 'ios' ? 60 : spacing.xl,
-  },
-  modalTitle: {
-    fontSize: typography.size.size21,
-    fontWeight: typography.weight.extrabold,
-    color: colors.textPrimary,
-  },
-  panelSubtitle: {
-    color: colors.textMuted,
-    fontSize: typography.size.smallLarge,
-    marginBottom: spacing.lg,
-  },
-  selector: {
-    marginBottom: spacing.xl,
-  },
-  selectorLabel: {
-    color: colors.textMutedDark,
-    fontSize: typography.size.small,
-    fontWeight: typography.weight.extrabold,
-    marginBottom: spacing.sm,
-    textTransform: "uppercase",
-  },
-  panelActions: {
-    flexDirection: "row",
-    gap: spacing.md,
-  },
-  secondaryButton: {
-    alignItems: "center",
-    borderColor: colors.border,
-    borderRadius: radius.control,
-    borderWidth: 1,
-    flex: 1,
-    justifyContent: "center",
-    minHeight: 46,
-  },
-  secondaryButtonText: {
-    color: colors.textMutedDark,
-    fontSize: typography.size.bodySmall,
-    fontWeight: typography.weight.extrabold,
-  },
-  darkButton: {
-    alignItems: "center",
-    backgroundColor: colors.textPrimary,
-    borderRadius: radius.control,
-    flex: 1,
-    justifyContent: "center",
-    minHeight: 46,
-  },
-  darkButtonText: {
-    color: colors.surface,
-    fontSize: typography.size.bodySmall,
-    fontWeight: typography.weight.extrabold,
-  },
-  submitButton: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: radius.control,
-    flex: 1,
-    flexDirection: "row",
-    gap: spacing.sm,
-    justifyContent: "center",
-    minHeight: 46,
-  },
-  destructiveButton: {
-    backgroundColor: colors.danger,
-  },
-  submitButtonText: {
-    color: colors.surface,
-    fontSize: typography.size.bodySmall,
-    fontWeight: typography.weight.extrabold,
-  },
-  disabledButton: {
-    opacity: 0.55,
-  },
-  formError: {
-    color: colors.danger,
-    fontSize: typography.size.smallLarge,
-    marginBottom: spacing.md,
-  },
-
-  // Card Styles
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    marginBottom: spacing.lgPlus,
-    padding: spacing.xl,
-    elevation: shadows.elevation.card,
-    shadowColor: shadows.color,
-    shadowOffset: shadows.offset.y2,
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  cardHeader: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: spacing.lg,
-    justifyContent: "space-between",
-  },
-  cardTitleBlock: {
-    flex: 1,
-  },
-  patientName: {
-    color: colors.textPrimary,
-    fontSize: typography.size.bodyLarge,
-    fontWeight: typography.weight.extrabold,
-  },
-  mutedText: {
-    color: colors.textMuted,
-    fontSize: typography.size.small,
-    marginTop: spacing.xs,
-  },
-  metaRow: {
-    borderBottomColor: colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: spacing.xl,
-    marginVertical: spacing.lg,
-    paddingVertical: spacing.lg,
-  },
-  metaBlock: {
-    flex: 1,
-  },
-  metaLabel: {
-    color: colors.textMuted,
-    fontSize: typography.size.captionLarge,
-    fontWeight: typography.weight.bold,
-    textTransform: "uppercase",
-  },
-  metaValue: {
-    color: colors.textStrong,
-    fontSize: typography.size.bodySmall,
-    fontWeight: typography.weight.extrabold,
-    marginTop: spacing.xs,
-  },
-  bodyText: {
-    color: colors.textStrong,
-    fontSize: typography.size.bodySmall,
-    lineHeight: typography.lineHeight.bodyRelaxed,
-    marginTop: spacing.xs,
-  },
-  decisionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    marginTop: spacing.lg,
-  },
-  workflowNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.neutral100,
-    borderColor: colors.border,
-    borderRadius: radius.control,
-    borderWidth: 1,
-    marginTop: spacing.lg,
-    padding: spacing.md,
-  },
-  workflowNoticeText: {
-    color: colors.textMutedDark,
-    fontSize: typography.size.smallLarge,
-    fontWeight: typography.weight.bold,
-  },
-  cardActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.md,
-    marginTop: spacing.xl,
-  },
-  smallButton: {
-    alignItems: "center",
-    borderRadius: radius.control,
-    flexGrow: 1,
-    justifyContent: "center",
-    minHeight: 44,
-    paddingHorizontal: spacing.lg,
-  },
-  approveButton: {
-    backgroundColor: colors.primary,
-  },
-  approveButtonText: {
-    color: colors.surface,
-    fontSize: typography.size.smallLarge,
-    fontWeight: typography.weight.extrabold,
-  },
-  rejectButton: {
-    backgroundColor: colors.dangerSurface,
-    borderColor: colors.dangerBorderStrong,
-    borderWidth: 1,
-  },
-  rejectButtonText: {
-    color: colors.danger,
-    fontSize: typography.size.smallLarge,
-    fontWeight: typography.weight.extrabold,
-  },
-  visitButton: {
-    backgroundColor: colors.blue,
-  },
-  visitButtonText: {
-    color: colors.surface,
-    fontSize: typography.size.smallLarge,
-    fontWeight: typography.weight.extrabold,
-  },
+  safeArea: { backgroundColor: colors.background, flex: 1 },
+  listContent: { padding: spacing.xl, paddingBottom: spacing.sectionLg },
+  listFooter: { height: spacing.sectionLg },
+  pageHeader: { alignItems: "flex-start", flexDirection: "row", gap: spacing.md, justifyContent: "space-between", marginBottom: spacing.lg },
+  headerCopy: { flex: 1 },
+  eyebrow: { color: colors.primary, fontSize: typography.size.small, fontWeight: typography.weight.extrabold, textTransform: "uppercase" },
+  title: { color: colors.textPrimary, fontSize: typography.size.size27, fontWeight: typography.weight.extrabold, marginTop: spacing.xs },
+  subtitle: { color: colors.textMuted, fontSize: typography.size.bodySmall, marginTop: spacing.xs },
+  filterButton: { alignItems: "center", borderColor: colors.primary, borderRadius: radius.pill, borderWidth: 1, flexDirection: "row", gap: spacing.xs, marginTop: spacing.md, minHeight: 42, paddingHorizontal: spacing.md },
+  filterButtonActive: { backgroundColor: colors.primary },
+  filterButtonText: { color: colors.primary, fontSize: typography.size.small, fontWeight: typography.weight.extrabold },
+  filterButtonTextActive: { color: colors.surface },
+  listHeadingRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.md, marginTop: spacing.xl },
+  sectionTitle: { color: colors.textPrimary, fontSize: typography.size.titleSmall, fontWeight: typography.weight.extrabold },
+  filterCountText: { color: colors.primary, fontSize: typography.size.small, fontWeight: typography.weight.bold },
+  fab: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.rounded, bottom: spacing.xlPlus, elevation: shadows.elevation.floating, height: 60, justifyContent: "center", position: "absolute", right: spacing.xl, shadowColor: shadows.color, shadowOffset: shadows.offset.y4, shadowOpacity: shadows.opacity.strong, shadowRadius: shadows.radius.raised, width: 60 },
+  filterCard: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.card, borderWidth: 1, gap: spacing.md, marginTop: spacing.lg, padding: spacing.lg },
+  filterLabel: { color: colors.textMutedDark, fontSize: typography.size.small, fontWeight: typography.weight.extrabold, marginTop: spacing.sm, textTransform: "uppercase" },
+  dateFilterRow: { flexDirection: "row", gap: spacing.md },
+  dateFilterItem: { flex: 1 },
+  filterActions: { flexDirection: "row", gap: spacing.md, marginTop: spacing.sm },
+  secondaryButton: { alignItems: "center", borderColor: colors.border, borderRadius: radius.control, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 48 },
+  secondaryButtonText: { color: colors.textMutedDark, fontSize: typography.size.bodySmall, fontWeight: typography.weight.extrabold },
+  darkButton: { alignItems: "center", backgroundColor: colors.textPrimary, borderRadius: radius.control, flex: 1, justifyContent: "center", minHeight: 48 },
+  darkButtonText: { color: colors.surface, fontSize: typography.size.bodySmall, fontWeight: typography.weight.extrabold },
+  dropdownButton: { alignItems: "center", backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.control, borderWidth: 1, flexDirection: "row", justifyContent: "space-between", minHeight: 50, paddingHorizontal: spacing.lg },
+  dropdownText: { color: colors.textPrimary, flex: 1, fontSize: typography.size.bodySmall, fontWeight: typography.weight.bold },
+  dropdownPlaceholder: { color: colors.textSubtle },
+  dropdownOverlay: { backgroundColor: "rgba(0,0,0,0.35)", flex: 1, justifyContent: "flex-end" },
+  dropdownSheet: { backgroundColor: colors.surface, borderTopLeftRadius: radius.panel, borderTopRightRadius: radius.panel, maxHeight: "70%", padding: spacing.xl },
+  dropdownTitle: { color: colors.textPrimary, fontSize: typography.size.subtitle, fontWeight: typography.weight.extrabold, marginBottom: spacing.md },
+  dropdownOptions: { maxHeight: 360 },
+  dropdownOption: { alignItems: "center", borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", justifyContent: "space-between", minHeight: 52, paddingVertical: spacing.md },
+  dropdownOptionSelected: { backgroundColor: colors.primarySurface, borderRadius: radius.control, paddingHorizontal: spacing.md },
+  dropdownOptionText: { color: colors.textPrimary, flex: 1, fontSize: typography.size.bodySmall, fontWeight: typography.weight.bold },
+  dropdownOptionSelectedText: { color: colors.primary },
+  loadingContent: { padding: spacing.xl },
+  loadingHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.xl },
+  loadingTitle: { backgroundColor: colors.neutral150, borderRadius: radius.sm, height: 28, width: "42%" },
+  loadingFilter: { backgroundColor: colors.neutral150, borderRadius: radius.pill, height: 42, width: 84 },
+  modalContainer: { backgroundColor: colors.background, flex: 1 },
+  modalHeader: { alignItems: "center", backgroundColor: colors.surface, borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingVertical: spacing.lg },
+  modalEyebrow: { color: colors.primary, fontSize: typography.size.captionLarge, fontWeight: typography.weight.extrabold, textTransform: "uppercase" },
+  modalTitle: { color: colors.textPrimary, fontSize: typography.size.titleSmall, fontWeight: typography.weight.extrabold, marginTop: spacing.xs },
+  closeButton: { alignItems: "center", height: 48, justifyContent: "center", width: 48 },
+  modalContent: { padding: spacing.xl, paddingBottom: Platform.OS === "ios" ? 64 : spacing.xl },
+  formSectionTitle: { color: colors.primary, fontSize: typography.size.bodySmall, fontWeight: typography.weight.extrabold, marginBottom: spacing.lg, marginTop: spacing.sm, textTransform: "uppercase" },
+  panelActionsContainer: { marginTop: spacing.md, paddingBottom: spacing.lg },
+  panelActions: { flexDirection: "row", gap: spacing.md },
+  submitButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.control, flex: 1, flexDirection: "row", gap: spacing.sm, justifyContent: "center", minHeight: 48 },
+  submitButtonText: { color: colors.surface, fontSize: typography.size.bodySmall, fontWeight: typography.weight.extrabold },
+  disabledButton: { opacity: 0.55 },
+  formError: { color: colors.danger, fontSize: typography.size.smallLarge, marginBottom: spacing.md },
 });

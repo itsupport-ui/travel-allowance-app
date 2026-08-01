@@ -135,8 +135,13 @@ export default function AdminLayout() {
       <Tabs.Screen name="doctor-edit" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-claims" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-consultations" options={{ href: null }} />
+      <Tabs.Screen name="doctor-workflow-consultation-details" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-treatment-plans" options={{ href: null }} />
+      <Tabs.Screen name="doctor-workflow-treatment-plan-details" options={{ href: null }} />
+      <Tabs.Screen name="doctor-workflow-claim-details" options={{ href: null }} />
+      <Tabs.Screen name="claim-details" options={{ href: null }} />
       <Tabs.Screen name="schedule-create" options={{ href: null }} />
+      <Tabs.Screen name="schedule-details" options={{ href: null }} />
       <Tabs.Screen name="schedule-edit" options={{ href: null }} />
       <Tabs.Screen name="therapist-create" options={{ href: null }} />
       <Tabs.Screen name="therapist-edit" options={{ href: null }} />

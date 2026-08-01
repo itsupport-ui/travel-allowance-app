@@ -1,6 +1,6 @@
 import { colors, radius, shadows, spacing, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect, type Href } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   RefreshControl,
@@ -36,6 +36,7 @@ interface MetricDefinition {
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
   backgroundColor: string;
+  route: Href;
 }
 
 const metrics: MetricDefinition[] = [
@@ -45,6 +46,7 @@ const metrics: MetricDefinition[] = [
     icon: "people-outline",
     color: colors.blueDark,
     backgroundColor: colors.blueSurface,
+    route: "/(admin)/therapists",
   },
   {
     key: "todays_schedules",
@@ -52,6 +54,7 @@ const metrics: MetricDefinition[] = [
     icon: "calendar-outline",
     color: PRIMARY,
     backgroundColor: colors.primarySurface,
+    route: "/(admin)/schedules",
   },
   {
     key: "pending_claims",
@@ -59,6 +62,7 @@ const metrics: MetricDefinition[] = [
     icon: "time-outline",
     color: colors.warning,
     backgroundColor: colors.warningSurface,
+    route: "/(admin)/claims",
   },
   {
     key: "approved_claims",
@@ -66,6 +70,7 @@ const metrics: MetricDefinition[] = [
     icon: "checkmark-circle-outline",
     color: colors.greenDark,
     backgroundColor: colors.greenSurface,
+    route: "/(admin)/claims",
   },
   {
     key: "rejected_claims",
@@ -73,6 +78,7 @@ const metrics: MetricDefinition[] = [
     icon: "close-circle-outline",
     color: colors.danger,
     backgroundColor: colors.dangerSurfaceStrong,
+    route: "/(admin)/claims",
   },
   {
     key: "completed_treatments",
@@ -80,6 +86,7 @@ const metrics: MetricDefinition[] = [
     icon: "medkit-outline",
     color: colors.teal,
     backgroundColor: colors.tealSurface,
+    route: "/(admin)/reports",
   },
 ];
 
@@ -203,7 +210,14 @@ export default function AdminDashboardScreen() {
             <Text style={styles.sectionTitle}>Overview</Text>
             <View style={styles.metricsGrid}>
               {metrics.map((metric) => (
-                <View key={metric.key} style={styles.metricCard}>
+                <TouchableOpacity
+                  accessibilityLabel={`Open ${metric.label}`}
+                  accessibilityRole="button"
+                  activeOpacity={0.8}
+                  key={metric.key}
+                  onPress={() => router.push(metric.route)}
+                  style={styles.metricCard}
+                >
                   <View
                     style={[
                       styles.metricIcon,
@@ -220,7 +234,7 @@ export default function AdminDashboardScreen() {
                     {summary[metric.key]}
                   </Text>
                   <Text style={styles.metricLabel}>{metric.label}</Text>
-                </View>
+                </TouchableOpacity>
               ))}
             </View>
           </>

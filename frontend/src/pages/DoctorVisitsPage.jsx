@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useState } from "react"
 import toast from "react-hot-toast"
 import {
-  FaCalendarCheck,
   FaCalendarDay,
   FaClock,
   FaEye,
-  FaMapMarkerAlt,
   FaPhoneAlt,
+  FaPlay,
+  FaStopCircle,
 } from "react-icons/fa"
 
 import DoctorLayout from "../layouts/DoctorLayout"
 import {
   getDoctorVisit,
+  getDoctorVisitSession,
   getMyDoctorVisits,
-  updateDoctorVisitStatus,
+  punchInDoctorVisit,
+  punchOutDoctorVisit,
 } from "../services/doctorVisitService"
 
 
@@ -59,6 +61,32 @@ const formatDateTime = (value) => {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value))
+}
+
+const formatDuration = (seconds) => {
+  const value = Number(seconds) || 0
+  const hours = Math.floor(value / 3600)
+  const minutes = Math.floor((value % 3600) / 60)
+  const remainingSeconds = value % 60
+  return hours > 0
+    ? `${hours}h ${minutes}m`
+    : `${minutes}m ${remainingSeconds}s`
+}
+
+const sessionElapsed = (session) => {
+  if (!session) return 0
+  if (
+    session.session_status === "IN_PROGRESS" &&
+    session.punch_in_time
+  ) {
+    return Math.max(
+      session.elapsed_seconds || 0,
+      Math.floor(
+        (Date.now() - new Date(session.punch_in_time).getTime()) / 1000
+      )
+    )
+  }
+  return session.treatment_duration || 0
 }
 
 
@@ -138,6 +166,10 @@ function DoctorVisitsPage() {
   const [modal, setModal] = useState(null)
   const [selectedVisit, setSelectedVisit] = useState(null)
   const [remarks, setRemarks] = useState("")
+  const [session, setSession] = useState(null)
+  const [sessionLoading, setSessionLoading] = useState(false)
+  const [sessionError, setSessionError] = useState("")
+  const [, setElapsedTick] = useState(0)
 
   const today = getLocalDate()
 
@@ -157,6 +189,60 @@ function DoctorVisitsPage() {
         setIsLoading(false)
       })
   }, [])
+
+  useEffect(() => {
+    if (session?.session_status !== "IN_PROGRESS") return undefined
+    const timer = window.setInterval(
+      () => setElapsedTick((value) => value + 1),
+      1000
+    )
+    return () => window.clearInterval(timer)
+  }, [session?.session_status])
+
+  const captureLocation = () =>
+    new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Location is not supported by this browser"))
+        return
+      }
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      })
+    })
+
+  const loadSession = async (visit) => {
+    if (visit.status !== "scheduled") {
+      setSession(null)
+      return
+    }
+    try {
+      setSessionLoading(true)
+      setSessionError("")
+      const token = localStorage.getItem("token")
+      let coordinates
+      if (visit.session_status !== "IN_PROGRESS") {
+        const position = await captureLocation()
+        coordinates = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        }
+      }
+      const data = await getDoctorVisitSession(
+        visit.id,
+        token,
+        coordinates
+      )
+      setSession(data)
+    } catch (error) {
+      setSessionError(
+        getErrorMessage(error, "Unable to verify visit location")
+      )
+    } finally {
+      setSessionLoading(false)
+    }
+  }
 
   const todayVisits = useMemo(
     () =>
@@ -192,6 +278,8 @@ function DoctorVisitsPage() {
     setModal(null)
     setSelectedVisit(null)
     setRemarks("")
+    setSession(null)
+    setSessionError("")
   }
 
   const openDetails = async (visit) => {
@@ -201,6 +289,7 @@ function DoctorVisitsPage() {
       const data = await getDoctorVisit(visit.id, token)
       setSelectedVisit(data)
       setModal("details")
+      await loadSession(data)
     } catch (error) {
       toast.error(getErrorMessage(error, "Unable to load visit details"))
     } finally {
@@ -208,39 +297,72 @@ function DoctorVisitsPage() {
     }
   }
 
-  const openVisitedModal = (visit) => {
-    setSelectedVisit(visit)
-    setRemarks(visit.remarks || "")
-    setModal("visited")
-  }
-
-  const markVisited = async (event) => {
-    event.preventDefault()
-    if (!selectedVisit) return
-
+  const handlePunchIn = async () => {
+    if (
+      !selectedVisit ||
+      !window.confirm(
+        `Punch in for ${selectedVisit.patient_name}?`
+      )
+    ) {
+      return
+    }
     try {
-      setActionId(`visited-${selectedVisit.id}`)
+      setActionId(`punch-in-${selectedVisit.id}`)
+      const position = await captureLocation()
       const token = localStorage.getItem("token")
-      const updatedVisit = await updateDoctorVisitStatus(
+      const data = await punchInDoctorVisit(
         selectedVisit.id,
         {
-          status: "visited",
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        },
+        token
+      )
+      setSession(data)
+      toast.success("Treatment started")
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to Punch In"))
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const handlePunchOut = async () => {
+    if (
+      !selectedVisit ||
+      !window.confirm(
+        "Punch out and complete this patient visit?"
+      )
+    ) {
+      return
+    }
+    try {
+      setActionId(`punch-out-${selectedVisit.id}`)
+      const position = await captureLocation()
+      const token = localStorage.getItem("token")
+      await punchOutDoctorVisit(
+        selectedVisit.id,
+        {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
           remarks: remarks.trim() || null,
         },
         token
       )
-
+      const updatedVisit = await getDoctorVisit(
+        selectedVisit.id,
+        token
+      )
+      setSelectedVisit(updatedVisit)
       setVisits((current) =>
         current.map((visit) =>
           visit.id === updatedVisit.id ? updatedVisit : visit
         )
       )
-      setModal(null)
-      setSelectedVisit(null)
-      setRemarks("")
-      toast.success("Visit marked as visited")
+      setSession(null)
+      toast.success("Visit completed")
     } catch (error) {
-      toast.error(getErrorMessage(error, "Unable to update visit"))
+      toast.error(getErrorMessage(error, "Unable to Punch Out"))
     } finally {
       setActionId(null)
     }
@@ -248,8 +370,6 @@ function DoctorVisitsPage() {
 
   const renderActions = (visit, mobile = false) => {
     const isViewing = actionId === `view-${visit.id}`
-    const canMarkVisited = visit.status === "scheduled"
-
     return (
       <div
         className={`flex gap-2 ${
@@ -265,16 +385,6 @@ function DoctorVisitsPage() {
           <FaEye />
           {isViewing ? "Loading..." : "View"}
         </button>
-        {canMarkVisited && (
-          <button
-            type="button"
-            onClick={() => openVisitedModal(visit)}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
-          >
-            <FaCalendarCheck />
-            Mark visited
-          </button>
-        )}
       </div>
     )
   }
@@ -520,6 +630,68 @@ function DoctorVisitsPage() {
               />
             </dl>
 
+            {selectedVisit.status === "scheduled" && (
+              <section className="border-t border-slate-100 pt-5">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Visit session
+                </h3>
+                {sessionLoading ? (
+                  <p className="mt-3 text-sm text-slate-500">
+                    Verifying attendance and patient location...
+                  </p>
+                ) : (
+                  <div className="mt-3 grid grid-cols-1 gap-3 rounded-xl border border-slate-100 bg-slate-50 p-4 sm:grid-cols-3">
+                    <DetailItem
+                      label="Status"
+                      value={
+                        session?.session_status ||
+                        selectedVisit.session_status
+                      }
+                    />
+                    <DetailItem
+                      label="Punch In"
+                      value={formatDateTime(
+                        session?.punch_in_time ||
+                          selectedVisit.punch_in_time
+                      )}
+                    />
+                    <DetailItem
+                      label="Duration"
+                      value={formatDuration(sessionElapsed(session))}
+                    />
+                  </div>
+                )}
+                {session?.eligibility_message && (
+                  <p className="mt-3 text-xs text-slate-600">
+                    {session.eligibility_message}
+                  </p>
+                )}
+                {sessionError && (
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-rose-100 bg-rose-50 p-3 text-xs text-rose-700">
+                    <span>{sessionError}</span>
+                    <button
+                      type="button"
+                      onClick={() => loadSession(selectedVisit)}
+                      className="font-bold text-blue-700"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+                <div className="mt-4">
+                  <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                    Completion remarks
+                  </label>
+                  <textarea
+                    rows="3"
+                    value={remarks}
+                    onChange={(event) => setRemarks(event.target.value)}
+                    className={`${inputClass} resize-none`}
+                  />
+                </div>
+              </section>
+            )}
+
             <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
               <button
                 type="button"
@@ -528,13 +700,30 @@ function DoctorVisitsPage() {
               >
                 Close
               </button>
-              {selectedVisit.status === "scheduled" && (
+              {session?.can_punch_in && (
                 <button
                   type="button"
-                  onClick={() => openVisitedModal(selectedVisit)}
-                  className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700"
+                  disabled={actionId !== null}
+                  onClick={handlePunchIn}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"
                 >
-                  Mark visited
+                  <FaPlay />
+                  {actionId === `punch-in-${selectedVisit.id}`
+                    ? "Punching In..."
+                    : "Punch In"}
+                </button>
+              )}
+              {session?.can_punch_out && (
+                <button
+                  type="button"
+                  disabled={actionId !== null}
+                  onClick={handlePunchOut}
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-800 disabled:opacity-50"
+                >
+                  <FaStopCircle />
+                  {actionId === `punch-out-${selectedVisit.id}`
+                    ? "Punching Out..."
+                    : "Punch Out"}
                 </button>
               )}
             </div>
@@ -542,61 +731,6 @@ function DoctorVisitsPage() {
         </Modal>
       )}
 
-      {modal === "visited" && selectedVisit && (
-        <Modal
-          title="Mark visit as visited"
-          description={`Confirm the completed visit for ${selectedVisit.patient_name}.`}
-          onClose={closeModal}
-        >
-          <form onSubmit={markVisited} className="space-y-4">
-            <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-800">
-              <p className="flex items-center gap-2 font-semibold">
-                <FaCalendarCheck />
-                {formatDate(selectedVisit.visit_date)} at{" "}
-                {selectedVisit.visit_time?.slice(0, 5)}
-              </p>
-              <p className="mt-2 flex items-start gap-2 text-xs text-emerald-700">
-                <FaMapMarkerAlt className="mt-0.5 shrink-0" />
-                {selectedVisit.patient_address}
-              </p>
-            </div>
-
-            <div>
-              <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Remarks (optional)
-              </label>
-              <textarea
-                rows="4"
-                value={remarks}
-                onChange={(event) => setRemarks(event.target.value)}
-                className={`${inputClass} resize-none`}
-                placeholder="Add visit notes or remarks"
-              />
-            </div>
-
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={closeModal}
-                className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={
-                  actionId === `visited-${selectedVisit.id}`
-                }
-                className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {actionId === `visited-${selectedVisit.id}`
-                  ? "Saving..."
-                  : "Confirm visited"}
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
     </DoctorLayout>
   )
 }

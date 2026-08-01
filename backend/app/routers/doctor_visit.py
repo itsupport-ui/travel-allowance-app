@@ -18,7 +18,9 @@ from app.schemas.doctor_visit import (
 from app.utils.auth import require_permission, require_role
 from app.utils.workflow_transitions import (
     DOCTOR_VISIT_STATUS_TRANSITIONS,
-    validate_status_transition,
+)
+from app.services.doctor_attendance_service import (
+    apply_doctor_visit_status,
 )
 
 from typing import List, Optional
@@ -162,19 +164,12 @@ async def update_doctor_visit_status(
     if status_update.status not in allowed_statuses:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status value")
 
-    validate_status_transition(
-        entity="Doctor visit status",
-        current_status=visit.status,
-        next_status=status_update.status,
-        transitions=DOCTOR_VISIT_STATUS_TRANSITIONS,
-        allow_noop=True,
+    apply_doctor_visit_status(
+        visit,
+        status_update.status,
+        remarks=status_update.remarks,
+        completed_at=datetime.utcnow(),
     )
-
-    visit.status = status_update.status
-    if status_update.remarks:
-        visit.remarks = status_update.remarks
-    if status_update.status == 'visited':
-        visit.completed_at = datetime.utcnow()
     
     db.commit()
     db.refresh(visit)

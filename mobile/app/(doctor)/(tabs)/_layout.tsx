@@ -13,6 +13,7 @@ export default function DoctorTabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        tabBarHideOnKeyboard: true,
         sceneStyle: {
           backgroundColor: colors.background,
           paddingTop: insets.top,

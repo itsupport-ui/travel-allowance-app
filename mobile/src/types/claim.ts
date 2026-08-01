@@ -15,6 +15,7 @@ export interface ClaimResponse {
 export interface ClaimTravelEntry {
   id: number;
   travel_date: string;
+  travel_timestamp?: string | null;
   patient_name: string | null;
   transport_mode: string;
   bill_amount: number | null;
@@ -29,6 +30,11 @@ export interface ClaimTravelEntry {
 }
 
 export interface ClaimDetailsResponse {
-  claim: ClaimResponse;
+  claim: ClaimResponse & {
+    therapist_id: number;
+    therapist_role?: string | null;
+    submitted_at?: string | null;
+    notes?: string | null;
+  };
   travels: ClaimTravelEntry[];
 }

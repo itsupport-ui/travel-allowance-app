@@ -15,11 +15,46 @@ import {
 } from "react-icons/fa"
 
 import TherapistLayout from "../layouts/TherapistLayout"
+import ConfirmDialog from "../components/ui/ConfirmDialog"
 import {
   getTodaySchedules,
-  completeSchedule,
   missedSchedule
 } from "../services/scheduleService"
+import {
+  getTreatmentSession,
+  punchInTreatment,
+  punchOutTreatment,
+} from "../services/treatmentSessionService"
+
+const formatSessionTime = (value) =>
+  value
+    ? new Date(value).toLocaleTimeString("en-IN", {
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : "Not recorded"
+
+const formatDuration = (totalSeconds = 0) => {
+  const seconds = Math.max(0, Math.floor(totalSeconds))
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const remaining = seconds % 60
+  return `${hours ? `${hours}h ` : ""}${minutes}m ${remaining}s`
+}
+
+const getElapsedSeconds = (session) => {
+  if (!session) return 0
+  if (session.session_status === "IN_PROGRESS" && session.punch_in_time) {
+    return Math.max(
+      session.elapsed_seconds || 0,
+      Math.floor(
+        (Date.now() - new Date(session.punch_in_time).getTime()) / 1000,
+      ),
+    )
+  }
+  return session.treatment_duration || 0
+}
 
 function TodaysSchedulePage() {
   const [schedules, setSchedules] = useState([])
@@ -32,6 +67,12 @@ function TodaysSchedulePage() {
     invoice_file: null
   })
   const [completing, setCompleting] = useState(false)
+  const [sessions, setSessions] = useState({})
+  const [sessionLoading, setSessionLoading] = useState(false)
+  const [sessionError, setSessionError] = useState("")
+  const [punchInTarget, setPunchInTarget] = useState(null)
+  const [punchingIn, setPunchingIn] = useState(false)
+  const [, setElapsedTick] = useState(0)
 
   const getCurrentPosition = () => {
     if (!navigator.geolocation) {
@@ -50,19 +91,89 @@ function TodaysSchedulePage() {
   }
 
   useEffect(() => {
-    fetchSchedules()
+    const timer = window.setInterval(
+      () => setElapsedTick((value) => value + 1),
+      1000,
+    )
+    return () => window.clearInterval(timer)
   }, [])
+
+  async function loadSessionStates(scheduleData) {
+    if (!scheduleData.length) {
+      setSessions({})
+      return
+    }
+    setSessionLoading(true)
+    setSessionError("")
+    const token = localStorage.getItem("token")
+    let coordinates
+    try {
+      const position = await getCurrentPosition()
+      coordinates = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      }
+    } catch (error) {
+      setSessionError(
+        error.message || "Unable to verify your current location",
+      )
+    }
+
+    try {
+      const results = await Promise.all(
+        scheduleData.map((schedule) =>
+          getTreatmentSession(schedule.id, token, coordinates),
+        ),
+      )
+      setSessions(
+        Object.fromEntries(
+          results.map((session) => [session.schedule_id, session]),
+        ),
+      )
+    } catch (error) {
+      setSessionError(error.message || "Failed to load treatment sessions")
+    } finally {
+      setSessionLoading(false)
+    }
+  }
 
   const fetchSchedules = async () => {
     try {
       const token = localStorage.getItem("token")
       const data = await getTodaySchedules(token)
       setSchedules(data)
+      await loadSessionStates(data)
     } catch (error) {
       console.error(error)
       toast.error("Failed to load schedule telemetry")
     } finally {
       setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    // Load schedules and their location eligibility on entry.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchSchedules()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handlePunchIn = async () => {
+    if (!punchInTarget) return
+    try {
+      setPunchingIn(true)
+      const token = localStorage.getItem("token")
+      const position = await getCurrentPosition()
+      await punchInTreatment(punchInTarget.id, token, {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      })
+      toast.success("Treatment started")
+      setPunchInTarget(null)
+      await fetchSchedules()
+    } catch (error) {
+      toast.error(error.message || "Unable to punch in")
+    } finally {
+      setPunchingIn(false)
     }
   }
 
@@ -105,16 +216,16 @@ function TodaysSchedulePage() {
       const token = localStorage.getItem("token")
       const position = await getCurrentPosition()
 
-      const result = await completeSchedule(completionSchedule.id, {
+      const result = await punchOutTreatment(completionSchedule.id, token, {
         completion_notes: completionForm.completion_notes,
         transport_mode: completionForm.transport_mode,
         bill_amount: isVehicle ? null : Number(completionForm.bill_amount),
         invoice_file: isVehicle ? null : completionForm.invoice_file,
-        arrival_latitude: position.coords.latitude,
-        arrival_longitude: position.coords.longitude
-      }, token)
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude
+      })
 
-      toast.success("Treatment completed successfully")
+      toast.success("Treatment punched out and completed")
       if (result.arrival_warning) {
         toast(result.arrival_warning, { duration: 5000 })
       }
@@ -326,14 +437,79 @@ function TodaysSchedulePage() {
                   </p>
                 </div>
 
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Treatment Session
+                    </span>
+                    <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-slate-700">
+                      {(sessions[schedule.id]?.session_status || "VERIFYING").replaceAll("_", " ")}
+                    </span>
+                  </div>
+                  {sessionLoading && !sessions[schedule.id] ? (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Verifying workday and patient location...
+                    </p>
+                  ) : sessions[schedule.id] ? (
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
+                      <div>
+                        <span className="text-slate-400">Punch In</span>
+                        <p className="mt-1 font-bold text-slate-700">
+                          {formatSessionTime(sessions[schedule.id].punch_in_time)}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">
+                          {sessions[schedule.id].session_status === "IN_PROGRESS"
+                            ? "Elapsed"
+                            : "Duration"}
+                        </span>
+                        <p className="mt-1 font-bold text-slate-700">
+                          {formatDuration(getElapsedSeconds(sessions[schedule.id]))}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Punch Out</span>
+                        <p className="mt-1 font-bold text-slate-700">
+                          {formatSessionTime(sessions[schedule.id].punch_out_time)}
+                        </p>
+                      </div>
+                      <p className={`col-span-2 rounded-lg p-2 text-[11px] sm:col-span-3 ${
+                        sessions[schedule.id].location_verified === false
+                          ? "bg-rose-50 text-rose-700"
+                          : "bg-blue-50 text-blue-700"
+                      }`}>
+                        {sessions[schedule.id].eligibility_message}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-rose-600">
+                      {sessionError || "Unable to verify treatment session."}
+                    </p>
+                  )}
+                </div>
+
                 {/* Operations Validation Bottom Controls */}
                 <div className="flex flex-col sm:flex-row gap-2 mt-5 pt-4 border-t border-slate-100">
-                  <button
-                    onClick={() => openCompletion(schedule)}
-                    className="w-full sm:flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white py-2.5 px-4 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 order-1 sm:order-2"
-                  >
-                    <FaCheckCircle className="text-[11px]" /> Validate & Complete
-                  </button>
+                  {sessions[schedule.id]?.can_punch_in && (
+                    <button
+                      type="button"
+                      onClick={() => setPunchInTarget(schedule)}
+                      className="w-full sm:flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white py-2.5 px-4 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 order-1 sm:order-2"
+                    >
+                      <FaCheckCircle className="text-[11px]" /> Punch In
+                    </button>
+                  )}
+
+                  {sessions[schedule.id]?.can_punch_out && (
+                    <button
+                      type="button"
+                      onClick={() => openCompletion(schedule)}
+                      className="w-full sm:flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white py-2.5 px-4 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 order-1 sm:order-2"
+                    >
+                      <FaCheckCircle className="text-[11px]" /> Punch Out
+                    </button>
+                  )}
                   
                   <button
                     onClick={() => handleMissed(schedule.id)}
@@ -357,7 +533,7 @@ function TodaysSchedulePage() {
           >
             <div className="border-b border-slate-100 pb-3">
               <h2 className="text-lg font-bold text-slate-800">
-                Complete Visit
+                Punch Out & Complete
               </h2>
               <p className="text-xs text-slate-500 mt-1">
                 {completionSchedule.patient_name}
@@ -443,12 +619,25 @@ function TodaysSchedulePage() {
                 disabled={completing}
                 className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition disabled:opacity-50"
               >
-                {completing ? "Capturing Location..." : "Validate & Complete"}
+                {completing ? "Capturing Location..." : "Punch Out & Complete"}
               </button>
             </div>
           </form>
         </div>
       )}
+      <ConfirmDialog
+        open={Boolean(punchInTarget)}
+        title="Punch in to treatment?"
+        message={
+          punchInTarget
+            ? `Start the treatment session for ${punchInTarget.patient_name}. A fresh GPS position will be validated.`
+            : ""
+        }
+        confirmLabel="Punch In"
+        busy={punchingIn}
+        onClose={() => setPunchInTarget(null)}
+        onConfirm={handlePunchIn}
+      />
     </TherapistLayout>
   )
 }

@@ -5,7 +5,6 @@ import { router } from "expo-router";
 import { useMemo, useState } from "react";
 import {
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +12,7 @@ import {
   View,
 } from "react-native";
 
+import { FormScrollView } from "../../../src/components/layout/FormScrollView";
 import {
   DoctorChoiceChips,
   DoctorEmptyState,
@@ -109,7 +109,7 @@ export default function DoctorTreatmentPlansScreen() {
   }
 
   return (
-    <ScrollView
+    <FormScrollView
       contentContainerStyle={styles.content}
       refreshControl={
         <RefreshControl
@@ -256,7 +256,7 @@ export default function DoctorTreatmentPlansScreen() {
           </TouchableOpacity>
         ))
       )}
-    </ScrollView>
+    </FormScrollView>
   );
 }
 

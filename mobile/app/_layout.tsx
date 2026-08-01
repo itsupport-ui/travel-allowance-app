@@ -1,6 +1,7 @@
 import type { NotificationResponse } from "expo-notifications";
 import { router, Stack } from "expo-router";
 import { useEffect, useRef } from "react";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import {
   initialWindowMetrics,
   SafeAreaProvider,
@@ -198,19 +199,25 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <QueryProvider>
-      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)/login" />
-          <Stack.Screen name="(admin)" />
-          <Stack.Screen name="(doctor)" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="schedule-details" />
-          <Stack.Screen name="travel-details" />
-          <Stack.Screen name="claim-details" />
-          <Stack.Screen name="doctor-details" />
-        </Stack>
-      </SafeAreaProvider>
-    </QueryProvider>
+    <KeyboardProvider
+      navigationBarTranslucent
+      preserveEdgeToEdge
+      statusBarTranslucent
+    >
+      <QueryProvider>
+        <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)/login" />
+            <Stack.Screen name="(admin)" />
+            <Stack.Screen name="(doctor)" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="schedule-details" />
+            <Stack.Screen name="travel-details" />
+            <Stack.Screen name="claim-details" />
+            <Stack.Screen name="doctor-details" />
+          </Stack>
+        </SafeAreaProvider>
+      </QueryProvider>
+    </KeyboardProvider>
   );
 }
