@@ -6,7 +6,6 @@ import {
   FaUserInjured, 
   FaUserMd, 
   FaUserPlus, 
-  FaCheckCircle, 
   FaSlidersH, 
   FaCalendarCheck, 
   FaStickyNote 
@@ -25,11 +24,7 @@ function AdminCompletedSchedulesPage() {
   const [searchTherapist, setSearchTherapist] = useState("")
   const [priorityFilter, setPriorityFilter] = useState("all")
 
-  useEffect(() => {
-    loadSchedules()
-  }, [])
-
-  const loadSchedules = async () => {
+  async function loadSchedules() {
   try {
     const token = localStorage.getItem("token")
     const data = await getCompletedSchedules(token)
@@ -44,7 +39,13 @@ function AdminCompletedSchedulesPage() {
   } finally {
     setLoading(false)
   }
-}
+  }
+
+  useEffect(() => {
+    // Initial API hydration; state changes occur after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadSchedules()
+  }, [])
 
   const filteredSchedules = (schedules || []).filter((schedule) => {
   const matchesPatient = (schedule.patient_name || "")

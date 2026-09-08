@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.utils.uploads import public_upload_name
 
@@ -13,14 +13,21 @@ class ClaimResponse(BaseModel):
     travel_total: float
     daily_allowance: float
     grand_total: float
-    patient_visited_today: str | None = None
+    patient_visited_today: bool | None = None
     status: str
     therapist_name: str | None = None
     patient_count: int | None = 0
     per_km_rate: float | None = 0
+    rejection_reason: str | None = None
+    reviewed_at: datetime | None = None
+    reviewed_by: int | None = None
+    revision: int = 1
+    policy_id: int | None = None
+    calculation_version: str = "decimal-v1"
+    rounding_mode: str = "ROUND_HALF_UP"
+    included_travel_ids: list[int] | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ClaimDetailsClaimResponse(BaseModel):
@@ -38,6 +45,10 @@ class ClaimDetailsClaimResponse(BaseModel):
     status: str
     notes: str | None = None
     patient_count: int = 0
+    rejection_reason: str | None = None
+    reviewed_at: datetime | None = None
+    reviewed_by: int | None = None
+    revision: int = 1
 
 
 class ClaimTravelEntryResponse(BaseModel):
@@ -65,3 +76,15 @@ class ClaimTravelEntryResponse(BaseModel):
 class ClaimDetailsResponse(BaseModel):
     claim: ClaimDetailsClaimResponse
     travels: list[ClaimTravelEntryResponse]
+
+
+class ClaimRejectRequest(BaseModel):
+    rejection_reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("rejection_reason")
+    @classmethod
+    def validate_rejection_reason(cls, value: str) -> str:
+        reason = value.strip()
+        if not reason:
+            raise ValueError("Rejection reason is required")
+        return reason

@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { FormScrollView } from "../../src/components/layout/FormScrollView";
+import { AppDatePickerField } from "../../src/components/common/AppDatePickerField";
 import {
   DoctorBackHeader,
   DoctorChoiceChips,
@@ -55,6 +56,9 @@ export default function CompleteDoctorConsultationScreen() {
   const [diagnosis, setDiagnosis] = useState("");
   const [estimatedAmount, setEstimatedAmount] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [followUpTime, setFollowUpTime] = useState("");
+  const [followUpReason, setFollowUpReason] = useState("");
   const [patientDecision, setPatientDecision] =
     useState<PatientDecision>("pending");
   const [proposedTreatment, setProposedTreatment] = useState("");
@@ -86,6 +90,11 @@ export default function CompleteDoctorConsultationScreen() {
         patient_decision: patientDecision,
         preliminary_diagnosis: nullableDoctorText(diagnosis),
         proposed_treatment: nullableDoctorText(proposedTreatment),
+        follow_up_date: patientDecision === "follow_up" ? followUpDate : null,
+        follow_up_time: patientDecision === "follow_up" ? followUpTime : null,
+        follow_up_reason:
+          patientDecision === "follow_up" ? followUpReason.trim() : null,
+        lifecycle_version: consultationQuery.data?.lifecycle_version ?? 1,
       });
     },
     onError: (error) => {
@@ -142,6 +151,17 @@ export default function CompleteDoctorConsultationScreen() {
 
       if (!Number.isFinite(amount) || amount < 0) {
         setFormError("Estimated amount must be zero or more.");
+        return;
+      }
+    }
+
+    if (patientDecision === "follow_up") {
+      if (!followUpDate || !/^([01]\d|2[0-3]):[0-5]\d$/.test(followUpTime)) {
+        setFormError("Follow-up date and time are required.");
+        return;
+      }
+      if (followUpReason.trim().length < 3) {
+        setFormError("Enter a clear follow-up reason.");
         return;
       }
     }
@@ -243,10 +263,47 @@ export default function CompleteDoctorConsultationScreen() {
 
             <Text style={styles.choiceLabel}>Patient decision *</Text>
             <DoctorChoiceChips
-              onChange={setPatientDecision}
+              onChange={(value) => {
+                setPatientDecision(value);
+                setFormError(null);
+              }}
               options={decisions}
               value={patientDecision}
             />
+
+            {patientDecision === "follow_up" ? (
+              <View style={styles.followUpCard}>
+                <Text style={styles.followUpTitle}>Set a follow-up task</Text>
+                <AppDatePickerField
+                  label="Follow-up date"
+                  required
+                  value={followUpDate}
+                  onChange={setFollowUpDate}
+                />
+                <DoctorField
+                  label="Follow-up time"
+                  placeholder="HH:MM"
+                  required
+                  value={followUpTime}
+                  onChangeText={setFollowUpTime}
+                />
+                <DoctorField
+                  label="Follow-up reason"
+                  multiline
+                  required
+                  value={followUpReason}
+                  onChangeText={setFollowUpReason}
+                />
+              </View>
+            ) : null}
+
+            {formError &&
+            formError !== "Call outcome is required." &&
+            formError !== "Estimated amount must be zero or more." ? (
+              <Text accessibilityRole="alert" style={styles.formError}>
+                {formError}
+              </Text>
+            ) : null}
 
             <TouchableOpacity
               accessibilityRole="button"
@@ -315,6 +372,23 @@ const styles = StyleSheet.create({
     fontWeight: typography.weight.extrabold,
     marginBottom: spacing.sm,
     textTransform: "uppercase",
+  },
+  followUpCard: {
+    backgroundColor: colors.primarySurface,
+    borderRadius: radius.control,
+    marginTop: spacing.xl,
+    padding: spacing.lg,
+  },
+  followUpTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.body,
+    fontWeight: typography.weight.extrabold,
+    marginBottom: spacing.md,
+  },
+  formError: {
+    color: colors.danger,
+    fontSize: typography.size.bodySmall,
+    marginTop: spacing.lg,
   },
   submitButton: {
     alignItems: "center",

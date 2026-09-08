@@ -32,7 +32,7 @@ import {
 import { queryKeys } from "../../../src/query/queryKeys";
 import {
   deleteDoctorExpense,
-  downloadDoctorClaimProof,
+  downloadDoctorExpenseProof,
   getMyDoctorExpenses,
   getTodayDoctorExpenses,
 } from "../../../src/services/doctorWorkflowService";
@@ -122,14 +122,11 @@ export default function DoctorExpensesScreen() {
   });
   const proofMutation = useMutation({
     mutationFn: async (expense: DoctorExpense) => {
-      if (!expense.claim_id || !expense.proof_file) {
-        throw new Error(
-          "This receipt is not available for download until it is linked to a claim."
-        );
+      if (!expense.proof_file) {
+        throw new Error("This expense does not have a receipt.");
       }
 
-      const file = await downloadDoctorClaimProof(
-        expense.claim_id,
+      const file = await downloadDoctorExpenseProof(
         expense.id,
         expense.proof_file
       );
@@ -157,9 +154,10 @@ export default function DoctorExpensesScreen() {
     await Promise.all([todayQuery.refetch(), allQuery.refetch()]);
   };
   const confirmDelete = (expense: DoctorExpense) => {
+    const manual = expense.visit_id === null;
     Alert.alert(
-      "Delete Expense",
-      `Delete the ${formatDoctorCurrency(expense.fare)} expense from ${
+      manual ? "Cancel Manual Expense" : "Delete Expense",
+      `${manual ? "Cancel" : "Delete"} the ${formatDoctorCurrency(expense.fare)} expense from ${
         expense.from_location
       } to ${expense.to_location}?`,
       [
@@ -167,7 +165,7 @@ export default function DoctorExpensesScreen() {
         {
           onPress: () => deleteMutation.mutate(expense.id),
           style: "destructive",
-          text: "Delete",
+          text: manual ? "Cancel Expense" : "Delete",
         },
       ]
     );
@@ -266,7 +264,10 @@ export default function DoctorExpensesScreen() {
       ) : (
         visibleExpenses.map((expense) => {
           const canModify =
-            expense.status === "draft" && expense.claim_id === null;
+            expense.available_actions.includes("edit") ||
+            (expense.visit_id !== null &&
+              expense.status === "draft" &&
+              expense.claim_id === null);
           const deleting =
             deleteMutation.isPending &&
             deleteMutation.variables === expense.id;
@@ -299,7 +300,13 @@ export default function DoctorExpensesScreen() {
                     {expense.from_location} to {expense.to_location}
                   </Text>
                 </View>
-                <DoctorStatusBadge status={expense.status} />
+                <DoctorStatusBadge
+                  status={
+                    expense.visit_id === null && expense.manual_review_status
+                      ? expense.manual_review_status
+                      : expense.status
+                  }
+                />
               </View>
 
               <View style={styles.metaRow}>
@@ -326,6 +333,19 @@ export default function DoctorExpensesScreen() {
               {expense.remarks ? (
                 <Text style={styles.remarks}>{expense.remarks}</Text>
               ) : null}
+              {expense.visit_id === null ? (
+                <View style={styles.reviewCard}>
+                  <Text style={styles.reviewTitle}>
+                    {formatDoctorLabel(expense.expense_category)} · Revision {expense.manual_revision}
+                  </Text>
+                  <Text style={styles.reviewText}>{expense.manual_reason}</Text>
+                  {expense.manual_review_reason ? (
+                    <Text style={styles.reviewFeedback}>
+                      Review: {expense.manual_review_reason}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
 
               <View style={styles.receiptRow}>
                 <Ionicons
@@ -342,7 +362,7 @@ export default function DoctorExpensesScreen() {
                     ? "Receipt attached"
                     : "No receipt attached"}
                 </Text>
-                {expense.proof_file && expense.claim_id ? (
+                {expense.proof_file ? (
                   <TouchableOpacity
                     accessibilityRole="button"
                     disabled={proofMutation.isPending}
@@ -394,17 +414,33 @@ export default function DoctorExpensesScreen() {
                     ) : (
                       <Ionicons
                         color={colors.danger}
-                        name="trash-outline"
+                        name={expense.visit_id === null ? "close-circle-outline" : "trash-outline"}
                         size={18}
                       />
                     )}
                     <Text style={styles.deleteText}>
-                      {deleting ? "Deleting..." : "Delete"}
+                      {deleting
+                        ? expense.visit_id === null
+                          ? "Cancelling..."
+                          : "Deleting..."
+                        : expense.visit_id === null
+                          ? "Cancel"
+                          : "Delete"}
                     </Text>
                   </TouchableOpacity>
                 </View>
               ) : (
-                <Text style={styles.linkedText}>Linked to claim</Text>
+                <Text style={styles.linkedText}>
+                  {expense.claim_id
+                    ? "Linked to claim"
+                    : expense.manual_review_status === "approved"
+                      ? "Approved · ready to claim"
+                      : expense.manual_review_status === "pending"
+                        ? "Awaiting review"
+                        : expense.manual_review_status === "changes_requested"
+                          ? "Changes requested"
+                          : "Read-only"}
+                </Text>
               )}
               <View style={styles.detailsHint}>
                 <Text style={styles.detailsHintText}>View expense details</Text>
@@ -544,6 +580,29 @@ const styles = StyleSheet.create({
     fontSize: typography.size.bodySmall,
     lineHeight: typography.lineHeight.bodyRelaxed,
     marginBottom: spacing.lg,
+  },
+  reviewCard: {
+    backgroundColor: colors.warningSurface,
+    borderRadius: radius.control,
+    marginBottom: spacing.lg,
+    padding: spacing.md,
+  },
+  reviewTitle: {
+    color: colors.warningDark,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.extrabold,
+  },
+  reviewText: {
+    color: colors.textMutedDark,
+    fontSize: typography.size.small,
+    lineHeight: typography.lineHeight.smallRelaxed,
+    marginTop: spacing.xs,
+  },
+  reviewFeedback: {
+    color: colors.danger,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.bold,
+    marginTop: spacing.sm,
   },
   receiptRow: {
     alignItems: "center",

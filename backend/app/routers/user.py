@@ -15,6 +15,10 @@ from app.utils.auth import (
     require_permission,
     require_role,
 )
+from app.services.domain_audit_service import record_domain_audit_event
+from app.services.staff_deactivation_service import (
+    consume_staff_deactivation_override,
+)
 
 
 
@@ -70,6 +74,20 @@ def create_doctor_user(
         db.add(doctor_user)
         db.flush()
         db.refresh(doctor_user)
+        record_domain_audit_event(
+            db,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            domain="administration",
+            entity_type="staff_user",
+            entity_id=doctor_user.id,
+            action="created",
+            from_state=None,
+            to_state="active",
+            related_entity_type="staff_role",
+            related_entity_id="doctor",
+            details={"role": "doctor"},
+        )
         db.commit()
         return doctor_user
     except IntegrityError as error:
@@ -187,6 +205,27 @@ def update_therapist(
             detail="Username already registered",
         )
 
+    prior_state = "active" if therapist.is_active else "inactive"
+    deactivation_override = None
+    if therapist.is_active and not payload.is_active:
+        deactivation_override = consume_staff_deactivation_override(
+            db,
+            staff_role="therapist",
+            staff_id=therapist.id,
+            override_request_id=payload.override_request_id,
+            deactivation_reason=payload.deactivation_reason,
+            actor=current_user,
+        )
+    changed_fields = []
+    if therapist.username != normalized_username:
+        changed_fields.append("username")
+    if therapist.email != normalized_email:
+        changed_fields.append("email")
+    if bool(therapist.is_active) != bool(payload.is_active):
+        changed_fields.append("is_active")
+    if payload.password:
+        changed_fields.append("password")
+
     therapist.username = normalized_username
     therapist.email = normalized_email
     therapist.is_active = payload.is_active
@@ -194,6 +233,49 @@ def update_therapist(
         therapist.password_hash = hash_password(payload.password)
 
     try:
+        next_state = "active" if therapist.is_active else "inactive"
+        record_domain_audit_event(
+            db,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            domain="administration",
+            entity_type="staff_user",
+            entity_id=therapist.id,
+            action=(
+                "activated"
+                if prior_state == "inactive" and next_state == "active"
+                else "deactivated"
+                if prior_state == "active" and next_state == "inactive"
+                else "updated"
+                if changed_fields
+                else "no_change"
+            ),
+            from_state=prior_state,
+            to_state=next_state,
+            related_entity_type="staff_role",
+            related_entity_id="therapist",
+            reason_code=(
+                "staff_deactivation"
+                if prior_state == "active" and next_state == "inactive"
+                else None
+            ),
+            reason=(
+                payload.deactivation_reason
+                if prior_state == "active" and next_state == "inactive"
+                else None
+            ),
+            details={
+                "role": "therapist",
+                "changed_fields": changed_fields,
+                "credential_changed": "password" in changed_fields,
+                "override_used": deactivation_override is not None,
+                "override_request_id": (
+                    deactivation_override.id
+                    if deactivation_override is not None
+                    else None
+                ),
+            },
+        )
         db.commit()
         db.refresh(therapist)
     except Exception as error:

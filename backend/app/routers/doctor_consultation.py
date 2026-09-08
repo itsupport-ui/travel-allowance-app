@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
@@ -7,18 +8,28 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.doctor import Doctor
 from app.models.doctor_consultation import DoctorConsultation
+from app.models.doctor_consultation_event import DoctorConsultationEvent
 from app.models.doctor_visit import DoctorVisit
 from app.models.user import User
 from app.schemas.doctor_consultation import (
+    DoctorConsultationCancel,
     DoctorConsultationComplete,
+    DoctorConsultationConfirm,
     DoctorConsultationCreate,
     DoctorConsultationDashboardResponse,
+    DoctorConsultationEventResponse,
+    DoctorConsultationFollowUpSchedule,
     DoctorConsultationReject,
+    DoctorConsultationReschedule,
     DoctorConsultationResponse,
     DoctorConsultationVisitCreate,
 )
 from app.schemas.doctor_visit import DoctorVisitResponse
+from app.services.domain_audit_service import record_domain_audit_event
 from app.utils.auth import require_permission, require_role
+from app.utils.domain_errors import DomainHTTPException
+from app.utils.permissions import role_has_permission
+from app.utils.timezone import india_now
 from app.utils.workflow_transitions import (
     DOCTOR_CONSULTATION_DECISION_TRANSITIONS,
     DOCTOR_CONSULTATION_STATUS_TRANSITIONS,
@@ -30,6 +41,7 @@ router = APIRouter(
     prefix="/doctor-consultations",
     tags=["Doctor Consultations"],
 )
+logger = logging.getLogger(__name__)
 
 
 def _get_current_doctor(db: Session, current_user: User) -> Doctor:
@@ -92,6 +104,148 @@ def _order_consultations(query):
     )
 
 
+def _validate_future_schedule(scheduled_date: date, scheduled_time) -> None:
+    scheduled_at = datetime.combine(scheduled_date, scheduled_time)
+    if scheduled_at < india_now().replace(tzinfo=None):
+        raise DomainHTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="CONSULTATION_SCHEDULE_IN_PAST",
+            message="Cannot schedule a consultation in the past",
+            recoverable=True,
+            suggested_action="choose_future_consultation_time",
+            blocking_fields=("scheduled_date", "scheduled_time"),
+        )
+
+
+def _check_lifecycle_version(
+    consultation: DoctorConsultation,
+    expected_version: int | None,
+) -> None:
+    if (
+        expected_version is not None
+        and consultation.lifecycle_version != expected_version
+    ):
+        raise DomainHTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            code="CONSULTATION_VERSION_CONFLICT",
+            message=(
+                "This consultation changed after it was loaded. "
+                "Refresh it before trying again."
+            ),
+            recoverable=True,
+            suggested_action="refresh_consultation",
+        )
+
+
+def _authorize_consultation_lifecycle(
+    db: Session,
+    consultation: DoctorConsultation,
+    current_user: User,
+) -> None:
+    if role_has_permission(current_user.role, "consultations.manage"):
+        return
+    if current_user.role == "doctor":
+        doctor = _get_current_doctor(db, current_user)
+        if consultation.doctor_id == doctor.id:
+            return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Not authorized to manage this consultation",
+    )
+
+
+def _record_event(
+    db: Session,
+    consultation: DoctorConsultation,
+    current_user: User,
+    *,
+    event_type: str,
+    from_status: str | None = None,
+    to_status: str | None = None,
+    from_decision: str | None = None,
+    to_decision: str | None = None,
+    reason: str | None = None,
+    related_consultation_id: int | None = None,
+    related_visit_id: int | None = None,
+) -> None:
+    db.add(
+        DoctorConsultationEvent(
+            consultation_id=consultation.id,
+            event_type=event_type,
+            actor_id=current_user.id,
+            from_status=from_status,
+            to_status=to_status,
+            from_decision=from_decision,
+            to_decision=to_decision,
+            reason=reason,
+            related_consultation_id=related_consultation_id,
+            related_visit_id=related_visit_id,
+            lifecycle_version=consultation.lifecycle_version,
+        )
+    )
+    record_domain_audit_event(
+        db,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        domain="clinical",
+        entity_type="doctor_consultation",
+        entity_id=consultation.id,
+        action=event_type,
+        from_state=from_status or from_decision,
+        to_state=to_status or to_decision,
+        reason=(
+            reason
+            if event_type
+            in {"cancelled", "rescheduled", "follow_up_scheduled"}
+            else None
+        ),
+        related_entity_type=(
+            "doctor_consultation"
+            if related_consultation_id is not None
+            else "doctor_visit"
+            if related_visit_id is not None
+            else None
+        ),
+        related_entity_id=(
+            related_consultation_id
+            if related_consultation_id is not None
+            else related_visit_id
+        ),
+        details={"lifecycle_version": consultation.lifecycle_version},
+    )
+
+
+def _create_successor(
+    db: Session,
+    source: DoctorConsultation,
+    current_user: User,
+    *,
+    scheduled_date: date,
+    scheduled_time,
+    origin_kind: str,
+) -> DoctorConsultation:
+    successor = DoctorConsultation(
+        patient_name=source.patient_name,
+        patient_phone=source.patient_phone,
+        patient_address=source.patient_address,
+        doctor_id=source.doctor_id,
+        origin_consultation_id=source.id,
+        origin_kind=origin_kind,
+        scheduled_date=scheduled_date,
+        scheduled_time=scheduled_time,
+        purpose=source.purpose,
+        notes=source.notes,
+        patient_decision="pending",
+        status="scheduled",
+        created_by=current_user.id,
+        lifecycle_version=1,
+    )
+    db.add(successor)
+    db.flush()
+    source.successor_consultation_id = successor.id
+    return successor
+
+
 @router.post(
     "/",
     response_model=DoctorConsultationResponse,
@@ -115,16 +269,20 @@ def create_doctor_consultation(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Doctor not found",
             )
+        if not doctor.active or doctor.user is None or not doctor.user.is_active:
+            raise DomainHTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="DOCTOR_INACTIVE",
+                message="Consultations can only be assigned to an active doctor",
+                recoverable=True,
+                suggested_action="choose_active_doctor",
+                blocking_fields=("doctor_id",),
+            )
 
-        scheduled_at = datetime.combine(
+        _validate_future_schedule(
             consultation_data.scheduled_date,
             consultation_data.scheduled_time,
         )
-        if scheduled_at < datetime.now():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot schedule a consultation in the past",
-            )
 
         consultation = DoctorConsultation(
             patient_name=consultation_data.patient_name,
@@ -142,6 +300,14 @@ def create_doctor_consultation(
 
         db.add(consultation)
         db.flush()
+        _record_event(
+            db,
+            consultation,
+            current_user,
+            event_type="created",
+            to_status="scheduled",
+            to_decision="pending",
+        )
         db.refresh(consultation)
         db.commit()
         return consultation
@@ -191,7 +357,7 @@ def get_doctor_consultation_dashboard(
 
     return {
         "today_calls": doctor_consultations.filter(
-            DoctorConsultation.scheduled_date == date.today()
+            DoctorConsultation.scheduled_date == india_now().date()
         ).count(),
         "scheduled": doctor_consultations.filter(
             DoctorConsultation.status == "scheduled"
@@ -367,6 +533,348 @@ def get_doctor_consultation(
     return consultation
 
 
+@router.get(
+    "/{consultation_id}/history",
+    response_model=list[DoctorConsultationEventResponse],
+)
+def get_doctor_consultation_history(
+    consultation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["doctor", "admin"])),
+):
+    consultation = (
+        db.query(DoctorConsultation)
+        .filter(DoctorConsultation.id == consultation_id)
+        .first()
+    )
+    if consultation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Doctor consultation not found",
+        )
+    _authorize_consultation_lifecycle(db, consultation, current_user)
+    return (
+        db.query(DoctorConsultationEvent)
+        .filter(DoctorConsultationEvent.consultation_id == consultation_id)
+        .order_by(
+            DoctorConsultationEvent.created_at.asc(),
+            DoctorConsultationEvent.id.asc(),
+        )
+        .all()
+    )
+
+
+@router.put(
+    "/{consultation_id}/cancel",
+    response_model=DoctorConsultationResponse,
+)
+def cancel_doctor_consultation(
+    consultation_id: int,
+    cancellation_data: DoctorConsultationCancel,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["doctor", "admin"])),
+):
+    try:
+        consultation = (
+            db.query(DoctorConsultation)
+            .filter(DoctorConsultation.id == consultation_id)
+            .with_for_update()
+            .first()
+        )
+        if consultation is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Doctor consultation not found",
+            )
+        _authorize_consultation_lifecycle(db, consultation, current_user)
+        _check_lifecycle_version(
+            consultation,
+            cancellation_data.lifecycle_version,
+        )
+        validate_status_transition(
+            entity="Doctor consultation status",
+            current_status=consultation.status,
+            next_status="cancelled",
+            transitions=DOCTOR_CONSULTATION_STATUS_TRANSITIONS,
+        )
+
+        previous_status = consultation.status
+        consultation.status = "cancelled"
+        consultation.cancellation_code = cancellation_data.cancellation_code
+        consultation.cancellation_reason = cancellation_data.reason
+        consultation.cancelled_by = current_user.id
+        consultation.cancelled_at = datetime.now(timezone.utc)
+        consultation.lifecycle_version += 1
+        db.flush()
+        _record_event(
+            db,
+            consultation,
+            current_user,
+            event_type="cancelled",
+            from_status=previous_status,
+            to_status="cancelled",
+            from_decision=consultation.patient_decision,
+            to_decision=consultation.patient_decision,
+            reason=cancellation_data.reason,
+        )
+        db.commit()
+        db.refresh(consultation)
+        return consultation
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as error:
+        db.rollback()
+        logger.exception("Unable to create doctor consultation")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to cancel doctor consultation",
+        ) from error
+
+
+@router.post(
+    "/{consultation_id}/reschedule",
+    response_model=DoctorConsultationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def reschedule_doctor_consultation(
+    consultation_id: int,
+    reschedule_data: DoctorConsultationReschedule,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["doctor", "admin"])),
+):
+    try:
+        consultation = (
+            db.query(DoctorConsultation)
+            .filter(DoctorConsultation.id == consultation_id)
+            .with_for_update()
+            .first()
+        )
+        if consultation is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Doctor consultation not found",
+            )
+        _authorize_consultation_lifecycle(db, consultation, current_user)
+        _check_lifecycle_version(
+            consultation,
+            reschedule_data.lifecycle_version,
+        )
+        validate_status_transition(
+            entity="Doctor consultation status",
+            current_status=consultation.status,
+            next_status="cancelled",
+            transitions=DOCTOR_CONSULTATION_STATUS_TRANSITIONS,
+        )
+        if consultation.successor_consultation_id is not None:
+            raise DomainHTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                code="CONSULTATION_SUCCESSOR_EXISTS",
+                message="A replacement consultation already exists",
+                recoverable=True,
+                suggested_action="view_successor_consultation",
+            )
+        _validate_future_schedule(
+            reschedule_data.scheduled_date,
+            reschedule_data.scheduled_time,
+        )
+
+        successor = _create_successor(
+            db,
+            consultation,
+            current_user,
+            scheduled_date=reschedule_data.scheduled_date,
+            scheduled_time=reschedule_data.scheduled_time,
+            origin_kind="rescheduled",
+        )
+        previous_status = consultation.status
+        consultation.status = "cancelled"
+        consultation.cancellation_code = "rescheduled"
+        consultation.cancellation_reason = reschedule_data.reason
+        consultation.cancelled_by = current_user.id
+        consultation.cancelled_at = datetime.now(timezone.utc)
+        consultation.lifecycle_version += 1
+        db.flush()
+        _record_event(
+            db,
+            consultation,
+            current_user,
+            event_type="rescheduled",
+            from_status=previous_status,
+            to_status="cancelled",
+            from_decision=consultation.patient_decision,
+            to_decision=consultation.patient_decision,
+            reason=reschedule_data.reason,
+            related_consultation_id=successor.id,
+        )
+        _record_event(
+            db,
+            successor,
+            current_user,
+            event_type="created_from_reschedule",
+            to_status="scheduled",
+            to_decision="pending",
+            reason=reschedule_data.reason,
+            related_consultation_id=consultation.id,
+        )
+        db.commit()
+        db.refresh(successor)
+        return successor
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as error:
+        db.rollback()
+        raise DomainHTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            code="CONSULTATION_SUCCESSOR_EXISTS",
+            message="A replacement consultation already exists",
+            recoverable=True,
+            suggested_action="refresh_consultation",
+        ) from error
+    except Exception as error:
+        db.rollback()
+        logger.exception("Unable to create doctor consultation")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to reschedule doctor consultation",
+        ) from error
+
+
+@router.post(
+    "/{consultation_id}/schedule-follow-up",
+    response_model=DoctorConsultationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def schedule_doctor_consultation_follow_up(
+    consultation_id: int,
+    follow_up_data: DoctorConsultationFollowUpSchedule,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["doctor", "admin"])),
+):
+    try:
+        consultation = (
+            db.query(DoctorConsultation)
+            .filter(DoctorConsultation.id == consultation_id)
+            .with_for_update()
+            .first()
+        )
+        if consultation is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Doctor consultation not found",
+            )
+        _authorize_consultation_lifecycle(db, consultation, current_user)
+        _check_lifecycle_version(
+            consultation,
+            follow_up_data.lifecycle_version,
+        )
+        if (
+            consultation.status != "completed"
+            or consultation.patient_decision != "follow_up"
+        ):
+            raise DomainHTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="CONSULTATION_NOT_READY_FOR_FOLLOW_UP",
+                message=(
+                    "Only a completed consultation marked for follow-up "
+                    "can create a follow-up appointment"
+                ),
+                recoverable=False,
+                suggested_action="view_consultation_status",
+            )
+        if consultation.successor_consultation_id is not None:
+            raise DomainHTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                code="CONSULTATION_SUCCESSOR_EXISTS",
+                message="A follow-up consultation already exists",
+                recoverable=True,
+                suggested_action="view_successor_consultation",
+            )
+
+        follow_up_date = (
+            follow_up_data.scheduled_date or consultation.follow_up_date
+        )
+        follow_up_time = (
+            follow_up_data.scheduled_time or consultation.follow_up_time
+        )
+        if follow_up_date is None or follow_up_time is None:
+            raise DomainHTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="FOLLOW_UP_SCHEDULE_REQUIRED",
+                message="Follow-up date and time are required",
+                recoverable=True,
+                suggested_action="provide_follow_up_schedule",
+                blocking_fields=("scheduled_date", "scheduled_time"),
+            )
+        _validate_future_schedule(follow_up_date, follow_up_time)
+        reason = follow_up_data.reason or consultation.follow_up_reason
+        if reason is None or len(reason.strip()) < 3:
+            raise DomainHTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                code="FOLLOW_UP_REASON_REQUIRED",
+                message="A clear follow-up reason is required",
+                recoverable=True,
+                suggested_action="provide_follow_up_reason",
+                blocking_fields=("reason",),
+            )
+        reason = reason.strip()
+
+        successor = _create_successor(
+            db,
+            consultation,
+            current_user,
+            scheduled_date=follow_up_date,
+            scheduled_time=follow_up_time,
+            origin_kind="follow_up",
+        )
+        consultation.lifecycle_version += 1
+        db.flush()
+        _record_event(
+            db,
+            consultation,
+            current_user,
+            event_type="follow_up_scheduled",
+            from_status=consultation.status,
+            to_status=consultation.status,
+            from_decision="follow_up",
+            to_decision="follow_up",
+            reason=reason,
+            related_consultation_id=successor.id,
+        )
+        _record_event(
+            db,
+            successor,
+            current_user,
+            event_type="created_from_follow_up",
+            to_status="scheduled",
+            to_decision="pending",
+            reason=reason,
+            related_consultation_id=consultation.id,
+        )
+        db.commit()
+        db.refresh(successor)
+        return successor
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as error:
+        db.rollback()
+        raise DomainHTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            code="CONSULTATION_SUCCESSOR_EXISTS",
+            message="A follow-up consultation already exists",
+            recoverable=True,
+            suggested_action="refresh_consultation",
+        ) from error
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to schedule follow-up consultation",
+        ) from error
+
+
 @router.put(
     "/{consultation_id}/complete",
     response_model=DoctorConsultationResponse,
@@ -395,6 +903,10 @@ def complete_doctor_consultation(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to complete this consultation",
             )
+        _check_lifecycle_version(
+            consultation,
+            completion_data.lifecycle_version,
+        )
         validate_status_transition(
             entity="Doctor consultation status",
             current_status=consultation.status,
@@ -408,7 +920,14 @@ def complete_doctor_consultation(
             transitions=DOCTOR_CONSULTATION_DECISION_TRANSITIONS,
             allow_noop=True,
         )
+        if completion_data.patient_decision == "follow_up":
+            _validate_future_schedule(
+                completion_data.follow_up_date,
+                completion_data.follow_up_time,
+            )
 
+        previous_status = consultation.status
+        previous_decision = consultation.patient_decision
         consultation.call_outcome = completion_data.call_outcome
         consultation.preliminary_diagnosis = (
             completion_data.preliminary_diagnosis
@@ -422,10 +941,25 @@ def complete_doctor_consultation(
         consultation.patient_decision = (
             completion_data.patient_decision
         )
+        consultation.follow_up_date = completion_data.follow_up_date
+        consultation.follow_up_time = completion_data.follow_up_time
+        consultation.follow_up_reason = completion_data.follow_up_reason
         consultation.status = "completed"
         consultation.completed_at = datetime.now(timezone.utc)
+        consultation.lifecycle_version += 1
 
         db.flush()
+        _record_event(
+            db,
+            consultation,
+            current_user,
+            event_type="completed",
+            from_status=previous_status,
+            to_status=consultation.status,
+            from_decision=previous_decision,
+            to_decision=consultation.patient_decision,
+            reason=consultation.call_outcome,
+        )
         db.refresh(consultation)
         db.commit()
         return consultation
@@ -446,6 +980,7 @@ def complete_doctor_consultation(
 )
 def confirm_doctor_consultation(
     consultation_id: int,
+    confirmation_data: DoctorConsultationConfirm,
     db: Session = Depends(get_db),
     current_user: User = Depends(
         require_permission("consultations.manage")
@@ -463,6 +998,10 @@ def confirm_doctor_consultation(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Doctor consultation not found",
             )
+        _check_lifecycle_version(
+            consultation,
+            confirmation_data.lifecycle_version,
+        )
         if consultation.status != "completed":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -483,9 +1022,22 @@ def confirm_doctor_consultation(
             transitions=DOCTOR_CONSULTATION_DECISION_TRANSITIONS,
         )
 
+        previous_decision = consultation.patient_decision
         consultation.patient_decision = "confirmed"
+        consultation.rejection_reason = None
+        consultation.lifecycle_version += 1
 
         db.flush()
+        _record_event(
+            db,
+            consultation,
+            current_user,
+            event_type="confirmed",
+            from_status=consultation.status,
+            to_status=consultation.status,
+            from_decision=previous_decision,
+            to_decision="confirmed",
+        )
         db.refresh(consultation)
         db.commit()
         return consultation
@@ -524,6 +1076,10 @@ def reject_doctor_consultation(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Doctor consultation not found",
             )
+        _check_lifecycle_version(
+            consultation,
+            rejection_data.lifecycle_version,
+        )
         if consultation.status != "completed":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -544,10 +1100,23 @@ def reject_doctor_consultation(
             transitions=DOCTOR_CONSULTATION_DECISION_TRANSITIONS,
         )
 
+        previous_decision = consultation.patient_decision
         consultation.patient_decision = "rejected"
         consultation.rejection_reason = rejection_data.rejection_reason
+        consultation.lifecycle_version += 1
 
         db.flush()
+        _record_event(
+            db,
+            consultation,
+            current_user,
+            event_type="rejected",
+            from_status=consultation.status,
+            to_status=consultation.status,
+            from_decision=previous_decision,
+            to_decision="rejected",
+            reason=rejection_data.rejection_reason,
+        )
         db.refresh(consultation)
         db.commit()
         return consultation
@@ -587,6 +1156,10 @@ def create_visit_from_doctor_consultation(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Doctor consultation not found",
             )
+        _check_lifecycle_version(
+            consultation,
+            visit_data.lifecycle_version,
+        )
         if consultation.patient_decision != "confirmed":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -597,7 +1170,7 @@ def create_visit_from_doctor_consultation(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A doctor visit already exists for this consultation",
             )
-        if visit_data.visit_date < date.today():
+        if visit_data.visit_date < india_now().date():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot schedule a visit in the past",
@@ -623,8 +1196,20 @@ def create_visit_from_doctor_consultation(
         db.flush()
 
         consultation.doctor_visit_id = visit.id
+        consultation.lifecycle_version += 1
 
         db.flush()
+        _record_event(
+            db,
+            consultation,
+            current_user,
+            event_type="visit_created",
+            from_status=consultation.status,
+            to_status=consultation.status,
+            from_decision=consultation.patient_decision,
+            to_decision=consultation.patient_decision,
+            related_visit_id=visit.id,
+        )
         db.refresh(visit)
         db.commit()
         return visit

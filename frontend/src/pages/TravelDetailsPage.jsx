@@ -2,12 +2,18 @@ import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import toast from "react-hot-toast"
 import TherapistLayout from "../layouts/TherapistLayout"
-import { getTravelById, openTravelInvoice } from "../services/travelService"
+import {
+  cancelTravel,
+  getTravelById,
+  getTravelReviewHistory,
+  openTravelInvoice,
+} from "../services/travelService"
 
 function TravelDetailsPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [travel, setTravel] = useState(null)
+  const [reviewHistory, setReviewHistory] = useState([])
 
   useEffect(() => {
     const fetchTravel = async () => {
@@ -15,6 +21,9 @@ function TravelDetailsPage() {
         const token = localStorage.getItem("token")
         const data = await getTravelById(id, token)
         setTravel(data)
+        if (data.schedule_id == null) {
+          setReviewHistory(await getTravelReviewHistory(id, token))
+        }
       } catch {
         toast.error("Failed to load travel details")
         navigate("/travel/today", { replace: true })
@@ -37,6 +46,20 @@ function TravelDetailsPage() {
     }
   }
 
+  const handleCancel = async () => {
+    if (!window.confirm("Cancel this unclaimed manual travel entry? The audit history will be retained.")) {
+      return
+    }
+    try {
+      const token = localStorage.getItem("token")
+      await cancelTravel(travel.id, token)
+      toast.success("Manual travel entry cancelled")
+      navigate("/travel/today", { replace: true })
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Unable to cancel travel")
+    }
+  }
+
   return (
     <TherapistLayout>
       <div className="w-full max-w-4xl mx-auto px-1 sm:px-4">
@@ -46,7 +69,9 @@ function TravelDetailsPage() {
               Travel Details
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              Travel entries are read-only after creation.
+              {travel.schedule_id == null
+                ? "Manual entries can be corrected until approval and claim submission."
+                : "Automatic travel is derived from verified field activity."}
             </p>
           </div>
           <button
@@ -66,6 +91,38 @@ function TravelDetailsPage() {
           </div>
 
           <div className="p-5 sm:p-6 space-y-6">
+            {travel.schedule_id == null && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-bold capitalize">
+                    Review: {(travel.manual_review_status || "pending").replaceAll("_", " ")}
+                  </p>
+                  <span className="text-xs font-semibold">Revision {travel.manual_revision}</span>
+                </div>
+                <p className="mt-2"><span className="font-semibold">Manual reason:</span> {travel.manual_reason}</p>
+                {travel.manual_review_reason && (
+                  <p className="mt-2"><span className="font-semibold">Reviewer note:</span> {travel.manual_review_reason}</p>
+                )}
+                {travel.available_actions?.includes("edit") && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/travel/add?edit=${travel.id}`)}
+                      className="rounded-md bg-blue-700 px-3 py-2 text-xs font-bold text-white"
+                    >
+                      Correct Entry
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCancel}
+                      className="rounded-md border border-rose-300 px-3 py-2 text-xs font-bold text-rose-700"
+                    >
+                      Cancel Entry
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="grid sm:grid-cols-2 gap-5">
               <Detail label="From Address" value={travel.from_address} />
               <Detail label="To Address" value={travel.to_address} />
@@ -103,6 +160,23 @@ function TravelDetailsPage() {
                     <span className="text-gray-800 font-semibold">N/A</span>
                   )}
                 </div>
+              </div>
+            )}
+
+            {reviewHistory.length > 0 && (
+              <div className="border-t border-gray-100 pt-6">
+                <h2 className="font-bold text-gray-800">Review history</h2>
+                <ol className="mt-3 space-y-2">
+                  {reviewHistory.map((event) => (
+                    <li key={event.id} className="rounded-md bg-gray-50 p-3 text-sm text-gray-700">
+                      <p className="font-semibold capitalize">{event.event_type.replaceAll("_", " ")} · revision {event.revision}</p>
+                      <p className="mt-1">{event.reason}</p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {event.actor_name || `User #${event.actor_id}`} · {new Date(event.created_at).toLocaleString()}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
               </div>
             )}
           </div>

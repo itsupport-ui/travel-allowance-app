@@ -47,7 +47,9 @@ export interface AdminScheduleSummary {
 }
 
 export interface AdminScheduleReviewItem {
+  availableActions: string[];
   area: string;
+  blockingReasons: string[];
   clinicalNotes: string | null;
   doctorId: number;
   doctorName: string;
@@ -69,6 +71,7 @@ export interface AdminScheduleReviewItem {
   startDate: string | null;
   startTime: string;
   status: ScheduleStatus;
+  nextAction: string | null;
   therapistId: number;
   therapistName: string;
   treatmentName: string;

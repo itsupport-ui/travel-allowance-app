@@ -367,6 +367,7 @@ export function AdminScheduleFormScreen({
       try {
         setAvailability(
           await getTherapistAvailability({
+            cadenceDays: form.cadenceDays,
             endDate: form.endDate,
             excludeScheduleId:
               mode === "edit" ? scheduleId : undefined,
@@ -388,6 +389,7 @@ export function AdminScheduleFormScreen({
     return () => clearTimeout(timeout);
   }, [
     availabilityReady,
+    form.cadenceDays,
     form.endDate,
     form.inTime,
     form.outTime,
@@ -858,37 +860,53 @@ export function AdminScheduleFormScreen({
               value={form.treatmentDate}
             />
           ) : (
-            <View
-              style={[
-                styles.twoColumns,
-                stackColumns ? styles.stackedColumns : null,
-              ]}
-            >
-              <View style={styles.column}>
-                <DateTimeField
-                  error={errors.startDate}
-                  label="Start Date"
-                  minimumDate={startOfDay(new Date())}
-                  mode="date"
-                  onChange={(value) => updateField("startDate", value)}
-                  placeholder="Start date"
-                  required
-                  value={form.startDate}
-                />
+            <>
+              <View
+                style={[
+                  styles.twoColumns,
+                  stackColumns ? styles.stackedColumns : null,
+                ]}
+              >
+                <View style={styles.column}>
+                  <DateTimeField
+                    error={errors.startDate}
+                    label="Start Date"
+                    minimumDate={startOfDay(new Date())}
+                    mode="date"
+                    onChange={(value) => updateField("startDate", value)}
+                    placeholder="Start date"
+                    required
+                    value={form.startDate}
+                  />
+                </View>
+                <View style={styles.column}>
+                  <DateTimeField
+                    error={errors.endDate}
+                    label="End Date"
+                    minimumDate={form.startDate ?? startOfDay(new Date())}
+                    mode="date"
+                    onChange={(value) => updateField("endDate", value)}
+                    placeholder="End date"
+                    required
+                    value={form.endDate}
+                  />
+                </View>
               </View>
-              <View style={styles.column}>
-                <DateTimeField
-                  error={errors.endDate}
-                  label="End Date"
-                  minimumDate={form.startDate ?? startOfDay(new Date())}
-                  mode="date"
-                  onChange={(value) => updateField("endDate", value)}
-                  placeholder="End date"
-                  required
-                  value={form.endDate}
-                />
-              </View>
-            </View>
+              <FormTextField
+                accessibilityLabel="Days between recurring visits"
+                error={errors.cadenceDays}
+                icon="repeat-outline"
+                keyboardType="number-pad"
+                label="Days Between Visits"
+                maxLength={2}
+                placeholder="1"
+                required
+                value={String(form.cadenceDays)}
+                onChangeText={(value) =>
+                  updateField("cadenceDays", Number(value) || 0)
+                }
+              />
+            </>
           )}
           <View
             style={[

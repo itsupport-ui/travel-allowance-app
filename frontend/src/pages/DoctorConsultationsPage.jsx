@@ -10,9 +10,17 @@ import {
 
 import DoctorLayout from "../layouts/DoctorLayout"
 import {
+  ConsultationLifecycleDialog,
+  ConsultationTimeline,
+} from "../components/consultations/ConsultationLifecycleDialog"
+import {
+  cancelDoctorConsultation,
   completeDoctorConsultation,
   getDoctorConsultation,
+  getDoctorConsultationHistory,
   getMyDoctorConsultations,
+  rescheduleDoctorConsultation,
+  scheduleDoctorConsultationFollowUp,
 } from "../services/doctorConsultationService"
 
 
@@ -22,6 +30,9 @@ const initialCompletionForm = {
   proposed_treatment: "",
   estimated_amount: "",
   patient_decision: "pending",
+  follow_up_date: "",
+  follow_up_time: "",
+  follow_up_reason: "",
 }
 
 const inputClass =
@@ -141,6 +152,9 @@ function DoctorConsultationsPage() {
   const [actionId, setActionId] = useState(null)
   const [modal, setModal] = useState(null)
   const [selectedConsultation, setSelectedConsultation] = useState(null)
+  const [history, setHistory] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [lifecycleMode, setLifecycleMode] = useState(null)
   const [completionForm, setCompletionForm] = useState(
     initialCompletionForm
   )
@@ -185,14 +199,20 @@ function DoctorConsultationsPage() {
     if (actionId !== null) return
     setModal(null)
     setSelectedConsultation(null)
+    setHistory([])
   }
 
   const openDetails = async (consultation) => {
     try {
       setActionId(`view-${consultation.id}`)
+      setHistoryLoading(true)
       const token = localStorage.getItem("token")
-      const data = await getDoctorConsultation(consultation.id, token)
+      const [data, eventData] = await Promise.all([
+        getDoctorConsultation(consultation.id, token),
+        getDoctorConsultationHistory(consultation.id, token),
+      ])
       setSelectedConsultation(data)
+      setHistory(eventData || [])
       setModal("details")
     } catch (error) {
       toast.error(
@@ -200,6 +220,7 @@ function DoctorConsultationsPage() {
       )
     } finally {
       setActionId(null)
+      setHistoryLoading(false)
     }
   }
 
@@ -214,6 +235,56 @@ function DoctorConsultationsPage() {
       ...current,
       [event.target.name]: event.target.value,
     }))
+  }
+
+  const openLifecycleModal = (consultation, mode) => {
+    setModal(null)
+    setSelectedConsultation(consultation)
+    setLifecycleMode(mode)
+  }
+
+  const closeLifecycleModal = () => {
+    if (actionId !== null) return
+    setLifecycleMode(null)
+    setSelectedConsultation(null)
+  }
+
+  const submitLifecycle = async (payload) => {
+    if (!selectedConsultation || !lifecycleMode) return
+    try {
+      setActionId(`lifecycle-${selectedConsultation.id}`)
+      const token = localStorage.getItem("token")
+      if (lifecycleMode === "cancel") {
+        await cancelDoctorConsultation(
+          selectedConsultation.id,
+          payload,
+          token
+        )
+        toast.success("Consultation cancelled with history retained")
+      } else if (lifecycleMode === "reschedule") {
+        await rescheduleDoctorConsultation(
+          selectedConsultation.id,
+          payload,
+          token
+        )
+        toast.success("Replacement consultation scheduled")
+      } else {
+        await scheduleDoctorConsultationFollowUp(
+          selectedConsultation.id,
+          payload,
+          token
+        )
+        toast.success("Follow-up consultation scheduled")
+      }
+      const data = await getMyDoctorConsultations(token)
+      setConsultations(data || [])
+      setLifecycleMode(null)
+      setSelectedConsultation(null)
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to update consultation"))
+    } finally {
+      setActionId(null)
+    }
   }
 
   const submitCompletion = async (event) => {
@@ -236,6 +307,19 @@ function DoctorConsultationsPage() {
               ? null
               : Number(completionForm.estimated_amount),
           patient_decision: completionForm.patient_decision,
+          follow_up_date:
+            completionForm.patient_decision === "follow_up"
+              ? completionForm.follow_up_date
+              : null,
+          follow_up_time:
+            completionForm.patient_decision === "follow_up"
+              ? completionForm.follow_up_time
+              : null,
+          follow_up_reason:
+            completionForm.patient_decision === "follow_up"
+              ? completionForm.follow_up_reason.trim()
+              : null,
+          lifecycle_version: selectedConsultation.lifecycle_version,
         },
         token
       )
@@ -261,7 +345,10 @@ function DoctorConsultationsPage() {
 
   const renderActions = (consultation, mobile = false) => {
     const isViewing = actionId === `view-${consultation.id}`
-    const canComplete = consultation.status === "scheduled"
+    const actions = new Set(
+      consultation.available_actions ||
+        (consultation.status === "scheduled" ? ["complete"] : [])
+    )
 
     return (
       <div
@@ -278,7 +365,7 @@ function DoctorConsultationsPage() {
           <FaEye />
           {isViewing ? "Loading..." : "View"}
         </button>
-        {canComplete && (
+        {actions.has("complete") && (
           <button
             type="button"
             onClick={() => openCompleteModal(consultation)}
@@ -286,6 +373,33 @@ function DoctorConsultationsPage() {
           >
             <FaCheckCircle />
             Complete
+          </button>
+        )}
+        {actions.has("reschedule") && (
+          <button
+            type="button"
+            onClick={() => openLifecycleModal(consultation, "reschedule")}
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+          >
+            Reschedule
+          </button>
+        )}
+        {actions.has("cancel") && (
+          <button
+            type="button"
+            onClick={() => openLifecycleModal(consultation, "cancel")}
+            className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+          >
+            Cancel
+          </button>
+        )}
+        {actions.has("schedule_follow_up") && (
+          <button
+            type="button"
+            onClick={() => openLifecycleModal(consultation, "follow_up")}
+            className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700"
+          >
+            Schedule follow-up
           </button>
         )}
       </div>
@@ -541,7 +655,41 @@ function DoctorConsultationsPage() {
                       ).toLocaleString("en-IN")}`
                 }
               />
+              {selectedConsultation.follow_up_date && (
+                <DetailItem
+                  label="Follow-up due"
+                  value={`${formatDate(
+                    selectedConsultation.follow_up_date
+                  )} · ${selectedConsultation.follow_up_time?.slice(0, 5)}`}
+                />
+              )}
+              {selectedConsultation.follow_up_reason && (
+                <DetailItem
+                  label="Follow-up reason"
+                  value={selectedConsultation.follow_up_reason}
+                />
+              )}
+              {selectedConsultation.cancellation_reason && (
+                <DetailItem
+                  label="Cancellation"
+                  value={`${selectedConsultation.cancellation_code?.replaceAll(
+                    "_",
+                    " "
+                  )}: ${selectedConsultation.cancellation_reason}`}
+                  className="sm:col-span-2"
+                />
+              )}
             </dl>
+
+            <section className="border-t border-slate-100 pt-4">
+              <h3 className="mb-3 text-sm font-bold text-slate-900">
+                Lifecycle history
+              </h3>
+              <ConsultationTimeline
+                events={history}
+                loading={historyLoading}
+              />
+            </section>
 
             <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
               <button
@@ -560,6 +708,19 @@ function DoctorConsultationsPage() {
                   className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
                 >
                   Complete consultation
+                </button>
+              )}
+              {selectedConsultation.available_actions?.includes(
+                "schedule_follow_up"
+              ) && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    openLifecycleModal(selectedConsultation, "follow_up")
+                  }
+                  className="rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-violet-700"
+                >
+                  Schedule follow-up
                 </button>
               )}
             </div>
@@ -657,6 +818,50 @@ function DoctorConsultationsPage() {
               </div>
             </div>
 
+            {completionForm.patient_decision === "follow_up" && (
+              <div className="space-y-4 rounded-xl border border-violet-200 bg-violet-50 p-4">
+                <p className="text-sm font-semibold text-violet-900">
+                  Set a clear follow-up task
+                </p>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className={labelClass}>Follow-up date</label>
+                    <input
+                      required
+                      type="date"
+                      name="follow_up_date"
+                      value={completionForm.follow_up_date}
+                      onChange={handleCompletionChange}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Follow-up time</label>
+                    <input
+                      required
+                      type="time"
+                      name="follow_up_time"
+                      value={completionForm.follow_up_time}
+                      onChange={handleCompletionChange}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelClass}>Follow-up reason</label>
+                  <textarea
+                    required
+                    minLength="3"
+                    rows="2"
+                    name="follow_up_reason"
+                    value={completionForm.follow_up_reason}
+                    onChange={handleCompletionChange}
+                    className={`${inputClass} resize-none`}
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="flex justify-end gap-3 pt-2">
               <button
                 type="button"
@@ -682,6 +887,18 @@ function DoctorConsultationsPage() {
             </div>
           </form>
         </Modal>
+      )}
+
+      {lifecycleMode && selectedConsultation && (
+        <ConsultationLifecycleDialog
+          consultation={selectedConsultation}
+          mode={lifecycleMode}
+          busy={
+            actionId === `lifecycle-${selectedConsultation.id}`
+          }
+          onClose={closeLifecycleModal}
+          onSubmit={submitLifecycle}
+        />
       )}
     </DoctorLayout>
   )

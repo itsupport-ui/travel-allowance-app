@@ -30,6 +30,8 @@ import { FormScrollView } from "../src/components/layout/FormScrollView";
 import { ScheduleListSkeleton } from "../src/components/skeletons/ScreenSkeletons";
 import { queryKeys } from "../src/query/queryKeys";
 import { getApiErrorMessage } from "../src/services/errorHandler";
+import { isOfflineMutationQueuedError } from "../src/services/offlineMutationQueue";
+import { createLocationException } from "../src/services/locationExceptionService";
 import {
   getScheduleById,
   getTreatmentSession,
@@ -203,12 +205,16 @@ export default function ScheduleDetailsScreen() {
     useState<number | null>(null);
   const [capturingLocation, setCapturingLocation] = useState(false);
   const [eligibilityCoordinates, setEligibilityCoordinates] = useState<{
+    device_timestamp: string;
+    gps_accuracy_m: number;
     latitude: number;
     longitude: number;
   } | null>(null);
   const [eligibilityError, setEligibilityError] =
     useState<string | null>(null);
   const [checkingEligibility, setCheckingEligibility] = useState(false);
+  const [exceptionVisible, setExceptionVisible] = useState(false);
+  const [exceptionReason, setExceptionReason] = useState("");
   const [, setElapsedTick] = useState(0);
 
   const scheduleQuery = useQuery({
@@ -252,7 +258,7 @@ export default function ScheduleDetailsScreen() {
     if (
       !schedule ||
       schedule.status !== "scheduled" ||
-      schedule.session_status !== "NOT_STARTED"
+      schedule.session_status === "COMPLETED"
     ) {
       return;
     }
@@ -268,6 +274,8 @@ export default function ScheduleDetailsScreen() {
         if (active) {
           setLocationAccuracy(coordinates.accuracy);
           setEligibilityCoordinates({
+            device_timestamp: new Date().toISOString(),
+            gps_accuracy_m: Math.max(coordinates.accuracy ?? 1, 1),
             latitude: coordinates.latitude,
             longitude: coordinates.longitude,
           });
@@ -341,6 +349,9 @@ export default function ScheduleDetailsScreen() {
         invoice_file:
           transportMode === "vehicle" ? null : invoiceFile,
         transport_mode: transportMode,
+        gps_accuracy_m: Math.max(coordinates.accuracy ?? 1, 1),
+        location_exception_id:
+          sessionQuery.data?.location_exception_id,
       });
     },
     onSuccess: async (schedule) => {
@@ -373,7 +384,9 @@ export default function ScheduleDetailsScreen() {
     onError: (error) => {
       setCapturingLocation(false);
       Alert.alert(
-        "Unable to Complete Treatment",
+        isOfflineMutationQueuedError(error)
+          ? "Saved for Sync"
+          : "Unable to Complete Treatment",
         getApiErrorMessage(
           error,
           "Unable to complete this treatment."
@@ -395,6 +408,8 @@ export default function ScheduleDetailsScreen() {
       const coordinates = await getCurrentLocation();
       setLocationAccuracy(coordinates.accuracy);
       setEligibilityCoordinates({
+        device_timestamp: new Date().toISOString(),
+        gps_accuracy_m: Math.max(coordinates.accuracy ?? 1, 1),
         latitude: coordinates.latitude,
         longitude: coordinates.longitude,
       });
@@ -403,6 +418,9 @@ export default function ScheduleDetailsScreen() {
         latitude: coordinates.latitude,
         longitude: coordinates.longitude,
         device_timestamp: new Date().toISOString(),
+        gps_accuracy_m: Math.max(coordinates.accuracy ?? 1, 1),
+        location_exception_id:
+          sessionQuery.data?.location_exception_id,
       });
     },
     onSuccess: async () => {
@@ -418,7 +436,9 @@ export default function ScheduleDetailsScreen() {
     onError: (error) => {
       setCapturingLocation(false);
       Alert.alert(
-        "Unable to Punch In",
+        isOfflineMutationQueuedError(error)
+          ? "Saved for Sync"
+          : "Unable to Punch In",
         getApiErrorMessage(error, "Unable to start this treatment.")
       );
     },
@@ -438,6 +458,45 @@ export default function ScheduleDetailsScreen() {
       ]
     );
   };
+
+  const exceptionMutation = useMutation({
+    mutationFn: async () => {
+      if (scheduleId === null || exceptionReason.trim().length < 10) {
+        throw new Error("Enter at least 10 characters explaining the GPS issue.");
+      }
+      await requestLocationPermission();
+      const current = await getCurrentLocation();
+      setLocationAccuracy(current.accuracy);
+      return createLocationException({
+        action:
+          sessionQuery.data?.session_status === "IN_PROGRESS"
+            ? "punch_out"
+            : "punch_in",
+        device_timestamp: new Date().toISOString(),
+        gps_accuracy_m: Math.max(current.accuracy ?? 1, 1),
+        latitude: current.latitude,
+        longitude: current.longitude,
+        reason: exceptionReason.trim(),
+        target_id: scheduleId,
+        target_type: "therapist_schedule",
+      });
+    },
+    onError: (error) => {
+      Alert.alert(
+        "Unable to Request Exception",
+        getApiErrorMessage(error, "Unable to send this location exception.")
+      );
+    },
+    onSuccess: async () => {
+      setExceptionVisible(false);
+      setExceptionReason("");
+      await sessionQuery.refetch();
+      Alert.alert(
+        "Request Sent",
+        "An administrator must approve this one-time location exception before you continue."
+      );
+    },
+  });
 
   const missedMutation = useMutation({
     mutationFn: async () => {
@@ -617,6 +676,7 @@ export default function ScheduleDetailsScreen() {
     completionMutation.isPending ||
     missedMutation.isPending ||
     punchInMutation.isPending ||
+    exceptionMutation.isPending ||
     capturingLocation;
   const actionBarBottomPadding = Math.max(insets.bottom, spacing.lg);
   const actionContentPadding =
@@ -934,6 +994,20 @@ export default function ScheduleDetailsScreen() {
                   <Text style={styles.completeActionText}>Punch Out</Text>
                 </TouchableOpacity>
               ) : null}
+              {session?.can_request_location_exception ? (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  disabled={actionBusy}
+                  style={[styles.exceptionAction, actionBusy && styles.disabledButton]}
+                  onPress={() => {
+                    setExceptionReason("");
+                    setExceptionVisible(true);
+                  }}
+                >
+                  <Ionicons color={colors.warning} name="warning-outline" size={20} />
+                  <Text style={styles.exceptionActionText}>GPS Exception</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : null}
         </>
@@ -1143,6 +1217,64 @@ export default function ScheduleDetailsScreen() {
                 )}
               </TouchableOpacity>
             </FormScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="slide"
+        transparent
+        visible={exceptionVisible}
+        onRequestClose={() => {
+          if (!exceptionMutation.isPending) setExceptionVisible(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Request Location Exception</Text>
+              <TouchableOpacity
+                accessibilityLabel="Close location exception"
+                accessibilityRole="button"
+                disabled={exceptionMutation.isPending}
+                style={styles.closeButton}
+                onPress={() => setExceptionVisible(false)}
+              >
+                <Ionicons color={colors.textStrong} name="close" size={22} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalFormContent}>
+              <Text style={styles.locationText}>
+                A fresh GPS reading and your reason will be reviewed. Approval is valid once for this attendance action.
+              </Text>
+              <Text style={styles.inputLabel}>Reason</Text>
+              <TextInput
+                autoFocus
+                editable={!exceptionMutation.isPending}
+                maxLength={500}
+                multiline
+                onChangeText={setExceptionReason}
+                placeholder="Explain why the normal GPS check cannot be completed."
+                placeholderTextColor={colors.textSubtle}
+                style={styles.textArea}
+                textAlignVertical="top"
+                value={exceptionReason}
+              />
+              <Text style={styles.locationText}>{exceptionReason.length}/500 characters</Text>
+              <TouchableOpacity
+                accessibilityRole="button"
+                disabled={exceptionMutation.isPending || exceptionReason.trim().length < 10}
+                style={[styles.submitButton, (exceptionMutation.isPending || exceptionReason.trim().length < 10) && styles.disabledButton]}
+                onPress={() => exceptionMutation.mutate()}
+              >
+                {exceptionMutation.isPending ? (
+                  <ActivityIndicator color={colors.surface} size="small" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Capture GPS & Send</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1389,6 +1521,22 @@ const styles = StyleSheet.create({
     height: "90%",
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.sm,
+  },
+  exceptionAction: {
+    alignItems: "center",
+    borderColor: colors.warning,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "center",
+    minHeight: 52,
+  },
+  exceptionActionText: {
+    color: colors.warning,
+    fontSize: typography.size.smallLarge,
+    fontWeight: typography.weight.extrabold,
   },
   modalFormContent: {
     flexGrow: 1,

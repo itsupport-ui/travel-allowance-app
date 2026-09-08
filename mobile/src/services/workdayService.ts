@@ -1,6 +1,7 @@
 import { api } from "../api/apiClient";
 import { getToken } from "../utils/storage";
 import type { DoctorTodayWorkday } from "../types/doctorWorkflow";
+import { executeOrQueueMutation } from "./offlineMutationQueue";
 
 export interface StartDayRequest {
   start_address: string;
@@ -30,6 +31,13 @@ export interface TodayWorkdayResponse {
   should_prompt_end: boolean;
   auto_logout_enabled: boolean;
   auto_logout_grace_minutes: number;
+  available_actions: string[];
+  blocking_reasons: string[];
+  next_action: string | null;
+  active_schedule_id: number | null;
+  ended_early: boolean;
+  end_reason: string | null;
+  early_end_review_status: string | null;
 }
 
 export interface EndDayResponse {
@@ -40,6 +48,9 @@ export interface EndDayResponse {
   pending_schedules_count: number;
   completed_schedules_count: number;
   missed_schedules_count: number;
+  ended_early: boolean;
+  end_reason: string | null;
+  early_end_review_status: string | null;
 }
 
 const getAuthHeaders = async () => {
@@ -57,15 +68,24 @@ const getAuthHeaders = async () => {
 export const startWorkday = async (
   request: StartDayRequest
 ): Promise<StartDayResponse> => {
-  const response = await api.post<StartDayResponse>(
-    "/therapist/workday/start",
-    request,
-    {
-      headers: await getAuthHeaders(),
-    }
-  );
-
-  return response.data;
+  const body = { ...request };
+  return executeOrQueueMutation({
+    body,
+    execute: async (operationId) => {
+      const response = await api.post<StartDayResponse>(
+        "/therapist/workday/start",
+        body,
+        {
+          headers: {
+            ...(await getAuthHeaders()),
+            "X-Idempotency-Key": operationId,
+          },
+        }
+      );
+      return response.data;
+    },
+    operationType: "therapist_workday_start",
+  });
 };
 
 export const getTodayWorkday =
@@ -84,30 +104,52 @@ export const endWorkday = async (request: {
   end_latitude: number;
   end_longitude: number;
   device_timestamp: string;
+  early_end_reason?: string;
 }): Promise<EndDayResponse> => {
-  const response = await api.post<EndDayResponse>(
-    "/therapist/workday/end",
-    request,
-    {
-      headers: await getAuthHeaders(),
-    }
-  );
-
-  return response.data;
+  const body = { ...request };
+  return executeOrQueueMutation({
+    body,
+    execute: async (operationId) => {
+      const response = await api.post<EndDayResponse>(
+        "/therapist/workday/end",
+        body,
+        {
+          headers: {
+            ...(await getAuthHeaders()),
+            "X-Idempotency-Key": operationId,
+          },
+        }
+      );
+      return response.data;
+    },
+    operationType: "therapist_workday_end",
+  });
 };
 
 export const startDoctorWorkday = async (
   request: StartDayRequest
 ): Promise<StartDayResponse> => {
-  const response = await api.post<StartDayResponse>(
-    "/doctor/workday/start",
-    {
-      ...request,
-      device_timestamp: new Date().toISOString(),
+  const body = {
+    ...request,
+    device_timestamp: new Date().toISOString(),
+  };
+  return executeOrQueueMutation({
+    body,
+    execute: async (operationId) => {
+      const response = await api.post<StartDayResponse>(
+        "/doctor/workday/start",
+        body,
+        {
+          headers: {
+            ...(await getAuthHeaders()),
+            "X-Idempotency-Key": operationId,
+          },
+        }
+      );
+      return response.data;
     },
-    { headers: await getAuthHeaders() }
-  );
-  return response.data;
+    operationType: "doctor_workday_start",
+  });
 };
 
 export const getTodayDoctorWorkday =
@@ -128,6 +170,9 @@ export interface DoctorEndDayResponse {
   completed_visits_count: number;
   pending_visits_count: number;
   total_distance_km: number;
+  ended_early: boolean;
+  end_reason: string | null;
+  early_end_review_status: string | null;
 }
 
 export const endDoctorWorkday = async (request: {
@@ -135,11 +180,24 @@ export const endDoctorWorkday = async (request: {
   end_latitude: number;
   end_longitude: number;
   device_timestamp: string;
+  early_end_reason?: string;
 }): Promise<DoctorEndDayResponse> => {
-  const response = await api.post<DoctorEndDayResponse>(
-    "/doctor/workday/end",
-    request,
-    { headers: await getAuthHeaders() }
-  );
-  return response.data;
+  const body = { ...request };
+  return executeOrQueueMutation({
+    body,
+    execute: async (operationId) => {
+      const response = await api.post<DoctorEndDayResponse>(
+        "/doctor/workday/end",
+        body,
+        {
+          headers: {
+            ...(await getAuthHeaders()),
+            "X-Idempotency-Key": operationId,
+          },
+        }
+      );
+      return response.data;
+    },
+    operationType: "doctor_workday_end",
+  });
 };

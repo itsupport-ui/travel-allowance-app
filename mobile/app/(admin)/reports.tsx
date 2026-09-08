@@ -1,9 +1,7 @@
 import { colors, radius, shadows, spacing, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { File, Paths } from "expo-file-system";
-import * as Print from "expo-print";
 import { router, useFocusEffect } from "expo-router";
-import * as Sharing from "expo-sharing";
 import {
   useCallback,
   useEffect,
@@ -23,6 +21,10 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { appConfig } from "../../src/config/env";
+import { LocationExceptionReview } from "../../src/components/admin/LocationExceptionReview";
+import { EarlyWorkdayReview } from "../../src/components/admin/EarlyWorkdayReview";
+import { ManualTravelReview } from "../../src/components/admin/ManualTravelReview";
+import { ManualDoctorExpenseReview } from "../../src/components/admin/ManualDoctorExpenseReview";
 import {
   FilterFieldSkeleton,
 } from "../../src/components/skeletons/ScreenSkeletons";
@@ -38,29 +40,40 @@ import {
 } from "../../src/components/schedule/ScheduleFormControls";
 import {
   AdminReportServiceError,
-  getAdminReportClaims,
+  downloadAdminClaimRegister,
+  getAdminReportExportEvents,
+  getAdminReportExportHistory,
+  getReportOperationsHealth,
   getAdminReportSummary,
+  previewAdminClaimRegister,
+  type AdminClaimRegisterPreview,
+  type AdminReportExportEvent,
+  type AdminReportExportHistoryItem,
+  type ReportOperationsHealth,
 } from "../../src/services/adminReportService";
 import {
-  getTherapists,
-  TherapistServiceError,
-} from "../../src/services/therapistService";
+  AdminScheduleServiceError,
+  getAdminScheduleFormOptions,
+} from "../../src/services/adminScheduleService";
+import {
+  deliverReportFile,
+  type ReportDeliveryMode,
+} from "../../src/services/reportFileDelivery";
 import type {
   AdminReportFilters,
   AdminReportSummary,
   ReportClaimStatus,
 } from "../../src/types/adminReport";
-import type { ClaimResponse } from "../../src/types/claim";
-import {
-  formatDateForDisplay,
-  formatDateForApi,
-} from "../../src/utils/date";
 import { formatScheduleDate } from "../../src/utils/scheduleForm";
 import { clearAuthSession } from "../../src/utils/storage";
 
 const PRIMARY = colors.primary;
-const MAX_CSV_EXPORT_ROWS = 50_000;
-const MAX_PDF_EXPORT_ROWS = 2_000;
+const formatReportAmount = (value: number): string =>
+  new Intl.NumberFormat("en-IN", {
+    currency: "INR",
+    maximumFractionDigits: 2,
+    style: "currency",
+  }).format(value);
 
 class ReportExportError extends Error {
   constructor(message: string) {
@@ -78,6 +91,69 @@ interface ReportFilterForm {
 }
 
 type LoadMode = "initial" | "refresh" | "apply";
+type OrganizationReportType =
+  | "consolidated_claims"
+  | "organization_attendance"
+  | "organization_expenses"
+  | "organization_clinical_activity"
+  | "organization_exceptions"
+  | "organization_performance";
+type OrganizationReportStatus =
+  | "all"
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "active"
+  | "completed"
+  | "ended_early"
+  | "draft"
+  | "submitted"
+  | "scheduled"
+  | "in_progress"
+  | "missed"
+  | "cancelled"
+  | "open"
+  | "needs_review"
+  | "needs_correction"
+  | "manual";
+
+const claimExportStatuses: readonly OrganizationReportStatus[] = [
+  "all",
+  "pending",
+  "approved",
+  "rejected",
+];
+const attendanceExportStatuses: readonly OrganizationReportStatus[] = [
+  "all",
+  "active",
+  "completed",
+  "ended_early",
+];
+const expenseExportStatuses: readonly OrganizationReportStatus[] = [
+  "all",
+  "draft",
+  "submitted",
+];
+const clinicalExportStatuses: readonly OrganizationReportStatus[] = [
+  "all",
+  "scheduled",
+  "in_progress",
+  "completed",
+  "missed",
+  "cancelled",
+  "pending",
+  "submitted",
+  "approved",
+  "rejected",
+];
+const exceptionExportStatuses: readonly OrganizationReportStatus[] = [
+  "all",
+  "open",
+  "needs_review",
+  "needs_correction",
+  "missed",
+  "manual",
+];
 
 const createEmptyFilterForm = (): ReportFilterForm => ({
   fromDate: null,
@@ -164,7 +240,7 @@ const getStorageErrorMessage = (error: unknown): string => {
 
 const getExportErrorMessage = (
   error: unknown,
-  format: "CSV" | "PDF"
+  format: "CSV" | "PDF" | "Excel"
 ): string => {
   if (
     error instanceof ReportExportError ||
@@ -174,24 +250,6 @@ const getExportErrorMessage = (
   }
 
   return `The ${format} report could not be generated. Please try again.`;
-};
-
-const validateExportSize = (
-  rowCount: number,
-  format: "CSV" | "PDF"
-): void => {
-  const maximumRows =
-    format === "CSV" ? MAX_CSV_EXPORT_ROWS : MAX_PDF_EXPORT_ROWS;
-
-  if (rowCount > maximumRows) {
-    throw new ReportExportError(
-      `This report contains ${rowCount.toLocaleString(
-        "en-IN"
-      )} records. Apply a narrower date or therapist filter to export ${maximumRows.toLocaleString(
-        "en-IN"
-      )} records or fewer as ${format}.`
-    );
-  }
 };
 
 const deleteFileSafely = (file: File | null): void => {
@@ -210,7 +268,7 @@ const deleteFileSafely = (file: File | null): void => {
 
 const validateGeneratedFile = (
   file: File,
-  format: "CSV" | "PDF"
+  format: "CSV" | "PDF" | "Excel"
 ): void => {
   if (!file.exists || file.size <= 0) {
     throw new ReportExportError(
@@ -219,495 +277,21 @@ const validateGeneratedFile = (
   }
 };
 
-const ensureSharingAvailable = async (): Promise<void> => {
-  let sharingAvailable: boolean;
-
-  try {
-    sharingAvailable = await Sharing.isAvailableAsync();
-  } catch {
-    throw new ReportExportError(
-      "The app could not access the system sharing service. Check app permissions and try again."
+const chooseReportDelivery = (): Promise<ReportDeliveryMode | null> =>
+  new Promise((resolve) => {
+    Alert.alert(
+      "Deliver Report",
+      "Save a durable copy to a folder, or open the system share sheet.",
+      [
+        { onPress: () => resolve(null), style: "cancel", text: "Cancel" },
+        { onPress: () => resolve("save"), text: "Save" },
+        { onPress: () => resolve("share"), text: "Share" },
+      ],
+      { cancelable: true, onDismiss: () => resolve(null) }
     );
-  }
+  });
 
-  if (!sharingAvailable) {
-    throw new ReportExportError(
-      "File sharing is unavailable on this device. Use a supported mobile device or enable a sharing app."
-    );
-  }
-};
 
-const escapeCsvText = (value: string): string => {
-  const formulaSafeValue = /^[\t\r ]*[=+\-@]/.test(value)
-    ? `'${value}`
-    : value;
-
-  return `"${formulaSafeValue.replace(/"/g, '""')}"`;
-};
-
-const buildReportCsv = (claims: ClaimResponse[]): string => {
-  const header = [
-    "Claim Date",
-    "Therapist",
-    "Patient Count",
-    "Total KM",
-    "Travel Total",
-    "Daily Allowance",
-    "Grand Total",
-    "Status",
-  ].join(",");
-  const rows = claims.map((claim) =>
-    [
-      escapeCsvText(formatReportDate(claim.claim_date)),
-      escapeCsvText(claim.therapist_name ?? "Not assigned"),
-      String(claim.patient_count ?? 0),
-      claim.total_km.toFixed(2),
-      claim.travel_total.toFixed(2),
-      claim.daily_allowance.toFixed(2),
-      claim.grand_total.toFixed(2),
-      escapeCsvText(claim.status),
-    ].join(",")
-  );
-
-  return `\uFEFF${[header, ...rows].join("\r\n")}`;
-};
-
-const getReportFileName = (): string => {
-  const today = new Date();
-  const [year, month, day] = formatDateForApi(today).split("-");
-
-  return `reports_${year}_${month}_${day}.csv`;
-};
-
-const getPdfFileName = (): string => {
-  const today = new Date();
-  const [year, month, day] = formatDateForApi(today).split("-");
-
-  return `report_${year}_${month}_${day}.pdf`;
-};
-
-const escapeHtml = (value: string): string =>
-  value.replace(
-    /[&<>"']/g,
-    (character) =>
-      ({
-        '"': "&quot;",
-        "&": "&amp;",
-        "'": "&#39;",
-        "<": "&lt;",
-        ">": "&gt;",
-      })[character] ?? character
-  );
-
-const formatReportDate = (
-  value: string | null | undefined
-): string => {
-  return formatDateForDisplay(value) || value || "Date not available";
-};
-
-const formatGeneratedDate = (value: Date): string =>
-  `${formatDateForDisplay(value)}, ${value.toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    hour12: true,
-    minute: "2-digit",
-  })}`;
-
-const getStatusClass = (status: string): string => {
-  switch (status.toLocaleLowerCase()) {
-    case "approved":
-      return "approved";
-    case "rejected":
-      return "rejected";
-    case "pending":
-      return "pending";
-    default:
-      return "neutral";
-  }
-};
-
-const buildReportHtml = (
-  reportSummary: AdminReportSummary,
-  claims: ClaimResponse[],
-  filters: AdminReportFilters,
-  generatedAt: Date
-): string => {
-  const totals = claims.reduce(
-    (current, claim) => ({
-      dailyAllowance:
-        current.dailyAllowance + claim.daily_allowance,
-      grandTotal: current.grandTotal + claim.grand_total,
-      patientCount:
-        current.patientCount + (claim.patient_count ?? 0),
-      totalKm: current.totalKm + claim.total_km,
-      travelTotal: current.travelTotal + claim.travel_total,
-    }),
-    {
-      dailyAllowance: 0,
-      grandTotal: 0,
-      patientCount: 0,
-      totalKm: 0,
-      travelTotal: 0,
-    }
-  );
-  const tableRows =
-    claims.length > 0
-      ? `${claims
-          .map(
-            (claim) => `
-              <tr>
-                <td>${escapeHtml(
-                  formatReportDate(claim.claim_date)
-                )}</td>
-                <td>${escapeHtml(
-                  claim.therapist_name ?? "Not assigned"
-                )}</td>
-                <td class="number">${claim.patient_count ?? 0}</td>
-                <td class="number">${claim.total_km.toFixed(2)}</td>
-                <td class="number">${claim.travel_total.toFixed(
-                  2
-                )}</td>
-                <td class="number">${claim.daily_allowance.toFixed(
-                  2
-                )}</td>
-                <td class="number strong">${claim.grand_total.toFixed(
-                  2
-                )}</td>
-                <td>
-                  <span class="status ${getStatusClass(
-                    claim.status
-                  )}">
-                    ${escapeHtml(claim.status.toLocaleUpperCase())}
-                  </span>
-                </td>
-              </tr>
-            `
-          )
-          .join("")}
-          <tr class="totals-row">
-            <td colspan="2">TOTALS</td>
-            <td class="number">${totals.patientCount}</td>
-            <td class="number">${totals.totalKm.toFixed(2)}</td>
-            <td class="number">${totals.travelTotal.toFixed(2)}</td>
-            <td class="number">${totals.dailyAllowance.toFixed(
-              2
-            )}</td>
-            <td class="number">${totals.grandTotal.toFixed(2)}</td>
-            <td></td>
-          </tr>`
-      : `
-          <tr>
-            <td class="empty-row" colspan="8">
-              No claim records match the applied filters.
-            </td>
-          </tr>
-        `;
-  const dateRange =
-    filters.fromDate || filters.toDate
-      ? `${filters.fromDate ?? "Beginning"} to ${
-          filters.toDate ?? "Present"
-        }`
-      : "All dates";
-  const therapist = filters.therapistName ?? "All therapists";
-  const status =
-    filters.status === "all"
-      ? "All statuses"
-      : filters.status.charAt(0).toLocaleUpperCase() +
-        filters.status.slice(1);
-
-  return `
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta
-          name="viewport"
-          content="width=device-width, initial-scale=1"
-        />
-        <style>
-          @page {
-            size: A4 landscape;
-            margin: ${spacing.s26}px;
-          }
-
-          * {
-            box-sizing: border-box;
-          }
-
-          body {
-            background: ${colors.white};
-            color: ${colors.textStrong};
-            font-family: Arial, Helvetica, sans-serif;
-            font-size: ${typography.size.caption}px;
-            margin: ${spacing.none};
-          }
-
-          .header {
-            background: ${colors.primary};
-            color: ${colors.white};
-            padding: ${spacing.xxlPlus}px ${spacing.xxxl}px;
-          }
-
-          .company {
-            font-size: ${typography.size.small}px;
-            font-weight: ${typography.weight.bold};
-            letter-spacing: ${typography.letterSpacing.wide}px;
-            margin: ${spacing.none} ${spacing.none} ${spacing.md}px;
-            text-transform: uppercase;
-          }
-
-          .report-title {
-            font-size: ${typography.size.heading}px;
-            margin: ${spacing.none};
-          }
-
-          .generated {
-            color: ${colors.primarySurfaceBright};
-            font-size: ${typography.size.tiny}px;
-            margin: ${spacing.s7}px ${spacing.none} ${spacing.none};
-          }
-
-          .content {
-            padding: ${spacing.xlPlus}px ${spacing.xxlPlus}px ${spacing.md}px;
-          }
-
-          .filter-bar {
-            background: ${colors.neutral100};
-            border-left: ${spacing.xs}px solid ${colors.primary};
-            color: ${colors.textMutedDark};
-            margin-bottom: ${spacing.xl}px;
-            padding: ${spacing.mdPlus}px ${spacing.lg}px;
-          }
-
-          .filter-label {
-            color: ${colors.primaryDark};
-            font-weight: ${typography.weight.bold};
-          }
-
-          .summary-title,
-          .table-title {
-            color: ${colors.textPrimary};
-            font-size: ${typography.size.smallLarge}px;
-            margin: ${spacing.none} ${spacing.none} ${spacing.s9}px;
-          }
-
-          .summary-grid {
-            display: flex;
-            margin: ${spacing.none} -${spacing.xs}px ${spacing.xlPlus}px;
-          }
-
-          .summary-card {
-            background: ${colors.surfaceMuted};
-            border: ${spacing.hairline}px solid ${colors.border};
-            border-top: ${spacing.s3}px solid ${colors.primary};
-            margin: ${spacing.none} ${spacing.xs}px;
-            min-height: ${spacing.s68}px;
-            padding: ${spacing.s11}px ${spacing.mdPlus}px;
-            width: 20%;
-          }
-
-          .summary-value {
-            color: ${colors.textPrimary};
-            font-size: ${typography.size.title}px;
-            font-weight: ${typography.weight.bold};
-            margin-bottom: ${spacing.s5}px;
-          }
-
-          .summary-label {
-            color: ${colors.textMuted};
-            font-size: ${typography.size.micro}px;
-            font-weight: ${typography.weight.bold};
-            text-transform: uppercase;
-          }
-
-          table {
-            border-collapse: collapse;
-            table-layout: fixed;
-            width: 100%;
-          }
-
-          thead {
-            display: table-header-group;
-          }
-
-          th {
-            background: ${colors.primary};
-            color: ${colors.white};
-            font-size: ${typography.size.micro}px;
-            padding: ${spacing.md}px ${spacing.sm}px;
-            text-align: left;
-          }
-
-          td {
-            border-bottom: ${spacing.hairline}px solid ${colors.border};
-            color: ${colors.textSecondary};
-            font-size: ${typography.size.micro}px;
-            overflow-wrap: anywhere;
-            padding: ${spacing.md}px ${spacing.sm}px;
-            vertical-align: middle;
-          }
-
-          tbody tr:nth-child(even) {
-            background: ${colors.surfaceMuted};
-          }
-
-          tr {
-            page-break-inside: avoid;
-          }
-
-          .number {
-            text-align: right;
-          }
-
-          .strong {
-            color: ${colors.textPrimary};
-            font-weight: ${typography.weight.bold};
-          }
-
-          .status {
-            border-radius: ${radius.control}px;
-            display: inline-block;
-            font-size: ${typography.size.nano}px;
-            font-weight: ${typography.weight.bold};
-            padding: ${spacing.xs}px ${spacing.s7}px;
-          }
-
-          .approved {
-            background: ${colors.greenSurface};
-            color: ${colors.primaryDark};
-          }
-
-          .pending {
-            background: ${colors.warningSurface};
-            color: ${colors.warningDark};
-          }
-
-          .rejected {
-            background: ${colors.dangerSurfaceStrong};
-            color: ${colors.dangerDark};
-          }
-
-          .neutral {
-            background: ${colors.border};
-            color: ${colors.textSecondary};
-          }
-
-          .totals-row {
-            background: ${colors.primarySurface} !important;
-            font-weight: ${typography.weight.bold};
-          }
-
-          .totals-row td {
-            border-bottom: ${spacing.xxs}px solid ${colors.primary};
-            color: ${colors.primaryDeep};
-          }
-
-          .empty-row {
-            color: ${colors.textMuted};
-            padding: ${spacing.xxxl}px;
-            text-align: center;
-          }
-
-          .footer {
-            border-top: ${spacing.hairline}px solid ${colors.border};
-            color: ${colors.textMuted};
-            font-size: ${typography.size.micro}px;
-            margin: ${spacing.xlPlus}px ${spacing.xxlPlus}px ${spacing.none};
-            padding: ${spacing.s9}px ${spacing.none};
-            text-align: right;
-          }
-        </style>
-      </head>
-      <body>
-        <header class="header">
-          <p class="company">
-            Travel Allowance Management System
-          </p>
-          <h1 class="report-title">Administrative Claims Report</h1>
-          <p class="generated">
-            Generated on ${escapeHtml(
-              formatGeneratedDate(generatedAt)
-            )}
-          </p>
-        </header>
-
-        <main class="content">
-          <div class="filter-bar">
-            <span class="filter-label">Applied Filters:</span>
-            Date: ${escapeHtml(dateRange)} &nbsp; | &nbsp;
-            Therapist: ${escapeHtml(therapist)} &nbsp; | &nbsp;
-            Claim Status: ${escapeHtml(status)}
-          </div>
-
-          <h2 class="summary-title">Operational Summary</h2>
-          <section class="summary-grid">
-            <div class="summary-card">
-              <div class="summary-value">
-                ${reportSummary.todaysTreatments}
-              </div>
-              <div class="summary-label">Today's Treatments</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value">
-                ${reportSummary.totalKm.toFixed(2)}
-              </div>
-              <div class="summary-label">Total KM</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value">
-                ${reportSummary.totalClaims}
-              </div>
-              <div class="summary-label">Total Claims</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value">
-                ${reportSummary.pendingClaims}
-              </div>
-              <div class="summary-label">Pending Claims</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value">
-                ${reportSummary.completedTreatments}
-              </div>
-              <div class="summary-label">Completed Treatments</div>
-            </div>
-          </section>
-
-          <h2 class="table-title">Claim Details</h2>
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 11%;">Claim Date</th>
-                <th style="width: 18%;">Therapist</th>
-                <th style="width: 9%; text-align: right;">
-                  Patients
-                </th>
-                <th style="width: 10%; text-align: right;">
-                  Total KM
-                </th>
-                <th style="width: 13%; text-align: right;">
-                  Travel Total
-                </th>
-                <th style="width: 14%; text-align: right;">
-                  Daily Allowance
-                </th>
-                <th style="width: 13%; text-align: right;">
-                  Grand Total
-                </th>
-                <th style="width: 12%;">Status</th>
-              </tr>
-            </thead>
-            <tbody>${tableRows}</tbody>
-          </table>
-        </main>
-
-        <footer class="footer">
-          Travel Allowance Management System &nbsp; | &nbsp;
-          Confidential administrative report
-        </footer>
-      </body>
-    </html>
-  `;
-};
 
 export default function AdminReportsScreen() {
   const [summary, setSummary] =
@@ -719,8 +303,9 @@ export default function AdminReportsScreen() {
   const [therapistOptions, setTherapistOptions] = useState<
     SelectOption[]
   >([]);
-  const [therapistsLoading, setTherapistsLoading] = useState(true);
-  const [therapistError, setTherapistError] = useState<string | null>(
+  const [doctorOptions, setDoctorOptions] = useState<SelectOption[]>([]);
+  const [staffOptionsLoading, setStaffOptionsLoading] = useState(true);
+  const [staffOptionsError, setStaffOptionsError] = useState<string | null>(
     null
   );
   const [filterError, setFilterError] = useState<string | null>(null);
@@ -728,7 +313,28 @@ export default function AdminReportsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [applying, setApplying] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [excelExporting, setExcelExporting] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [exportReportType, setExportReportType] =
+    useState<OrganizationReportType>("consolidated_claims");
+  const [exportStatus, setExportStatus] =
+    useState<OrganizationReportStatus>("all");
+  const [exportRole, setExportRole] =
+    useState<"all" | "therapist" | "doctor">("all");
+  const [exportStaffId, setExportStaffId] = useState<number | null>(null);
+  const [exportPreview, setExportPreview] =
+    useState<AdminClaimRegisterPreview | null>(null);
+  const [exportHistory, setExportHistory] = useState<
+    AdminReportExportHistoryItem[]
+  >([]);
+  const [exportFailures, setExportFailures] = useState<
+    AdminReportExportEvent[]
+  >([]);
+  const [operationsHealth, setOperationsHealth] =
+    useState<ReportOperationsHealth | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historySharing, setHistorySharing] = useState<string | null>(null);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const appliedFiltersRef = useRef(appliedFilters);
@@ -738,7 +344,7 @@ export default function AdminReportsScreen() {
     async (requestError: unknown): Promise<boolean> => {
       if (
         (requestError instanceof AdminReportServiceError ||
-          requestError instanceof TherapistServiceError) &&
+          requestError instanceof AdminScheduleServiceError) &&
         requestError.status === 401
       ) {
         await clearAuthSession();
@@ -750,6 +356,48 @@ export default function AdminReportsScreen() {
     },
     []
   );
+
+  const clearExpiredPreview = useCallback((requestError: unknown) => {
+    if (
+      requestError instanceof AdminReportServiceError &&
+      requestError.status === 410
+    ) {
+      setExportPreview(null);
+    }
+  }, []);
+
+  const loadExportHistory = useCallback(async (): Promise<void> => {
+    setHistoryLoading(true);
+    try {
+      const [historyResult, eventsResult, healthResult] = await Promise.allSettled([
+        getAdminReportExportHistory(),
+        getAdminReportExportEvents(),
+        getReportOperationsHealth(),
+      ]);
+      const rejected = [historyResult, eventsResult, healthResult].find(
+        (result): result is PromiseRejectedResult => result.status === "rejected"
+      );
+      if (rejected && await handleSessionExpiry(rejected.reason)) return;
+      setExportHistory(
+        historyResult.status === "fulfilled" ? historyResult.value : []
+      );
+      setExportFailures(
+        eventsResult.status === "fulfilled"
+          ? eventsResult.value.filter((item) => item.outcome === "failure")
+          : []
+      );
+      setOperationsHealth(
+        healthResult.status === "fulfilled" ? healthResult.value : null
+      );
+    } catch (historyError) {
+      if (await handleSessionExpiry(historyError)) return;
+      setExportHistory([]);
+      setExportFailures([]);
+      setOperationsHealth(null);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [handleSessionExpiry]);
 
   const loadReports = useCallback(
     async (
@@ -806,18 +454,29 @@ export default function AdminReportsScreen() {
     }, [loadReports])
   );
 
-  const loadTherapists = useCallback(async (): Promise<void> => {
-    setTherapistsLoading(true);
-    setTherapistError(null);
+  const loadStaffOptions = useCallback(async (): Promise<void> => {
+    setStaffOptionsLoading(true);
+    setStaffOptionsError(null);
 
     try {
-      const therapists = await getTherapists();
+      const options = await getAdminScheduleFormOptions();
       setTherapistOptions(
-        therapists
+        options.therapists
           .map((therapist) => ({
             description: therapist.email,
             id: therapist.id,
-            label: therapist.username,
+            label: therapist.name,
+          }))
+          .sort((first, second) =>
+            first.label.localeCompare(second.label)
+          )
+      );
+      setDoctorOptions(
+        options.doctors
+          .map((doctor) => ({
+            description: doctor.specialization || undefined,
+            id: doctor.id,
+            label: doctor.name,
           }))
           .sort((first, second) =>
             first.label.localeCompare(second.label)
@@ -828,15 +487,19 @@ export default function AdminReportsScreen() {
         return;
       }
 
-      setTherapistError(getErrorMessage(loadError));
+      setStaffOptionsError(getErrorMessage(loadError));
     } finally {
-      setTherapistsLoading(false);
+      setStaffOptionsLoading(false);
     }
   }, [handleSessionExpiry]);
 
   useEffect(() => {
-    void loadTherapists();
-  }, [loadTherapists]);
+    void loadStaffOptions();
+  }, [loadStaffOptions]);
+
+  useEffect(() => {
+    void loadExportHistory();
+  }, [loadExportHistory]);
 
   const applyFilters = useCallback(async (): Promise<void> => {
     if (
@@ -855,6 +518,7 @@ export default function AdminReportsScreen() {
     if (applied) {
       appliedFiltersRef.current = nextFilters;
       setAppliedFilters(nextFilters);
+      setExportPreview(null);
       setFiltersExpanded(false);
     }
   }, [draftFilters, loadReports]);
@@ -870,33 +534,69 @@ export default function AdminReportsScreen() {
     if (reset) {
       appliedFiltersRef.current = emptyFilters;
       setAppliedFilters(emptyFilters);
+      setExportPreview(null);
       setFiltersExpanded(false);
     }
   }, [loadReports]);
 
+  const previewExport = useCallback(async (): Promise<void> => {
+    if (exportInFlightRef.current) return;
+    exportInFlightRef.current = true;
+    setPreviewing(true);
+    try {
+      const preview = await previewAdminClaimRegister(
+        appliedFiltersRef.current,
+        exportReportType,
+        exportStatus,
+        exportRole,
+        exportStaffId
+      );
+      setExportPreview(preview);
+      if (preview.rowCount === 0) {
+        Alert.alert(
+          "No Records to Export",
+          preview.warnings[0] ??
+            "No records match the currently applied export filters."
+        );
+      }
+    } catch (previewError) {
+      if (await handleSessionExpiry(previewError)) return;
+      Alert.alert(
+        "Unable to Preview Export",
+        getErrorMessage(previewError)
+      );
+    } finally {
+      exportInFlightRef.current = false;
+      setPreviewing(false);
+    }
+  }, [
+    exportReportType,
+    exportRole,
+    exportStaffId,
+    exportStatus,
+    handleSessionExpiry,
+  ]);
+
   const exportReport = useCallback(async (): Promise<void> => {
-    if (exportInFlightRef.current) {
+    if (exportInFlightRef.current || !exportPreview) {
       return;
     }
 
+    const deliveryMode = await chooseReportDelivery();
+    if (!deliveryMode) return;
     exportInFlightRef.current = true;
     setExporting(true);
     let reportFile: File | null = null;
 
     try {
-      await ensureSharingAvailable();
-
-      const claims = await getAdminReportClaims(
-        appliedFiltersRef.current
+      const report = await downloadAdminClaimRegister(
+        exportPreview.snapshotId
       );
-      validateExportSize(claims.length, "CSV");
-      const fileName = getReportFileName();
-      const csv = buildReportCsv(claims);
 
       try {
-        reportFile = new File(Paths.cache, fileName);
+        reportFile = new File(Paths.cache, report.fileName);
         reportFile.create({ overwrite: true });
-        reportFile.write(csv);
+        reportFile.write(report.content);
         validateGeneratedFile(reportFile, "CSV");
       } catch (fileError) {
         deleteFileSafely(reportFile);
@@ -910,26 +610,33 @@ export default function AdminReportsScreen() {
         );
       }
 
-      try {
-        await Sharing.shareAsync(reportFile.uri, {
-          dialogTitle: "Export Claims Report",
-          mimeType: "text/csv",
-          UTI: "public.comma-separated-values-text",
-        });
-      } catch {
-        throw new ReportExportError(
-          "The CSV file was generated, but the system share sheet could not be opened. Check sharing permissions and try again."
-        );
-      }
+      await deliverReportFile(deliveryMode, {
+        dialogTitle: "Share Organization Report",
+        file: reportFile,
+        fileName: report.fileName,
+        mimeType: "text/csv",
+      });
+      await loadExportHistory();
 
       Alert.alert(
         "Report Exported",
-        claims.length === 0
-          ? `${fileName} was generated with column headers. No claims matched the applied filters.`
-          : `${fileName} was generated successfully.`
+        report.rowCount === 0
+          ? `${report.fileName} was generated with column headers. No records matched the applied filters.`
+          : exportReportType === "consolidated_claims"
+            ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} therapist and doctor claim rows totaling ${formatReportAmount(exportPreview.totalAmount)}.`
+            : exportReportType === "organization_attendance"
+              ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} therapist and doctor workdays totaling ${Number(exportPreview.summary.total_work_minutes ?? 0).toLocaleString("en-IN")} worked minutes.`
+              : exportReportType === "organization_expenses"
+                ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} therapist travel and doctor expense rows totaling ${formatReportAmount(exportPreview.totalAmount)}.`
+                : exportReportType === "organization_clinical_activity"
+                  ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} clinical activity rows totaling ${Number(exportPreview.summary.total_clinical_minutes ?? 0).toLocaleString("en-IN")} clinical minutes.`
+                  : exportReportType === "organization_performance"
+                    ? `${report.fileName} summarizes ${report.rowCount.toLocaleString("en-IN")} staff member${report.rowCount === 1 ? "" : "s"}, ${Number(exportPreview.summary.total_workdays ?? 0).toLocaleString("en-IN")} workdays, and ${Number(exportPreview.summary.completed_clinical_activities ?? 0).toLocaleString("en-IN")} completed activities.`
+                    : `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} operational exceptions, including ${Number(exportPreview.summary.overdue_exceptions ?? 0).toLocaleString("en-IN")} overdue.`
       );
     } catch (exportError) {
       deleteFileSafely(reportFile);
+      clearExpiredPreview(exportError);
 
       if (await handleSessionExpiry(exportError)) {
         return;
@@ -940,104 +647,68 @@ export default function AdminReportsScreen() {
         getExportErrorMessage(exportError, "CSV")
       );
     } finally {
+      deleteFileSafely(reportFile);
       exportInFlightRef.current = false;
       setExporting(false);
     }
-  }, [handleSessionExpiry]);
+  }, [clearExpiredPreview, exportPreview, exportReportType, handleSessionExpiry, loadExportHistory]);
 
   const exportPdfReport = useCallback(async (): Promise<void> => {
-    if (exportInFlightRef.current) {
+    if (exportInFlightRef.current || !exportPreview) {
       return;
     }
 
+    const deliveryMode = await chooseReportDelivery();
+    if (!deliveryMode) return;
     exportInFlightRef.current = true;
     setPdfExporting(true);
-    let generatedFile: File | null = null;
     let reportFile: File | null = null;
 
     try {
-      await ensureSharingAvailable();
-
-      const filters = appliedFiltersRef.current;
-      const [reportSummary, claims] = await Promise.all([
-        getAdminReportSummary(filters),
-        getAdminReportClaims(filters),
-      ]);
-      validateExportSize(claims.length, "PDF");
-      const html = buildReportHtml(
-        reportSummary,
-        claims,
-        filters,
-        new Date()
+      const report = await downloadAdminClaimRegister(
+        exportPreview.snapshotId,
+        "pdf"
       );
-      let generatedPdf: Print.FilePrintResult;
 
       try {
-        generatedPdf = await Print.printToFileAsync({
-          height: 595,
-          html,
-          textZoom: 100,
-          width: 842,
-        });
-      } catch {
-        throw new ReportExportError(
-          "The PDF renderer could not generate this report. Try again or apply narrower filters."
-        );
-      }
-
-      generatedFile = new File(generatedPdf.uri);
-      validateGeneratedFile(generatedFile, "PDF");
-
-      if (generatedPdf.numberOfPages < 1) {
-        throw new ReportExportError(
-          "PDF generation completed without creating a printable page."
-        );
-      }
-
-      const fileName = getPdfFileName();
-      reportFile = new File(Paths.cache, fileName);
-
-      try {
-        if (reportFile.exists) {
-          reportFile.delete();
-        }
-
-        generatedFile.move(reportFile);
+        reportFile = new File(Paths.cache, report.fileName);
+        reportFile.create({ overwrite: true });
+        reportFile.write(report.content);
         validateGeneratedFile(reportFile, "PDF");
       } catch (fileError) {
-        deleteFileSafely(generatedFile);
         deleteFileSafely(reportFile);
-
-        if (fileError instanceof ReportExportError) {
-          throw fileError;
-        }
-
         throw new ReportExportError(
           getStorageErrorMessage(fileError)
         );
       }
 
-      try {
-        await Sharing.shareAsync(reportFile.uri, {
-          dialogTitle: "Export Administrative Report",
-          mimeType: "application/pdf",
-          UTI: "com.adobe.pdf",
-        });
-      } catch {
-        throw new ReportExportError(
-          "The PDF was generated, but the system share sheet could not be opened. Check sharing permissions and try again."
-        );
-      }
+      await deliverReportFile(deliveryMode, {
+        dialogTitle: "Share Organization Report",
+        file: reportFile,
+        fileName: report.fileName,
+        mimeType: report.mimeType,
+      });
+      await loadExportHistory();
 
       Alert.alert(
-        "Report Exported",
-        claims.length === 0
-          ? `${fileName} was generated with an empty claim table because no claims matched the applied filters.`
-          : `${fileName} was generated successfully.`
+        deliveryMode === "save" ? "Report Saved" : "Report Shared",
+        report.rowCount === 0
+          ? `${report.fileName} was generated with an empty table because no records matched the applied filters.`
+          : exportReportType === "consolidated_claims"
+            ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} therapist and doctor claim rows totaling ${formatReportAmount(exportPreview.totalAmount)}.`
+            : exportReportType === "organization_attendance"
+              ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} therapist and doctor workdays totaling ${Number(exportPreview.summary.total_work_minutes ?? 0).toLocaleString("en-IN")} worked minutes.`
+              : exportReportType === "organization_expenses"
+                ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} therapist travel and doctor expense rows totaling ${formatReportAmount(exportPreview.totalAmount)}.`
+                : exportReportType === "organization_clinical_activity"
+                  ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} clinical activity rows totaling ${Number(exportPreview.summary.total_clinical_minutes ?? 0).toLocaleString("en-IN")} clinical minutes.`
+                  : exportReportType === "organization_performance"
+                    ? `${report.fileName} summarizes ${report.rowCount.toLocaleString("en-IN")} staff member${report.rowCount === 1 ? "" : "s"}, ${Number(exportPreview.summary.total_workdays ?? 0).toLocaleString("en-IN")} workdays, and ${Number(exportPreview.summary.completed_clinical_activities ?? 0).toLocaleString("en-IN")} completed activities.`
+                    : `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} operational exceptions, including ${Number(exportPreview.summary.overdue_exceptions ?? 0).toLocaleString("en-IN")} overdue.`
       );
     } catch (exportError) {
-      deleteFileSafely(generatedFile);
       deleteFileSafely(reportFile);
+      clearExpiredPreview(exportError);
 
       if (await handleSessionExpiry(exportError)) {
         return;
@@ -1048,14 +719,129 @@ export default function AdminReportsScreen() {
         getExportErrorMessage(exportError, "PDF")
       );
     } finally {
+      deleteFileSafely(reportFile);
       exportInFlightRef.current = false;
       setPdfExporting(false);
     }
-  }, [handleSessionExpiry]);
+  }, [clearExpiredPreview, exportPreview, exportReportType, handleSessionExpiry, loadExportHistory]);
+
+  const exportExcelReport = useCallback(async (): Promise<void> => {
+    if (exportInFlightRef.current || !exportPreview) {
+      return;
+    }
+
+    const deliveryMode = await chooseReportDelivery();
+    if (!deliveryMode) return;
+    exportInFlightRef.current = true;
+    setExcelExporting(true);
+    let reportFile: File | null = null;
+
+    try {
+      const report = await downloadAdminClaimRegister(
+        exportPreview.snapshotId,
+        "xlsx"
+      );
+
+      try {
+        reportFile = new File(Paths.cache, report.fileName);
+        reportFile.create({ overwrite: true });
+        reportFile.write(report.content);
+        validateGeneratedFile(reportFile, "Excel");
+      } catch (fileError) {
+        deleteFileSafely(reportFile);
+        throw new ReportExportError(getStorageErrorMessage(fileError));
+      }
+
+      await deliverReportFile(deliveryMode, {
+        dialogTitle: "Share Organization Report",
+        file: reportFile,
+        fileName: report.fileName,
+        mimeType: report.mimeType,
+      });
+      await loadExportHistory();
+      Alert.alert(
+        deliveryMode === "save" ? "Report Saved" : "Report Shared",
+        exportReportType === "consolidated_claims"
+          ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} therapist and doctor claim rows totaling ${formatReportAmount(exportPreview.totalAmount)}.`
+          : exportReportType === "organization_attendance"
+            ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} therapist and doctor workdays totaling ${Number(exportPreview.summary.total_work_minutes ?? 0).toLocaleString("en-IN")} worked minutes.`
+            : exportReportType === "organization_expenses"
+              ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} therapist travel and doctor expense rows totaling ${formatReportAmount(exportPreview.totalAmount)}.`
+              : exportReportType === "organization_clinical_activity"
+                ? `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} clinical activity rows totaling ${Number(exportPreview.summary.total_clinical_minutes ?? 0).toLocaleString("en-IN")} clinical minutes.`
+                : exportReportType === "organization_performance"
+                  ? `${report.fileName} summarizes ${report.rowCount.toLocaleString("en-IN")} staff member${report.rowCount === 1 ? "" : "s"}, ${Number(exportPreview.summary.total_workdays ?? 0).toLocaleString("en-IN")} workdays, and ${Number(exportPreview.summary.completed_clinical_activities ?? 0).toLocaleString("en-IN")} completed activities.`
+                  : `${report.fileName} contains ${report.rowCount.toLocaleString("en-IN")} operational exceptions, including ${Number(exportPreview.summary.overdue_exceptions ?? 0).toLocaleString("en-IN")} overdue.`
+      );
+    } catch (exportError) {
+      deleteFileSafely(reportFile);
+      clearExpiredPreview(exportError);
+      if (await handleSessionExpiry(exportError)) {
+        return;
+      }
+      Alert.alert(
+        "Unable to Export Excel",
+        getExportErrorMessage(exportError, "Excel")
+      );
+    } finally {
+      deleteFileSafely(reportFile);
+      exportInFlightRef.current = false;
+      setExcelExporting(false);
+    }
+  }, [clearExpiredPreview, exportPreview, exportReportType, handleSessionExpiry, loadExportHistory]);
+
+  const shareHistoricalExport = useCallback(
+    async (item: AdminReportExportHistoryItem): Promise<void> => {
+      if (exportInFlightRef.current) return;
+      const deliveryMode = await chooseReportDelivery();
+      if (!deliveryMode) return;
+      exportInFlightRef.current = true;
+      setHistorySharing(item.id);
+      let reportFile: File | null = null;
+      try {
+        const report = await downloadAdminClaimRegister(
+          item.snapshot_id,
+          item.format
+        );
+        reportFile = new File(Paths.cache, report.fileName);
+        reportFile.create({ overwrite: true });
+        reportFile.write(report.content);
+        const label = item.format === "xlsx" ? "Excel" : item.format.toUpperCase();
+        validateGeneratedFile(reportFile, label as "CSV" | "PDF" | "Excel");
+        await deliverReportFile(deliveryMode, {
+          dialogTitle: "Share Organization Report Again",
+          file: reportFile,
+          fileName: report.fileName,
+          mimeType: report.mimeType,
+        });
+        await loadExportHistory();
+      } catch (shareError) {
+        deleteFileSafely(reportFile);
+        if (await handleSessionExpiry(shareError)) return;
+        Alert.alert(
+          `Unable to ${deliveryMode === "save" ? "Save" : "Share"} Report`,
+          getErrorMessage(shareError)
+        );
+        await loadExportHistory();
+      } finally {
+        deleteFileSafely(reportFile);
+        exportInFlightRef.current = false;
+        setHistorySharing(null);
+      }
+    },
+    [handleSessionExpiry, loadExportHistory]
+  );
 
   const filtersActive = hasFilters(appliedFilters);
   const filterBusy =
-    applying || exporting || loading || pdfExporting || refreshing;
+    applying ||
+    excelExporting ||
+    exporting ||
+    loading ||
+    pdfExporting ||
+    previewing ||
+    refreshing ||
+    historySharing !== null;
   const exportDisabled = filterBusy || Boolean(error) || !summary;
 
   return (
@@ -1068,7 +854,13 @@ export default function AdminReportsScreen() {
           <RefreshControl
             colors={[PRIMARY]}
             onRefresh={() =>
-              void loadReports(appliedFiltersRef.current, "refresh")
+              void (async () => {
+                setExportPreview(null);
+                await loadReports(
+                  appliedFiltersRef.current,
+                  "refresh"
+                );
+              })()
             }
             refreshing={refreshing}
             tintColor={PRIMARY}
@@ -1081,6 +873,65 @@ export default function AdminReportsScreen() {
         <Text style={styles.subtitle}>
           Treatment, travel, and claims performance
         </Text>
+
+        <TouchableOpacity
+          accessibilityHint="Opens privacy-safe operational change history"
+          accessibilityLabel="View operational audit log"
+          accessibilityRole="button"
+          activeOpacity={0.8}
+          onPress={() => router.push("/(admin)/audit-log")}
+          style={styles.auditLogButton}
+        >
+          <View style={styles.auditLogIcon}>
+            <Ionicons color={colors.blueDark} name="shield-checkmark-outline" size={21} />
+          </View>
+          <View style={styles.auditLogText}>
+            <Text style={styles.auditLogTitle}>Operational Audit Log</Text>
+            <Text style={styles.auditLogSubtitle}>Review who changed critical records and when</Text>
+          </View>
+          <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          accessibilityHint="Opens the assignable cross-domain exception queue"
+          accessibilityLabel="View operational follow-ups"
+          accessibilityRole="button"
+          activeOpacity={0.8}
+          onPress={() => router.push("/(admin)/follow-ups" as never)}
+          style={styles.auditLogButton}
+        >
+          <View style={styles.auditLogIcon}>
+            <Ionicons color={colors.blueDark} name="checkmark-done-outline" size={21} />
+          </View>
+          <View style={styles.auditLogText}>
+            <Text style={styles.auditLogTitle}>Operational Follow-ups</Text>
+            <Text style={styles.auditLogSubtitle}>Assign, track, and resolve cross-domain exceptions</Text>
+          </View>
+          <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          accessibilityHint="Opens the travel expense report for therapists and doctors"
+          accessibilityLabel="View travel expense report"
+          accessibilityRole="button"
+          activeOpacity={0.8}
+          onPress={() => router.push("/(admin)/travel-expense-report" as never)}
+          style={styles.auditLogButton}
+        >
+          <View style={styles.auditLogIcon}>
+            <Ionicons color={colors.blueDark} name="car-outline" size={21} />
+          </View>
+          <View style={styles.auditLogText}>
+            <Text style={styles.auditLogTitle}>Travel Expense Report</Text>
+            <Text style={styles.auditLogSubtitle}>Generate travel expense reports by person or for everyone</Text>
+          </View>
+          <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
+        </TouchableOpacity>
+
+        <LocationExceptionReview />
+        <EarlyWorkdayReview />
+        <ManualTravelReview />
+        <ManualDoctorExpenseReview />
 
         <View style={styles.filterSection}>
           <TouchableOpacity
@@ -1156,9 +1007,9 @@ export default function AdminReportsScreen() {
             />
               </View>
 
-              {therapistsLoading ? (
+              {staffOptionsLoading ? (
                 <FilterFieldSkeleton />
-              ) : therapistError ? (
+              ) : staffOptionsError ? (
                 <View style={styles.filterInlineError}>
                   <View style={styles.filterInlineErrorText}>
                     <Ionicons
@@ -1167,14 +1018,14 @@ export default function AdminReportsScreen() {
                       size={18}
                     />
                     <Text style={styles.filterInlineErrorMessage}>
-                      {therapistError}
+                      {staffOptionsError}
                     </Text>
                   </View>
                   <TouchableOpacity
                     accessibilityLabel="Retry loading therapists"
                     accessibilityRole="button"
                     activeOpacity={0.82}
-                    onPress={() => void loadTherapists()}
+                    onPress={() => void loadStaffOptions()}
                     style={styles.inlineRetryButton}
                   >
                     <Ionicons
@@ -1335,13 +1186,256 @@ export default function AdminReportsScreen() {
               summary={summary}
             />
             {appConfig.features.reportExports ? (
-              <ReportExportPanel
-                csvExporting={exporting}
-                disabled={exportDisabled}
-                onExportCsv={() => void exportReport()}
-                onExportPdf={() => void exportPdfReport()}
-                pdfExporting={pdfExporting}
-              />
+              <>
+                <View style={styles.exportSelectorPanel}>
+                  <Text style={styles.exportSelectorTitle}>Export report</Text>
+                  <Text style={styles.exportSelectorLabel}>Report type</Text>
+                  <View style={styles.exportSelectorOptions}>
+                    {(["consolidated_claims", "organization_attendance", "organization_expenses", "organization_clinical_activity", "organization_performance", "organization_exceptions"] as const).map((value) => (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: exportReportType === value }}
+                        disabled={filterBusy}
+                        key={value}
+                        onPress={() => {
+                          setExportReportType(value);
+                          setExportStatus("all");
+                          setExportPreview(null);
+                        }}
+                        style={[
+                          styles.exportSelectorChip,
+                          exportReportType === value && styles.exportSelectorChipSelected,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.exportSelectorChipText,
+                            exportReportType === value && styles.exportSelectorChipTextSelected,
+                          ]}
+                        >
+                          {value === "consolidated_claims"
+                            ? "Claims"
+                            : value === "organization_attendance"
+                              ? "Attendance"
+                              : value === "organization_expenses"
+                                ? "Travel & expenses"
+                                : value === "organization_clinical_activity"
+                                  ? "Clinical activity"
+                                  : value === "organization_performance"
+                                    ? "Performance"
+                                    : "Exceptions"}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.exportSelectorLabel}>Staff role</Text>
+                  <View style={styles.exportSelectorOptions}>
+                    {(["all", "therapist", "doctor"] as const).map((value) => {
+                      return (
+                        <TouchableOpacity
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: exportRole === value }}
+                          disabled={filterBusy}
+                          key={value}
+                          onPress={() => {
+                            setExportRole(value);
+                            setExportStaffId(null);
+                            setExportPreview(null);
+                          }}
+                          style={[
+                            styles.exportSelectorChip,
+                            exportRole === value && styles.exportSelectorChipSelected,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.exportSelectorChipText,
+                              exportRole === value && styles.exportSelectorChipTextSelected,
+                            ]}
+                          >
+                            {value === "all"
+                              ? "Doctors and therapists"
+                              : value === "therapist"
+                                ? "Therapists"
+                                : "Doctors"}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  {exportRole !== "all" ? (
+                    <SearchableSelect
+                      accessibilityLabel={`Select ${exportRole} export filter`}
+                      emptyMessage={`No ${exportRole}s found.`}
+                      icon={exportRole === "doctor" ? "medkit-outline" : "person-outline"}
+                      label={exportRole === "doctor" ? "Doctor" : "Therapist"}
+                      onSelect={(option) => {
+                        setExportStaffId(
+                          option.id === "all"
+                            ? null
+                            : typeof option.id === "number"
+                              ? option.id
+                              : Number(option.id)
+                        );
+                        setExportPreview(null);
+                      }}
+                      options={[
+                        {
+                          id: "all",
+                          label: exportRole === "doctor" ? "All doctors" : "All therapists",
+                        },
+                        ...(exportRole === "doctor" ? doctorOptions : therapistOptions),
+                      ]}
+                      placeholder={exportRole === "doctor" ? "All doctors" : "All therapists"}
+                      searchPlaceholder={`Search ${exportRole}s`}
+                      selectedId={exportStaffId ?? "all"}
+                      title={exportRole === "doctor" ? "Select Doctor" : "Select Therapist"}
+                    />
+                  ) : null}
+                  <Text style={styles.exportSelectorLabel}>Status</Text>
+                  <View style={styles.exportSelectorOptions}>
+                    {(exportReportType === "consolidated_claims"
+                      ? claimExportStatuses
+                      : exportReportType === "organization_attendance"
+                        ? attendanceExportStatuses
+                        : exportReportType === "organization_expenses"
+                          ? expenseExportStatuses
+                          : exportReportType === "organization_clinical_activity"
+                            ? clinicalExportStatuses
+                            : exportReportType === "organization_performance"
+                              ? (["all"] as const)
+                              : exceptionExportStatuses
+                    ).map((value) => (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: exportStatus === value }}
+                        disabled={filterBusy}
+                        key={value}
+                        onPress={() => {
+                          setExportStatus(value);
+                          setExportPreview(null);
+                        }}
+                        style={[
+                          styles.exportSelectorChip,
+                          exportStatus === value && styles.exportSelectorChipSelected,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.exportSelectorChipText,
+                            exportStatus === value && styles.exportSelectorChipTextSelected,
+                          ]}
+                        >
+                          {value === "ended_early"
+                            ? "Ended early"
+                            : value === "completed"
+                              ? "Completed normally"
+                              : value[0].toUpperCase() + value.slice(1)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+                <ReportExportPanel
+                  csvExporting={exporting}
+                  disabled={exportDisabled}
+                  excelExporting={excelExporting}
+                  onExportCsv={() => void exportReport()}
+                  onExportExcel={() => void exportExcelReport()}
+                  onExportPdf={() => void exportPdfReport()}
+                  onPreview={() => void previewExport()}
+                  pdfExporting={pdfExporting}
+                  preview={exportPreview}
+                  previewing={previewing}
+                  reportType={exportReportType}
+                />
+                <View style={styles.exportHistoryPanel}>
+                  {operationsHealth ? (
+                    <View
+                      accessibilityLiveRegion="polite"
+                      style={[
+                        styles.operationsHealth,
+                        operationsHealth.status === "healthy"
+                          ? styles.operationsHealthy
+                          : styles.operationsDegraded,
+                      ]}
+                    >
+                      <Text style={styles.operationsHealthTitle}>
+                        Export operations: {operationsHealth.status}
+                      </Text>
+                      <Text style={styles.operationsHealthText}>
+                        {operationsHealth.queued_jobs} queued Â· {operationsHealth.processing_jobs} processing Â· {operationsHealth.stale_processing_jobs} stale Â· {operationsHealth.failed_jobs_last_24h} failed in 24h Â· {operationsHealth.expired_artifacts_pending_cleanup} awaiting cleanup Â· storage {operationsHealth.storage_backend.toUpperCase()} {operationsHealth.external_storage_configured ? "configured" : "needs configuration"}.
+                      </Text>
+                    </View>
+                  ) : null}
+                  <Text style={styles.exportHistoryTitle}>
+                    Recent organization exports
+                  </Text>
+                  {historyLoading ? (
+                    <ActivityIndicator
+                      color={colors.primary}
+                      style={styles.exportHistoryLoading}
+                    />
+                  ) : exportHistory.length === 0 ? (
+                    <Text style={styles.exportHistoryEmpty}>
+                      Generated organization reports will appear here.
+                    </Text>
+                  ) : (
+                    exportHistory.map((item) => {
+                      const expired =
+                        new Date(item.snapshot_expires_at) <= new Date();
+                      return (
+                        <View key={item.id} style={styles.exportHistoryItem}>
+                          <View style={styles.exportHistoryContent}>
+                              <Text style={styles.exportHistoryItemTitle}>
+                                {item.report_type === "organization_attendance" ? "Attendance" : item.report_type === "organization_expenses" ? "Travel & expenses" : item.report_type === "organization_clinical_activity" ? "Clinical activity" : item.report_type === "organization_performance" ? "Performance" : item.report_type === "organization_exceptions" ? "Exceptions" : "Claims"} · {item.format.toUpperCase()} · {item.row_count} row
+                                {item.row_count === 1 ? "" : "s"}
+                                {item.report_type === "consolidated_claims" || item.report_type === "organization_expenses" || item.report_type === "organization_performance" ? ` · ${formatReportAmount(item.total_amount)}` : ""}
+                            </Text>
+                            <Text style={styles.exportHistoryMeta}>
+                              {item.requester_name} · {new Date(item.last_downloaded_at).toLocaleString("en-IN")} · {item.download_count} download
+                              {item.download_count === 1 ? "" : "s"}
+                            </Text>
+                            <Text style={styles.exportHistoryChecksum}>
+                              SHA-256 {item.checksum_sha256.slice(0, 12)}…
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            accessibilityLabel={expired ? "Report expired" : `Share ${item.format.toUpperCase()} report again`}
+                            accessibilityRole="button"
+                            disabled={expired || historySharing !== null}
+                            onPress={() => void shareHistoricalExport(item)}
+                            style={[
+                              styles.exportHistoryButton,
+                              (expired || historySharing) && styles.disabledButton,
+                            ]}
+                          >
+                            {historySharing === item.id ? (
+                              <ActivityIndicator color={colors.primary} size="small" />
+                            ) : (
+                              <Text style={styles.exportHistoryButtonText}>
+                                {expired ? "Expired" : "Save / Share"}
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })
+                  )}
+                  {exportFailures.length > 0 ? (
+                    <View style={styles.exportFailurePanel}>
+                      <Text style={styles.exportFailureTitle}>
+                        Recent export issues
+                      </Text>
+                      {exportFailures.slice(0, 5).map((item) => (
+                        <Text key={item.id} style={styles.exportFailureText}>
+                          {item.requester_name} · {item.event_type.replaceAll("_", " ")} · {(item.error_code ?? "unknown error").replaceAll("_", " ")} · {new Date(item.occurred_at).toLocaleString("en-IN")}
+                        </Text>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              </>
             ) : null}
           </>
         ) : (
@@ -1389,6 +1483,39 @@ const styles = StyleSheet.create({
     fontSize: typography.size.bodySmall,
     lineHeight: typography.lineHeight.bodyRelaxed,
     marginTop: spacing.s5,
+  },
+  auditLogButton: {
+    alignItems: "center",
+    backgroundColor: colors.blueSurface,
+    borderColor: colors.border,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    flexDirection: "row",
+    marginTop: spacing.xl,
+    minHeight: 64,
+    padding: spacing.lg,
+  },
+  auditLogIcon: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
+  auditLogText: {
+    flex: 1,
+    marginHorizontal: spacing.lg,
+  },
+  auditLogTitle: {
+    color: colors.blueDark,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  auditLogSubtitle: {
+    color: colors.textMutedDark,
+    fontSize: typography.size.small,
+    marginTop: spacing.xs,
   },
   filterSection: {
     backgroundColor: colors.surface,
@@ -1547,6 +1674,155 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.6,
+  },
+  exportSelectorPanel: {
+    backgroundColor: colors.primarySurface,
+    borderColor: colors.primaryBorder,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    marginTop: spacing.xl,
+    padding: spacing.xl,
+  },
+  exportSelectorTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.bodyLarge,
+    fontWeight: typography.weight.extrabold,
+  },
+  exportSelectorLabel: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.bold,
+    marginTop: spacing.lg,
+  },
+  exportSelectorOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  exportSelectorChip: {
+    backgroundColor: colors.surface,
+    borderColor: colors.primaryBorder,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  exportSelectorChipSelected: {
+    backgroundColor: colors.primary,
+  },
+  exportSelectorChipText: {
+    color: colors.primaryDark,
+    fontSize: typography.size.small,
+  },
+  exportSelectorChipTextSelected: {
+    color: colors.surface,
+    fontWeight: typography.weight.bold,
+  },
+  exportHistoryPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    marginTop: spacing.xl,
+    padding: spacing.xl,
+  },
+  exportHistoryTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.bodyLarge,
+    fontWeight: typography.weight.extrabold,
+  },
+  operationsHealth: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    marginBottom: spacing.lg,
+    padding: spacing.md,
+  },
+  operationsHealthy: {
+    backgroundColor: "#ECFDF5",
+    borderColor: "#A7F3D0",
+  },
+  operationsDegraded: {
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FCD34D",
+  },
+  operationsHealthTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.bold,
+    textTransform: "capitalize",
+  },
+  operationsHealthText: {
+    color: colors.textMuted,
+    fontSize: typography.size.caption,
+    lineHeight: 18,
+    marginTop: spacing.xs,
+  },
+  exportHistoryLoading: { alignSelf: "flex-start", marginTop: spacing.lg },
+  exportHistoryEmpty: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    marginTop: spacing.lg,
+  },
+  exportHistoryItem: {
+    alignItems: "center",
+    borderColor: colors.border,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    marginTop: spacing.md,
+    padding: spacing.md,
+  },
+  exportHistoryContent: { flex: 1 },
+  exportHistoryItemTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.extrabold,
+  },
+  exportHistoryMeta: {
+    color: colors.textMuted,
+    fontSize: typography.size.tiny,
+    marginTop: spacing.xs,
+  },
+  exportHistoryChecksum: {
+    color: colors.textSubtle,
+    fontFamily: "monospace",
+    fontSize: typography.size.micro,
+    marginTop: spacing.xs,
+  },
+  exportHistoryButton: {
+    borderColor: colors.primaryBorder,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    minWidth: 88,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  exportHistoryButtonText: {
+    color: colors.primaryDark,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.extrabold,
+    textAlign: "center",
+  },
+  exportFailurePanel: {
+    backgroundColor: colors.warningSurface,
+    borderColor: colors.warningBright,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    marginTop: spacing.lg,
+    padding: spacing.md,
+  },
+  exportFailureTitle: {
+    color: colors.warningDark,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.extrabold,
+  },
+  exportFailureText: {
+    color: colors.warningDark,
+    fontSize: typography.size.tiny,
+    lineHeight: typography.lineHeight.small,
+    marginTop: spacing.sm,
   },
   stateContainer: {
     alignItems: "center",

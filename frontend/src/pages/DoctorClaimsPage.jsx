@@ -11,12 +11,15 @@ import {
 } from "react-icons/fa"
 
 import DoctorLayout from "../layouts/DoctorLayout"
+import MyClaimsExportPanel from "../components/reports/MyClaimsExportPanel"
 import {
   getDoctorClaim,
+  getDoctorClaimPreview,
   getMyDoctorClaims,
   submitDoctorClaim,
 } from "../services/doctorClaimService"
 import { getTodayDoctorExpenses } from "../services/doctorExpenseService"
+import { exportDoctorClaimPdf } from "../utils/pdfExport"
 
 
 const getErrorMessage = (error, fallback) => {
@@ -102,6 +105,9 @@ function StatusBadge({ value }) {
     pending: "border-blue-200 bg-blue-50 text-blue-700",
     approved: "border-emerald-200 bg-emerald-50 text-emerald-700",
     rejected: "border-rose-200 bg-rose-50 text-rose-700",
+    ready: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    blocked: "border-amber-200 bg-amber-50 text-amber-700",
+    already_submitted: "border-blue-200 bg-blue-50 text-blue-700",
   }
 
   return (
@@ -123,15 +129,20 @@ function DoctorClaimsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [actionId, setActionId] = useState(null)
   const [selectedClaim, setSelectedClaim] = useState(null)
+  const [readiness, setReadiness] = useState(null)
+  const [loadError, setLoadError] = useState("")
 
   const loadClaimsPage = async () => {
     const token = localStorage.getItem("token")
-    const [expenseData, claimData] = await Promise.all([
+    const [expenseData, claimData, previewData] = await Promise.all([
       getTodayDoctorExpenses(token),
       getMyDoctorClaims(token),
+      getDoctorClaimPreview(token),
     ])
     setTodayExpenses(expenseData || [])
     setClaims(claimData || [])
+    setReadiness(previewData)
+    setLoadError("")
   }
 
   useEffect(() => {
@@ -140,48 +151,29 @@ function DoctorClaimsPage() {
     Promise.all([
       getTodayDoctorExpenses(token),
       getMyDoctorClaims(token),
+      getDoctorClaimPreview(token),
     ])
-      .then(([expenseData, claimData]) => {
+      .then(([expenseData, claimData, previewData]) => {
         setTodayExpenses(expenseData || [])
         setClaims(claimData || [])
+        setReadiness(previewData)
+        setLoadError("")
       })
       .catch((error) => {
-        toast.error(
-          getErrorMessage(error, "Failed to load doctor claims")
-        )
+        const message = getErrorMessage(error, "Failed to load doctor claims")
+        setLoadError(message)
+        toast.error(message)
       })
       .finally(() => {
         setIsLoading(false)
       })
   }, [])
 
-  const eligibleExpenses = useMemo(
-    () =>
-      todayExpenses.filter(
-        (expense) =>
-          expense.status === "draft" && expense.claim_id == null
-      ),
-    [todayExpenses]
-  )
-
-  const eligibleTotal = useMemo(
-    () =>
-      eligibleExpenses.reduce(
-        (total, expense) => total + Number(expense.fare || 0),
-        0
-      ),
-    [eligibleExpenses]
-  )
-
-  const todayClaim = useMemo(() => {
-    const today = new Date()
-    const localToday = new Date(
-      today.getTime() - today.getTimezoneOffset() * 60000
-    )
-      .toISOString()
-      .slice(0, 10)
-    return claims.find((claim) => claim.claim_date === localToday)
-  }, [claims])
+  const todayClaim = readiness?.existing_claim_id
+    ? claims.find(
+        (claim) => claim.id === readiness.existing_claim_id
+      ) || null
+    : null
 
   const sortedClaims = useMemo(
     () =>
@@ -195,13 +187,11 @@ function DoctorClaimsPage() {
     [claims]
   )
 
-  const canSubmit =
-    eligibleExpenses.length > 0 &&
-    (!todayClaim || todayClaim.status === "rejected")
+  const canSubmit = Boolean(readiness?.can_submit)
 
   const handleSubmitClaim = async () => {
     const shouldSubmit = window.confirm(
-      `Submit ${eligibleExpenses.length} expense(s) totalling ${formatCurrency(eligibleTotal)} for approval?`
+      `${readiness?.submission_mode === "resubmit" ? "Resubmit" : "Submit"} ${readiness?.eligible_record_count || 0} expense(s) totalling ${formatCurrency(readiness?.total_amount)} for approval?`
     )
     if (!shouldSubmit) return
 
@@ -258,8 +248,55 @@ function DoctorClaimsPage() {
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             <FaFileInvoiceDollar />
-            {actionId === "submit" ? "Submitting..." : "Submit Claim"}
+            {actionId === "submit"
+              ? "Submitting..."
+              : readiness?.submission_mode === "resubmit"
+                ? "Resubmit Claim"
+                : "Submit Claim"}
           </button>
+        </div>
+
+        <MyClaimsExportPanel />
+
+        {loadError && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
+            <span>{loadError}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setIsLoading(true)
+                loadClaimsPage()
+                  .catch((error) => setLoadError(getErrorMessage(error, "Unable to refresh claim preview")))
+                  .finally(() => setIsLoading(false))
+              }}
+              className="rounded-lg border border-rose-300 bg-white px-3 py-2 font-semibold"
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
+        <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4" data-testid="doctor-claim-readiness">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="font-bold text-slate-900">Today&apos;s server-calculated preview</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Business date {readiness?.business_date || "loading"}; eligibility and totals are rechecked during submission.
+              </p>
+            </div>
+            {readiness && <StatusBadge value={readiness.state} />}
+          </div>
+          {readiness?.rejection_reason && readiness.submission_mode === "resubmit" && (
+            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="alert">
+              <strong>Changes requested:</strong> {readiness.rejection_reason}
+            </p>
+          )}
+          {readiness?.blocking_reasons.map((blocker) => (
+            <p key={blocker.code} className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="alert">
+              {blocker.affected_count > 0 && <strong>{blocker.affected_count} affected item{blocker.affected_count === 1 ? "" : "s"}. </strong>}
+              {blocker.message}
+            </p>
+          ))}
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -271,7 +308,7 @@ function DoctorClaimsPage() {
               <FaReceipt className="text-blue-500" />
             </div>
             <p className="mt-2 text-2xl font-extrabold text-slate-900">
-              {eligibleExpenses.length}
+              {readiness?.eligible_record_count ?? "—"}
             </p>
           </div>
           <div className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
@@ -282,7 +319,7 @@ function DoctorClaimsPage() {
               <FaFileInvoiceDollar className="text-emerald-500" />
             </div>
             <p className="mt-2 text-2xl font-extrabold text-slate-900">
-              {formatCurrency(eligibleTotal)}
+              {formatCurrency(readiness?.total_amount)}
             </p>
           </div>
           <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
@@ -312,7 +349,7 @@ function DoctorClaimsPage() {
         )}
 
         {todayClaim?.status === "rejected" &&
-          eligibleExpenses.length > 0 && (
+          readiness?.eligible_record_count > 0 && (
             <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
               The rejected claim can be resubmitted with today&apos;s draft
               expenses.
@@ -391,16 +428,25 @@ function DoctorClaimsPage() {
                           </p>
                         </td>
                         <td className="px-4 py-4 text-sm capitalize text-slate-700">
-                          {expense.transport_mode}
+                          {expense.transport_mode} · {expense.expense_category?.replaceAll("_", " ")}
                         </td>
                         <td className="px-4 py-4 font-bold text-slate-900">
-                          {formatCurrency(expense.fare)}
+                          {formatCurrency(expense.approved_amount ?? expense.fare)}
+                          {expense.approved_amount != null && Number(expense.approved_amount) !== Number(expense.fare) && (
+                            <span className="mt-0.5 block text-[10px] font-medium text-slate-500">Submitted {formatCurrency(expense.fare)}</span>
+                          )}
                         </td>
                         <td className="px-4 py-4 text-sm text-slate-600">
                           {expense.proof_file ? "Attached" : "—"}
                         </td>
                         <td className="px-4 py-4">
-                          <StatusBadge value={expense.status} />
+                          <StatusBadge
+                            value={
+                              expense.visit_id == null && expense.manual_review_status
+                                ? expense.manual_review_status
+                                : expense.status
+                            }
+                          />
                         </td>
                       </tr>
                     ))
@@ -566,14 +612,24 @@ function DoctorClaimsPage() {
                       </p>
                     </div>
                     <p className="shrink-0 font-bold text-slate-900">
-                      {formatCurrency(expense.fare)}
+                      {formatCurrency(expense.approved_amount ?? expense.fare)}
+                      {expense.approved_amount != null && Number(expense.approved_amount) !== Number(expense.fare) && (
+                        <span className="block text-[10px] font-medium text-slate-500">Submitted {formatCurrency(expense.fare)}</span>
+                      )}
                     </p>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="flex justify-end border-t border-slate-100 pt-4">
+            <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4">
+              <button
+                type="button"
+                onClick={() => exportDoctorClaimPdf(selectedClaim)}
+                className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
+              >
+                Download PDF statement
+              </button>
               <button
                 type="button"
                 onClick={closeDetails}

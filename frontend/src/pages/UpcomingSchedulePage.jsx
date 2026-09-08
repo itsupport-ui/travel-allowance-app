@@ -1,28 +1,32 @@
-import { useEffect, useState } from "react"
-import toast from "react-hot-toast"
+import { Fragment, useEffect, useState } from "react"
 import TherapistLayout from "../layouts/TherapistLayout"
+import PageState from "../components/ui/PageState"
 import { getUpcomingSchedules } from "../services/scheduleService"
 
-function UpcomingSchedulePage() {
+function UpcomingSchedulePage({ embedded = false }) {
   const [schedules, setSchedules] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const PageLayout = embedded ? Fragment : TherapistLayout
+
+  async function fetchSchedules() {
+    setLoading(true)
+    setError("")
+    try {
+      const token = localStorage.getItem("token")
+      const data = await getUpcomingSchedules(token)
+      setSchedules(Array.isArray(data) ? data : [])
+    } catch (requestError) {
+      setError(requestError.message || "Failed to load upcoming schedules")
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    let active = true
-
-    async function fetchSchedules() {
-      try {
-        const token = localStorage.getItem("token")
-        const data = await getUpcomingSchedules(token)
-        if (active) setSchedules(data)
-      } catch {
-        toast.error("Failed to load schedules")
-      }
-    }
-
-    fetchSchedules()
-    return () => {
-      active = false
-    }
+    // Initial API hydration; state changes occur after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchSchedules()
   }, [])
 
   // Dynamic visual status styling badge helper
@@ -39,21 +43,23 @@ function UpcomingSchedulePage() {
   }
 
   return (
-    <TherapistLayout>
+    <PageLayout>
       {/* px-2 sm:px-4 keeps content from hitting the raw edges of small device viewports */}
       <div className="w-full max-w-3xl mx-auto px-2 sm:px-4 py-4">
         
         {/* Responsive Header Elements */}
-        <div className="mb-6">
+        {!embedded && <div className="mb-6">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 tracking-tight">
             Upcoming Schedule
           </h1>
           <p className="text-xs sm:text-sm text-gray-400 mt-1">
             Track future practitioner operations, assigned caseloads, and planned treatments.
           </p>
-        </div>
+        </div>}
 
-        {schedules.length === 0 ? (
+        <PageState loading={loading} error={error} onRetry={fetchSchedules} />
+
+        {!loading && !error && (schedules.length === 0 ? (
           <div className="bg-white rounded-xl shadow-md p-8 text-center text-gray-400 text-sm font-medium border border-gray-100">
             No upcoming schedules 😄
           </div>
@@ -113,9 +119,9 @@ function UpcomingSchedulePage() {
               </div>
             ))}
           </div>
-        )}
+        ))}
       </div>
-    </TherapistLayout>
+    </PageLayout>
   )
 }
 

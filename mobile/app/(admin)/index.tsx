@@ -25,12 +25,15 @@ const PRIMARY = colors.primary;
 interface MetricDefinition {
   key: keyof Pick<
     AdminDashboardSummary,
-    | "total_therapists"
+    | "total_clinical_staff"
     | "todays_schedules"
     | "pending_claims"
     | "approved_claims"
     | "rejected_claims"
     | "completed_treatments"
+    | "missed_clinical_activities"
+    | "open_follow_ups"
+    | "todays_claims"
   >;
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
@@ -41,8 +44,8 @@ interface MetricDefinition {
 
 const metrics: MetricDefinition[] = [
   {
-    key: "total_therapists",
-    label: "Total Therapists",
+    key: "total_clinical_staff",
+    label: "Active Clinical Staff",
     icon: "people-outline",
     color: colors.blueDark,
     backgroundColor: colors.blueSurface,
@@ -50,7 +53,7 @@ const metrics: MetricDefinition[] = [
   },
   {
     key: "todays_schedules",
-    label: "Today's Schedules",
+    label: "Scheduled Today",
     icon: "calendar-outline",
     color: PRIMARY,
     backgroundColor: colors.primarySurface,
@@ -62,7 +65,7 @@ const metrics: MetricDefinition[] = [
     icon: "time-outline",
     color: colors.warning,
     backgroundColor: colors.warningSurface,
-    route: "/(admin)/claims",
+    route: "/(admin)/reports",
   },
   {
     key: "approved_claims",
@@ -70,22 +73,38 @@ const metrics: MetricDefinition[] = [
     icon: "checkmark-circle-outline",
     color: colors.greenDark,
     backgroundColor: colors.greenSurface,
-    route: "/(admin)/claims",
+    route: "/(admin)/reports",
   },
   {
-    key: "rejected_claims",
-    label: "Rejected Claims",
-    icon: "close-circle-outline",
+    key: "missed_clinical_activities",
+    label: "Missed Today",
+    icon: "alert-circle-outline",
     color: colors.danger,
     backgroundColor: colors.dangerSurfaceStrong,
-    route: "/(admin)/claims",
+    route: "/(admin)/schedules",
   },
   {
     key: "completed_treatments",
-    label: "Completed Treatments",
+    label: "Completed Today",
     icon: "medkit-outline",
     color: colors.teal,
     backgroundColor: colors.tealSurface,
+    route: "/(admin)/reports",
+  },
+  {
+    key: "open_follow_ups",
+    label: "Open Follow-ups",
+    icon: "checkmark-done-outline",
+    color: colors.blueDark,
+    backgroundColor: colors.blueSurface,
+    route: "/(admin)/follow-ups" as Href,
+  },
+  {
+    key: "todays_claims",
+    label: "Today's Claims",
+    icon: "receipt-outline",
+    color: colors.purple,
+    backgroundColor: colors.purpleSurface,
     route: "/(admin)/reports",
   },
 ];

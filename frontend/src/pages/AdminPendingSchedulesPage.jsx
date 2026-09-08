@@ -15,11 +15,7 @@ function AdminPendingSchedulesPage() {
   const [searchDoctor, setSearchDoctor] = useState("")
   const [searchTherapist, setSearchTherapist] = useState("")
 
-  useEffect(() => {
-    loadSchedules()
-  }, [])
-
-  const loadSchedules = async () => {
+  async function loadSchedules() {
     try {
       const token = localStorage.getItem("token")
       const data = await getPendingSchedules(token)
@@ -31,6 +27,12 @@ function AdminPendingSchedulesPage() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    // Initial API hydration; state changes occur after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadSchedules()
+  }, [])
 
   const renderPriorityBadge = (priority) => {
     const baseClass = "px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 uppercase tracking-wider"

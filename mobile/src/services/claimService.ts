@@ -4,8 +4,10 @@ import { api } from "../api/apiClient";
 import type {
   ClaimDetailsResponse,
   ClaimResponse,
+  TherapistClaimReadiness,
 } from "../types/claim";
 import { getToken } from "../utils/storage";
+import { executeOrQueueMutation } from "./offlineMutationQueue";
 
 interface ApiErrorBody {
   detail?: unknown;
@@ -87,13 +89,32 @@ const executeClaimRequest = async <T>(
 };
 
 export const submitTodayClaim = async (): Promise<ClaimResponse> =>
-  executeClaimRequest(
-    async () =>
-      api.post<ClaimResponse>("/claims/submit", undefined, {
-        headers: await getAuthHeaders(),
-      }),
-    "Unable to submit today's claim."
-  );
+  executeOrQueueMutation({
+    execute: async (operationId) => {
+      const response = await api.post<ClaimResponse>(
+        "/claims/submit",
+        undefined,
+        {
+          headers: {
+            ...(await getAuthHeaders()),
+            "X-Idempotency-Key": operationId,
+          },
+        }
+      );
+      return response.data;
+    },
+    operationType: "therapist_claim_submit",
+  });
+
+export const getTodayClaimReadiness =
+  async (): Promise<TherapistClaimReadiness> =>
+    executeClaimRequest(
+      async () =>
+        api.get<TherapistClaimReadiness>("/claims/preview", {
+          headers: await getAuthHeaders(),
+        }),
+      "Unable to calculate today's claim preview."
+    );
 
 export const getMyClaims = async (): Promise<ClaimResponse[]> =>
   executeClaimRequest(

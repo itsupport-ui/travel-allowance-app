@@ -12,6 +12,7 @@ from app.database import Base, get_db
 from app.models.claim import Claim
 from app.models.doctor import Doctor
 from app.models.push_token import PushToken
+from app.models.reimbursement_policy import ReimbursementPolicy
 from app.models.settings import Settings
 from app.models.therapist_workday import TherapistWorkDay
 from app.models.treatment_schedule import TreatmentSchedule
@@ -19,6 +20,7 @@ from app.models.travel import TravelEntry
 from app.models.user import User
 from app.routers import claims, therapist_workday, treatment_schedule, travel
 from app.utils.auth import get_current_user
+from app.utils.timezone import india_now
 
 
 class ThreePatientDayFlowTests(unittest.TestCase):
@@ -55,12 +57,19 @@ class ThreePatientDayFlowTests(unittest.TestCase):
             is_active=True,
         )
         self.settings = Settings(per_km_rate=8.0, daily_allowance=150.0)
+        self.policy = ReimbursementPolicy(
+            version=1,
+            effective_from=date(1970, 1, 1),
+            per_km_rate=8,
+            daily_allowance=150,
+        )
         self.db.add_all(
             [
                 self.admin,
                 self.therapist,
                 self.doctor_user,
                 self.settings,
+                self.policy,
             ]
         )
         self.db.flush()
@@ -276,11 +285,16 @@ class ThreePatientDayFlowTests(unittest.TestCase):
 
         self.use_user(self.therapist)
         duplicate_response = self.client.post("/claims/submit")
-        self.assertEqual(duplicate_response.status_code, 400)
+        self.assertEqual(duplicate_response.status_code, 200)
         self.assertEqual(
-            duplicate_response.json()["detail"],
-            "Claim for today already exists with status 'pending'",
+            duplicate_response.json()["id"],
+            claim["id"],
         )
+        self.assertEqual(
+            duplicate_response.headers["X-Idempotent-Replay"],
+            "true",
+        )
+        self.assertEqual(self.db.query(Claim).count(), 1)
 
     def test_claim_commit_failure_does_not_leave_partial_links(self):
         travel_entry = TravelEntry(
@@ -311,6 +325,56 @@ class ThreePatientDayFlowTests(unittest.TestCase):
         self.db.expire_all()
         self.assertEqual(self.db.query(Claim).count(), 0)
         self.assertIsNone(self.db.get(TravelEntry, travel_entry.id).claim_id)
+
+    def test_rejected_claim_releases_travel_and_can_be_resubmitted(self):
+        travel_entry = TravelEntry(
+            therapist_id=self.therapist.id,
+            travel_date=india_now().date(),
+            from_address="Origin",
+            to_address="Destination",
+            total_km=2.5,
+            per_km_rate=8.0,
+            travel_fare=20.0,
+            patient_visited=True,
+            patient_name="Patient",
+            transport_mode="vehicle",
+            status="draft",
+        )
+        self.db.add(travel_entry)
+        self.db.commit()
+
+        self.use_user(self.therapist)
+        submitted = self.client.post("/claims/submit")
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        claim_id = submitted.json()["id"]
+        self.db.refresh(travel_entry)
+        self.assertEqual(travel_entry.status, "submitted")
+
+        self.use_user(self.admin)
+        rejected = self.client.put(
+            f"/claims/{claim_id}/reject",
+            json={"rejection_reason": "Please attach corrected evidence"},
+        )
+        self.assertEqual(rejected.status_code, 200, rejected.text)
+        self.assertEqual(rejected.json()["status"], "rejected")
+        self.assertEqual(
+            rejected.json()["rejection_reason"],
+            "Please attach corrected evidence",
+        )
+        self.db.refresh(travel_entry)
+        self.assertIsNone(travel_entry.claim_id)
+        self.assertEqual(travel_entry.status, "draft")
+
+        self.use_user(self.therapist)
+        resubmitted = self.client.post("/claims/submit")
+        self.assertEqual(resubmitted.status_code, 200, resubmitted.text)
+        self.assertEqual(resubmitted.json()["id"], claim_id)
+        self.assertEqual(resubmitted.json()["status"], "pending")
+        self.assertEqual(resubmitted.json()["revision"], 2)
+        self.assertIsNone(resubmitted.json()["rejection_reason"])
+        self.db.refresh(travel_entry)
+        self.assertEqual(travel_entry.claim_id, claim_id)
+        self.assertEqual(travel_entry.status, "submitted")
 
 
 if __name__ == "__main__":

@@ -1,15 +1,15 @@
 import logging
 
-from datetime import date
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from datetime import date, datetime, timezone
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.claim import Claim
 from app.models.user import User
 from app.models.travel import TravelEntry
-from app.models.settings import Settings
-from app.schemas.claim import ClaimDetailsResponse, ClaimResponse
+from app.schemas.claim import ClaimDetailsResponse, ClaimRejectRequest, ClaimResponse
+from app.schemas.claim_readiness import TherapistClaimReadinessResponse
 from app.utils.auth import (
     get_current_user,
     require_permission,
@@ -17,12 +17,22 @@ from app.utils.auth import (
 )
 from app.utils.permissions import role_has_permission
 from app.services.push_notification_service import notify_claim_status
+from app.services.domain_audit_service import record_domain_audit_event
+from app.services.claim_readiness_service import (
+    build_therapist_claim_readiness,
+    raise_for_claim_readiness,
+)
 from app.utils.workflow_transitions import (
     THERAPIST_CLAIM_STATUS_TRANSITIONS,
-    validate_editable_status,
     validate_status_transition,
 )
-from sqlalchemy import func
+from app.utils.timezone import india_now
+from app.utils.domain_errors import DomainHTTPException
+from app.services.reimbursement_policy_service import (
+    CALCULATION_VERSION,
+    ROUNDING_MODE,
+    money,
+)
 
 
 router = APIRouter(
@@ -32,71 +42,74 @@ router = APIRouter(
 
 logger = logging.getLogger(__name__)
 
-# I have travel entries with patient visited today, and I want to submit a claim for today. I want to check if there is already a claim for today, if there is, I want to return an error message. If there is no claim for today, I want to calculate the total km, travel fare, daily allowance, and grand total for the claim, and then create a new claim in the database., but  I am getting no travel entries found for today error message, even though I have travel entries for today. I want to check if the travel entries are being created with the correct date, and if the claim submission is checking for the correct date as well. I also want to check if the patient visited today field is being set correctly in the travel entries, and if the daily allowance is being calculated correctly based on that field.
+
+@router.get("/preview", response_model=TherapistClaimReadinessResponse)
+def preview_claim(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["therapist"])),
+):
+    return build_therapist_claim_readiness(
+        db,
+        therapist_id=current_user.id,
+        business_date=india_now().date(),
+    ).response()
+
+
 @router.post("/submit", response_model=ClaimResponse)
 def submit_claim(
+    response: Response,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["therapist"]))
 ):
-    today = date.today()
-    
-    # Check for duplicate claim for the same date
-    existing_claim = (
-        db.query(Claim)
-        .filter(Claim.therapist_id == current_user.id, Claim.claim_date == today)
-        .first()
+    today = india_now().date()
+    readiness = build_therapist_claim_readiness(
+        db,
+        therapist_id=current_user.id,
+        business_date=today,
+        lock=True,
     )
+    existing_claim = readiness.existing_claim
 
-    if existing_claim:
-        validate_editable_status(
-            entity="Therapist claim",
-            current_status=existing_claim.status,
+    if readiness.state == "already_submitted" and existing_claim is not None:
+        response.headers["X-Idempotent-Replay"] = "true"
+        return existing_claim
+
+    raise_for_claim_readiness(readiness)
+    travels = readiness.eligible_records
+    policy = readiness.policy
+    if policy is None:
+        raise DomainHTTPException(
+            status_code=409,
+            code="REIMBURSEMENT_POLICY_UNAVAILABLE",
+            message="No reimbursement policy is effective for today.",
+            recoverable=True,
+            suggested_action="contact_administrator",
+            blocking_fields=["policy_id"],
         )
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Claim for today already exists "
-                f"with status '{existing_claim.status}'"
-            ),
-        )
+    per_km_rate = money(policy.per_km_rate)
 
-    # Get today's travel entries for the therapist
-    travels = (
-        db.query(TravelEntry)
-        .filter(TravelEntry.therapist_id == current_user.id, func.date(TravelEntry.travel_date) == today)
-        .all()
-    )
-
-    if not travels:
-        raise HTTPException(status_code=400, detail="No travel entries found for today")
-
-    total_km = round(sum(travel.total_km for travel in travels), 2)
-    patient_visited_today = any(travel.patient_visited for travel in travels)
-    settings = db.query(Settings).first()
-    per_km_rate = settings.per_km_rate if settings else 3.0
-    configured_allowance = settings.daily_allowance if settings else 150.0
-    daily_allowance = (
-        round(float(configured_allowance), 2)
-        if patient_visited_today
-        else 0.0
-    )
-    travel_total = round(
-        sum(travel.travel_fare for travel in travels),
-        2,
-    )
-    grand_total = round(travel_total + daily_allowance, 2)
-
-    claim = Claim(
+    prior_status = existing_claim.status if existing_claim is not None else "draft"
+    claim = existing_claim or Claim(
         therapist_id=current_user.id,
         claim_date=today,
-        total_km=total_km,
-        per_km_rate=per_km_rate,
-        travel_total=travel_total,
-        daily_allowance=daily_allowance,
-        grand_total=grand_total,
-        patient_visited_today=patient_visited_today,
-        status="pending"
     )
+    claim.total_km = readiness.total_km
+    claim.per_km_rate = per_km_rate
+    claim.travel_total = readiness.travel_total
+    claim.daily_allowance = readiness.daily_allowance
+    claim.grand_total = readiness.grand_total
+    claim.policy_id = policy.id
+    claim.calculation_version = CALCULATION_VERSION
+    claim.rounding_mode = ROUNDING_MODE
+    claim.included_travel_ids = [travel.id for travel in travels]
+    claim.patient_visited_today = readiness.patient_visited_today
+    claim.status = "pending"
+    claim.submitted_at = datetime.now(timezone.utc)
+    claim.rejection_reason = None
+    claim.reviewed_at = None
+    claim.reviewed_by = None
+    if existing_claim is not None:
+        claim.revision = int(claim.revision or 1) + 1
 
     try:
         db.add(claim)
@@ -104,6 +117,26 @@ def submit_claim(
 
         for travel in travels:
             travel.claim_id = claim.id
+            travel.status = "submitted"
+
+        record_domain_audit_event(
+            db,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            domain="financial",
+            entity_type="therapist_claim",
+            entity_id=claim.id,
+            action=("resubmitted" if existing_claim is not None else "submitted"),
+            business_date=claim.claim_date,
+            from_state=prior_status,
+            to_state="pending",
+            related_entity_type="therapist",
+            related_entity_id=current_user.id,
+            details={
+                "revision": int(claim.revision or 1),
+                "record_count": len(travels),
+            },
+        )
 
         db.commit()
     except IntegrityError as error:
@@ -175,7 +208,26 @@ def approve_claim(
         transitions=THERAPIST_CLAIM_STATUS_TRANSITIONS,
     )
 
+    prior_status = claim.status
     claim.status = "approved"
+    claim.reviewed_at = datetime.now(timezone.utc)
+    claim.reviewed_by = current_user.id
+    claim.rejection_reason = None
+    record_domain_audit_event(
+        db,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        domain="financial",
+        entity_type="therapist_claim",
+        entity_id=claim.id,
+        action="approved",
+        business_date=claim.claim_date,
+        from_state=prior_status,
+        to_state="approved",
+        related_entity_type="therapist",
+        related_entity_id=claim.therapist_id,
+        details={"revision": int(claim.revision or 1)},
+    )
     db.commit()
     db.refresh(claim)
     background_tasks.add_task(
@@ -190,13 +242,19 @@ def approve_claim(
 @router.put("/{claim_id}/reject", response_model=ClaimResponse)
 def reject_claim(
     claim_id: int,
+    reject_data: ClaimRejectRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(
         require_permission("claims.reject")
     )
 ):
-    claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    claim = (
+        db.query(Claim)
+        .filter(Claim.id == claim_id)
+        .with_for_update()
+        .first()
+    )
     
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
@@ -207,7 +265,41 @@ def reject_claim(
         transitions=THERAPIST_CLAIM_STATUS_TRANSITIONS,
     )
 
+    prior_status = claim.status
+    travels = (
+        db.query(TravelEntry)
+        .filter(TravelEntry.claim_id == claim.id)
+        .with_for_update()
+        .all()
+    )
+    for travel in travels:
+        travel.claim_id = None
+        travel.status = "draft"
+
     claim.status = "rejected"
+    claim.rejection_reason = reject_data.rejection_reason
+    claim.reviewed_at = datetime.now(timezone.utc)
+    claim.reviewed_by = current_user.id
+    record_domain_audit_event(
+        db,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        domain="financial",
+        entity_type="therapist_claim",
+        entity_id=claim.id,
+        action="changes_requested",
+        business_date=claim.claim_date,
+        from_state=prior_status,
+        to_state="rejected",
+        reason_code="review_changes_requested",
+        reason=reject_data.rejection_reason,
+        related_entity_type="therapist",
+        related_entity_id=claim.therapist_id,
+        details={
+            "revision": int(claim.revision or 1),
+            "released_record_count": len(travels),
+        },
+    )
     db.commit()
     db.refresh(claim)
     background_tasks.add_task(
@@ -347,6 +439,10 @@ def get_claim_details(
         "status": claim.status,
         "notes": claim.remarks,
         "patient_count": len(travels),
+        "rejection_reason": claim.rejection_reason,
+        "reviewed_at": claim.reviewed_at,
+        "reviewed_by": claim.reviewed_by,
+        "revision": claim.revision,
     },
 
     "travels": [
@@ -469,7 +565,7 @@ def create_auto_travel_claim(db, schedule, therapist):
         .filter(
             TreatmentSchedule.therapist_id == therapist.id,
             TreatmentSchedule.status == "completed",
-            TreatmentSchedule.treatment_date == date.today(),
+            TreatmentSchedule.treatment_date == india_now().date(),
             TreatmentSchedule.id != schedule.id
         )
         .order_by(TreatmentSchedule.completed_at.desc())
@@ -481,10 +577,10 @@ def create_auto_travel_claim(db, schedule, therapist):
     claim = Claim(
         therapist_id=therapist.id,
         schedule_id=schedule.id,
-        claim_date=date.today(),
+        claim_date=india_now().date(),
         from_address=from_address,
         to_address=to_address,
-        patient_visited_today=schedule.patient_name,
+        patient_visited_today=True,
         total_km=0,
         travel_total=0,
         grand_total=0,

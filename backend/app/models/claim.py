@@ -4,9 +4,10 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
-    Float,
+    JSON,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     UniqueConstraint,
 )
@@ -29,16 +30,28 @@ class Claim(Base):
     id = Column(Integer, primary_key=True, index=True)
     therapist_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     claim_date = Column(Date, nullable=False)
-    total_km = Column(Float, default=0)
-    travel_total = Column(Float, default=0)
-    daily_allowance = Column(Float, default=0)
-    grand_total = Column(Float, default=0)
-    patient_visited_today = Column(String, nullable=True)
+    total_km = Column(Numeric(12, 2), default=0)
+    travel_total = Column(Numeric(12, 2), default=0)
+    daily_allowance = Column(Numeric(12, 2), default=0)
+    grand_total = Column(Numeric(12, 2), default=0)
+    patient_visited_today = Column(Boolean, nullable=True)
     status = Column(String, default="pending")
     remarks = Column(String, nullable=True)  # e.g., 'draft', 'approved', 'rejected'
+    rejection_reason = Column(String, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    revision = Column(Integer, nullable=False, default=1, server_default="1")
     submitted_at = Column(DateTime(timezone=True), server_default=func.now())
-    therapist = relationship("User", back_populates="claims")
-    per_km_rate = Column(Float, default=0)  # New field for per km fare
+    therapist = relationship(
+        "User",
+        back_populates="claims",
+        foreign_keys=[therapist_id],
+    )
+    per_km_rate = Column(Numeric(12, 2), default=0)
+    policy_id = Column(Integer, ForeignKey("reimbursement_policies.id"), nullable=True)
+    calculation_version = Column(String, nullable=False, default="decimal-v1")
+    rounding_mode = Column(String, nullable=False, default="ROUND_HALF_UP")
+    included_travel_ids = Column(JSON, nullable=True)
 
     schedule_id = Column(Integer, ForeignKey("treatment_schedules.id"), nullable=True)
 
@@ -47,5 +60,5 @@ class Claim(Base):
     auto_generated = Column(Boolean, default=False) 
     source_type = Column(String, default="manual")  # 'manual' or 'auto'
 
-    distance_km = Column(Float, default=0)
+    distance_km = Column(Numeric(12, 2), default=0)
     distance_source = Column(String, default="manual")

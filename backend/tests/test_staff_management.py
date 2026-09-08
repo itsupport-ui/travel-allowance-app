@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.models.claim import Claim
 from app.models.doctor import Doctor
+from app.models.domain_audit_event import DomainAuditEvent
 from app.models.push_token import PushToken
 from app.models.settings import Settings
 from app.models.therapist_workday import TherapistWorkDay
@@ -17,6 +18,7 @@ from app.models.travel import TravelEntry
 from app.models.user import User
 from app.routers.doctors import router as doctors_router
 from app.routers.user import router as users_router
+from app.routers.auth import router as auth_router
 from app.utils.auth import get_current_user
 
 
@@ -79,6 +81,7 @@ class StaffManagementTests(unittest.TestCase):
 
         self.current_user = self.admin
         app = FastAPI()
+        app.include_router(auth_router)
         app.include_router(users_router)
         app.include_router(doctors_router)
         app.dependency_overrides[get_db] = lambda: self.db
@@ -122,6 +125,7 @@ class StaffManagementTests(unittest.TestCase):
                 "username": "Updated Therapist",
                 "email": "updated@example.com",
                 "is_active": False,
+                "deactivation_reason": "Employment access has ended.",
             },
         )
 
@@ -129,6 +133,17 @@ class StaffManagementTests(unittest.TestCase):
         self.assertEqual(response.json()["username"], "Updated Therapist")
         self.assertFalse(response.json()["is_active"])
         self.assertEqual(self.therapist.password_hash, "existing-hash")
+        event = self.db.query(DomainAuditEvent).one()
+        self.assertEqual(event.domain, "administration")
+        self.assertEqual(event.entity_type, "staff_user")
+        self.assertEqual(event.action, "deactivated")
+        self.assertEqual(event.from_state, "active")
+        self.assertEqual(event.to_state, "inactive")
+        self.assertEqual(
+            event.details["changed_fields"],
+            ["username", "email", "is_active"],
+        )
+        self.assertNotIn("email", event.details)
 
     def test_admin_updates_doctor_profile(self):
         response = self.client.put(
@@ -139,12 +154,63 @@ class StaffManagementTests(unittest.TestCase):
                 "specialization": "Orthopedics",
                 "phone": "9876543210",
                 "active": False,
+                "deactivation_reason": "Clinical assignment has ended.",
             },
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["name"], "Updated Doctor")
         self.assertFalse(response.json()["active"])
+        self.assertFalse(self.doctor_user.is_active)
+        event = self.db.query(DomainAuditEvent).one()
+        self.assertEqual(event.entity_type, "doctor_profile")
+        self.assertEqual(event.action, "deactivated")
+        self.assertEqual(event.related_entity_id, str(self.doctor_user.id))
+        self.assertNotIn("phone", event.details)
+
+    def test_staff_creation_records_privacy_safe_audit_events(self):
+        therapist_response = self.client.post(
+            "/auth/register",
+            json={
+                "username": "New Therapist",
+                "email": "new-therapist@example.com",
+                "password": "secure-pass-123",
+                "role": "therapist",
+            },
+        )
+        doctor_user_response = self.client.post(
+            "/users/doctors",
+            json={
+                "username": "New Doctor User",
+                "email": "new-doctor@example.com",
+                "password": "secure-pass-123",
+            },
+        )
+        doctor_response = self.client.post(
+            "/doctors/",
+            json={
+                "user_id": doctor_user_response.json()["id"],
+                "name": "New Doctor",
+                "specialization": "General",
+                "phone": "9999999999",
+            },
+        )
+
+        self.assertEqual(therapist_response.status_code, 200, therapist_response.text)
+        self.assertEqual(doctor_user_response.status_code, 201, doctor_user_response.text)
+        self.assertEqual(doctor_response.status_code, 200, doctor_response.text)
+        events = self.db.query(DomainAuditEvent).order_by(DomainAuditEvent.id).all()
+        self.assertEqual(
+            [(event.entity_type, event.action) for event in events],
+            [
+                ("staff_user", "created"),
+                ("staff_user", "created"),
+                ("doctor_profile", "created"),
+            ],
+        )
+        serialized_details = " ".join(str(event.details) for event in events)
+        self.assertNotIn("new-therapist@example.com", serialized_details)
+        self.assertNotIn("9999999999", serialized_details)
 
     def test_therapist_cannot_manage_staff_profiles(self):
         self.current_user = self.therapist

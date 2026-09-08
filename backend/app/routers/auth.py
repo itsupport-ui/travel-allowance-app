@@ -14,6 +14,7 @@ from app.utils.auth import (
     verify_password,
 )
 from app.utils.permissions import get_role_permissions
+from app.services.domain_audit_service import record_domain_audit_event
 from jose import JWTError, jwt  
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.security import OAuth2PasswordBearer
@@ -60,6 +61,21 @@ def register(
         role=requested_role,
     )
     db.add(user)
+    db.flush()
+    record_domain_audit_event(
+        db,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        domain="administration",
+        entity_type="staff_user",
+        entity_id=user.id,
+        action="created",
+        from_state=None,
+        to_state="active",
+        related_entity_type="staff_role",
+        related_entity_id=requested_role,
+        details={"role": requested_role},
+    )
     db.commit()
     db.refresh(user)
     return user

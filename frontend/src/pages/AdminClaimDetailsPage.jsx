@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import AdminLayout from "../layouts/AdminLayout";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 import { getClaimDetails, approveClaim, rejectClaim } from "../services/claimService";
 import { openTravelInvoice } from "../services/travelService";
 import { exportClaimDetailPdf } from "../utils/pdfExport";
@@ -11,6 +12,9 @@ function AdminClaimDetailsPage() {
   const navigate = useNavigate();
   const [claim, setClaim] = useState(null);
   const [travels, setTravels] = useState([]);
+  const [decision, setDecision] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const fetchDetails = async () => {
@@ -37,6 +41,7 @@ function AdminClaimDetailsPage() {
   };
 
   const handleApprove = async () => {
+    setSaving(true);
     try {
       const token = localStorage.getItem("token");
       await approveClaim(claimId, token);
@@ -44,17 +49,22 @@ function AdminClaimDetailsPage() {
       navigate("/admin/pending-claims");
     } catch {
       toast.error("Approval failed");
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleReject = async () => {
+    setSaving(true);
     try {
       const token = localStorage.getItem("token");
-      await rejectClaim(claimId, token);
+      await rejectClaim(claimId, token, rejectionReason.trim());
       toast.success("Claim rejected");
       navigate("/admin/pending-claims");
     } catch {
       toast.error("Reject failed");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -241,13 +251,13 @@ function AdminClaimDetailsPage() {
         {claim.status === "pending" && (
           <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 mt-8 pt-4 border-t border-gray-100">
             <button
-              onClick={handleReject}
+              onClick={() => setDecision("reject")}
               className="w-full sm:w-32 bg-white border border-red-200 hover:bg-red-50 text-red-600 px-5 py-2.5 rounded-xl font-semibold transition text-sm shadow-sm"
             >
               Reject Claim
             </button>
             <button
-              onClick={handleApprove}
+              onClick={() => setDecision("approve")}
               className="w-full sm:w-32 bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl font-semibold transition text-sm shadow-sm"
             >
               Approve
@@ -256,6 +266,40 @@ function AdminClaimDetailsPage() {
         )}
 
       </div>
+      <ConfirmDialog
+        open={Boolean(decision)}
+        title={decision === "approve" ? "Approve claim?" : "Request correction?"}
+        message={
+          decision === "approve"
+            ? "This confirms the submitted evidence and reimbursement total."
+            : "The therapist will see this reason and can correct and resubmit the same claim."
+        }
+        confirmLabel={decision === "approve" ? "Approve claim" : "Request correction"}
+        destructive={decision === "reject"}
+        busy={saving}
+        confirmDisabled={decision === "reject" && !rejectionReason.trim()}
+        onClose={() => {
+          setDecision(null);
+          setRejectionReason("");
+        }}
+        onConfirm={decision === "approve" ? handleApprove : handleReject}
+      >
+        {decision === "reject" && (
+          <label className="mt-4 block text-sm font-semibold text-slate-700">
+            What must the therapist correct?
+            <textarea
+              autoFocus
+              required
+              maxLength={500}
+              rows={4}
+              value={rejectionReason}
+              onChange={(event) => setRejectionReason(event.target.value)}
+              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100"
+              placeholder="Give a specific, actionable reason"
+            />
+          </label>
+        )}
+      </ConfirmDialog>
     </AdminLayout>
   );
 }

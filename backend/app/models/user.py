@@ -15,8 +15,16 @@ class User(Base):
     role = Column(String, nullable=False)  # e.g., 'employee', 'manager'
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    travel_entries = relationship("TravelEntry", back_populates="therapist")
-    claims = relationship("Claim", back_populates="therapist")
+    travel_entries = relationship(
+        "TravelEntry",
+        back_populates="therapist",
+        foreign_keys="TravelEntry.therapist_id",
+    )
+    claims = relationship(
+        "Claim",
+        back_populates="therapist",
+        foreign_keys="Claim.therapist_id",
+    )
     push_tokens = relationship(
         "PushToken",
         back_populates="user",

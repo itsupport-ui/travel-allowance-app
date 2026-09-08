@@ -14,6 +14,7 @@ from app.database import Base
 from app.models.claim import Claim
 from app.models.doctor import Doctor
 from app.models.push_token import PushToken
+from app.models.reimbursement_policy import ReimbursementPolicy
 from app.models.settings import Settings
 from app.models.therapist_workday import TherapistWorkDay
 from app.models.treatment_schedule import TreatmentSchedule
@@ -51,8 +52,19 @@ class AutoTravelEntryTests(unittest.TestCase):
             is_active=True,
         )
         self.settings = Settings(per_km_rate=8, daily_allowance=150)
+        self.policy = ReimbursementPolicy(
+            version=1,
+            effective_from=date(1970, 1, 1),
+            per_km_rate=8,
+            daily_allowance=150,
+        )
         self.db.add_all(
-            [self.therapist, self.doctor_user, self.settings]
+            [
+                self.therapist,
+                self.doctor_user,
+                self.settings,
+                self.policy,
+            ]
         )
         self.db.flush()
         self.doctor = Doctor(

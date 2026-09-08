@@ -39,6 +39,13 @@ import {
   getLocalIsoDate,
   parsePositiveId,
 } from "../../src/utils/doctorWorkflow";
+import {
+  buildFormDraftKey,
+  loadFormDraft,
+  removeFormDraft,
+  saveFormDraft,
+} from "../../src/utils/formDraftStorage";
+import { getStoredUser } from "../../src/utils/storage";
 
 const MAX_PROOF_BYTES = 5 * 1024 * 1024;
 const transportModes = [
@@ -50,6 +57,47 @@ const transportModes = [
   { label: "Other", value: "other" },
 ] as const;
 type TransportMode = (typeof transportModes)[number]["value"] | "";
+type EntryMode = "manual" | "visit";
+const expenseCategories = [
+  { label: "Mileage", value: "mileage" },
+  { label: "Public transport", value: "public_transport" },
+  { label: "Toll / parking", value: "toll_parking" },
+  { label: "Authorized other", value: "authorized_other" },
+] as const;
+type ExpenseCategory = (typeof expenseCategories)[number]["value"];
+
+interface DoctorExpenseFormDraft {
+  expenseDate: string;
+  fare: string;
+  remarks: string;
+  transportMode: TransportMode;
+  visitId: number | null;
+  entryMode: EntryMode;
+  expenseCategory: ExpenseCategory;
+  fromLocation: string;
+  toLocation: string;
+  manualReason: string;
+}
+
+const isDoctorExpenseFormDraft = (
+  value: unknown
+): value is DoctorExpenseFormDraft => {
+  if (typeof value !== "object" || value === null) return false;
+  const draft = value as Partial<DoctorExpenseFormDraft>;
+  return (
+    typeof draft.expenseDate === "string" &&
+    typeof draft.fare === "string" &&
+    typeof draft.remarks === "string" &&
+    (draft.visitId === null || typeof draft.visitId === "number") &&
+    (draft.entryMode === "visit" || draft.entryMode === "manual") &&
+    expenseCategories.some((category) => category.value === draft.expenseCategory) &&
+    typeof draft.fromLocation === "string" &&
+    typeof draft.toLocation === "string" &&
+    typeof draft.manualReason === "string" &&
+    (draft.transportMode === "" ||
+      transportModes.some((mode) => mode.value === draft.transportMode))
+  );
+};
 
 const inferMimeType = (name: string, mimeType?: string): string => {
   if (mimeType) return mimeType;
@@ -116,13 +164,23 @@ export default function DoctorExpenseFormScreen() {
   const queryClient = useQueryClient();
   const submittingRef = useRef(false);
   const initializedRef = useRef(false);
+  const [draftKey, setDraftKey] = useState<string | null>(null);
+  const [draftReady, setDraftReady] = useState(editing);
+  const [draftNotice, setDraftNotice] = useState<"restored" | "saved" | null>(
+    null
+  );
   const [expenseDate, setExpenseDate] = useState(getLocalIsoDate());
+  const [entryMode, setEntryMode] = useState<EntryMode>("visit");
+  const [expenseCategory, setExpenseCategory] =
+    useState<ExpenseCategory>("public_transport");
   const [fare, setFare] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [fromLocation, setFromLocation] = useState("");
   const [proofFile, setProofFile] =
     useState<DoctorProofAsset | null>(null);
   const [remarks, setRemarks] = useState("");
+  const [manualReason, setManualReason] = useState("");
+  const [correctionReason, setCorrectionReason] = useState("");
   const [toLocation, setToLocation] = useState("");
   const [visitId, setVisitId] = useState<number | null>(null);
   const [transportMode, setTransportMode] =
@@ -136,7 +194,7 @@ export default function DoctorExpenseFormScreen() {
     ? expensesQuery.data?.find((item) => item.id === expenseId)
     : undefined;
   const visitOptionsQuery = useQuery({
-    enabled: !editing,
+    enabled: !editing && entryMode === "visit",
     queryFn: getTodayCompletedDoctorVisits,
     queryKey: queryKeys.doctor.visits.completedToday,
   });
@@ -155,15 +213,159 @@ export default function DoctorExpenseFormScreen() {
   );
 
   useEffect(() => {
+    if (editing) return;
+    let active = true;
+
+    const initializeDraft = async () => {
+      const user = await getStoredUser();
+      if (!active) return;
+      if (!user) {
+        setDraftReady(true);
+        return;
+      }
+
+      const key = buildFormDraftKey(user.id, "doctor-expense-create");
+      setDraftKey(key);
+      let stored;
+      try {
+        stored = await loadFormDraft<DoctorExpenseFormDraft>(key);
+      } catch {
+        setDraftReady(true);
+        return;
+      }
+      if (!active) return;
+      if (!stored || !isDoctorExpenseFormDraft(stored.data)) {
+        if (stored) await removeFormDraft(key);
+        setDraftReady(true);
+        return;
+      }
+
+      Alert.alert(
+        "Restore expense draft?",
+        `A draft from ${new Date(stored.savedAt).toLocaleString()} is available. Receipt files are not stored and must be attached again.`,
+        [
+          {
+            onPress: () => {
+              void removeFormDraft(key);
+              setDraftReady(true);
+            },
+            style: "destructive",
+            text: "Discard",
+          },
+          {
+            onPress: () => {
+              setExpenseDate(stored.data.expenseDate);
+              setEntryMode(stored.data.entryMode);
+              setExpenseCategory(stored.data.expenseCategory);
+              setFare(stored.data.fare);
+              setFromLocation(stored.data.fromLocation);
+              setToLocation(stored.data.toLocation);
+              setManualReason(stored.data.manualReason);
+              setRemarks(stored.data.remarks);
+              setTransportMode(stored.data.transportMode);
+              setVisitId(stored.data.visitId);
+              setDraftNotice("restored");
+              setDraftReady(true);
+            },
+            text: "Restore",
+          },
+        ],
+        { cancelable: false }
+      );
+    };
+
+    void initializeDraft();
+    return () => {
+      active = false;
+    };
+  }, [editing]);
+
+  useEffect(() => {
+    if (editing || !draftReady || !draftKey) return undefined;
+    const timeout = setTimeout(() => {
+      const hasDraftData =
+        visitId !== null ||
+        entryMode === "manual" ||
+        Boolean(transportMode) ||
+        Boolean(fare.trim()) ||
+        Boolean(remarks.trim());
+      if (!hasDraftData) {
+        void removeFormDraft(draftKey);
+        setDraftNotice(null);
+        return;
+      }
+
+      void saveFormDraft<DoctorExpenseFormDraft>(draftKey, {
+        expenseDate,
+        entryMode,
+        expenseCategory,
+        fare,
+        fromLocation,
+        toLocation,
+        manualReason,
+        remarks,
+        transportMode,
+        visitId,
+      })
+        .then(() => setDraftNotice("saved"))
+        .catch(() => setDraftNotice(null));
+    }, 700);
+
+    return () => clearTimeout(timeout);
+  }, [
+    draftKey,
+    draftReady,
+    editing,
+    entryMode,
+    expenseDate,
+    expenseCategory,
+    fare,
+    fromLocation,
+    manualReason,
+    remarks,
+    transportMode,
+    toLocation,
+    visitId,
+  ]);
+
+  useEffect(() => {
+    if (
+      editing ||
+      !draftReady ||
+      visitOptionsQuery.isPending ||
+      !visitOptionsQuery.data ||
+      visitId === null
+    ) {
+      return;
+    }
+    if (!availableVisits.some((option) => option.visit_id === visitId)) {
+      setVisitId(null);
+      setFormError("The visit saved in this draft is no longer available. Select another completed visit.");
+    }
+  }, [
+    availableVisits,
+    draftReady,
+    editing,
+    visitId,
+    visitOptionsQuery.data,
+    visitOptionsQuery.isPending,
+  ]);
+
+  useEffect(() => {
     if (!expense || initializedRef.current) {
       return;
     }
 
     initializedRef.current = true;
     setExpenseDate(expense.expense_date);
+    setEntryMode(expense.visit_id === null ? "manual" : "visit");
+    setExpenseCategory(
+      expense.expense_category as ExpenseCategory
+    );
     setFare(String(expense.fare));
     setFromLocation(expense.from_location);
     setRemarks(expense.remarks ?? "");
+    setManualReason(expense.manual_reason ?? "");
     setToLocation(expense.to_location);
     setVisitId(expense.visit_id);
     setTransportMode(expense.transport_mode as TransportMode);
@@ -173,19 +375,39 @@ export default function DoctorExpenseFormScreen() {
     mutationFn: async () => {
       const request = {
         expense_date: expenseDate.trim(),
-        fare: Number(fare),
+        expense_category: expenseCategory,
+        fare: expenseCategory === "mileage" ? null : Number(fare),
         from_location:
-          editing && expense?.visit_id === null
+          (editing && expense?.visit_id === null) ||
+          (!editing && entryMode === "manual")
             ? fromLocation.trim()
+            : undefined,
+        manual_reason:
+          (editing && expense?.visit_id === null) ||
+          (!editing && entryMode === "manual")
+            ? manualReason.trim()
+            : undefined,
+        correction_reason:
+          editing && expense?.visit_id === null
+            ? correctionReason.trim()
             : undefined,
         proof_file: proofFile,
         remarks: remarks.trim(),
         to_location:
-          editing && expense?.visit_id === null
+          (editing && expense?.visit_id === null) ||
+          (!editing && entryMode === "manual")
             ? toLocation.trim()
             : undefined,
         transport_mode: transportMode,
-        visit_id: editing ? (expense?.visit_id ?? null) : visitId,
+        version:
+          editing && expense?.visit_id === null
+            ? expense.manual_review_version
+            : undefined,
+        visit_id: editing
+          ? (expense?.visit_id ?? null)
+          : entryMode === "visit"
+            ? visitId
+            : null,
       };
 
       if (editing) {
@@ -209,6 +431,9 @@ export default function DoctorExpenseFormScreen() {
       );
     },
     onSuccess: async () => {
+      if (draftKey) {
+        await removeFormDraft(draftKey);
+      }
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: queryKeys.doctor.expenses.all,
@@ -220,8 +445,12 @@ export default function DoctorExpenseFormScreen() {
       Alert.alert(
         editing ? "Expense Updated" : "Expense Added",
         editing
-          ? "The draft expense was updated."
-          : "The expense was saved as a draft.",
+          ? expense?.visit_id === null
+            ? "The corrected expense was resubmitted for review."
+            : "The draft expense was updated."
+          : entryMode === "manual"
+            ? "The manual expense was submitted for approval."
+            : "The expense was saved as a draft.",
         [
           {
             onPress: () =>
@@ -276,16 +505,48 @@ export default function DoctorExpenseFormScreen() {
       setFormError("Select a valid expense date.");
       return;
     }
-    if (!editing && visitId === null) {
+    if (!editing && entryMode === "visit" && visitId === null) {
       setFormError("Select a completed patient visit.");
+      return;
+    }
+    if (
+      ((editing && expense?.visit_id === null) ||
+        (!editing && entryMode === "manual")) &&
+      (!fromLocation.trim() || !toLocation.trim())
+    ) {
+      setFormError("From and to locations are required.");
+      return;
+    }
+    if (
+      !editing &&
+      entryMode === "manual" &&
+      expenseCategory === "mileage"
+    ) {
+      setFormError("Mileage requires a completed visit with a verified route.");
+      return;
+    }
+    if (
+      ((editing && expense?.visit_id === null) ||
+        (!editing && entryMode === "manual")) &&
+      manualReason.trim().length < 10
+    ) {
+      setFormError("Explain the manual expense in at least 10 characters.");
+      return;
+    }
+    if (
+      !editing &&
+      entryMode === "manual" &&
+      proofFile === null
+    ) {
+      setFormError("Attach a receipt for a manual expense.");
       return;
     }
     if (
       editing &&
       expense?.visit_id === null &&
-      (!fromLocation.trim() || !toLocation.trim())
+      correctionReason.trim().length < 5
     ) {
-      setFormError("From and to locations are required.");
+      setFormError("Explain the correction in at least 5 characters.");
       return;
     }
     if (!transportMode) {
@@ -294,7 +555,10 @@ export default function DoctorExpenseFormScreen() {
     }
 
     const amount = Number(fare);
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if (
+      expenseCategory !== "mileage" &&
+      (!Number.isFinite(amount) || amount <= 0)
+    ) {
       setFormError("Enter an actual fare greater than zero.");
       return;
     }
@@ -302,6 +566,34 @@ export default function DoctorExpenseFormScreen() {
     setFormError(null);
     submittingRef.current = true;
     mutation.mutate();
+  };
+  const discardLocalDraft = () => {
+    Alert.alert(
+      "Discard local draft?",
+      "This clears the unsaved visit, fare, transport mode, and remarks from this device.",
+      [
+        { style: "cancel", text: "Keep Draft" },
+        {
+          onPress: () => {
+            if (draftKey) void removeFormDraft(draftKey);
+            setExpenseDate(getLocalIsoDate());
+            setEntryMode("visit");
+            setExpenseCategory("public_transport");
+            setFare("");
+            setFormError(null);
+            setProofFile(null);
+            setRemarks("");
+            setManualReason("");
+            setCorrectionReason("");
+            setTransportMode("");
+            setVisitId(null);
+            setDraftNotice(null);
+          },
+          style: "destructive",
+          text: "Discard",
+        },
+      ]
+    );
   };
 
   if (editing && expensesQuery.isPending && !expensesQuery.data) {
@@ -351,7 +643,11 @@ export default function DoctorExpenseFormScreen() {
   if (
     editing &&
     expense &&
-    (expense.status !== "draft" || expense.claim_id !== null)
+    !(
+      expense.visit_id !== null
+        ? expense.status === "draft" && expense.claim_id === null
+        : expense.available_actions.includes("edit")
+    )
   ) {
     return (
       <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
@@ -375,7 +671,56 @@ export default function DoctorExpenseFormScreen() {
         <FormScrollView
           contentContainerStyle={styles.content}
         >
-          {editing ? (
+          {!editing && draftNotice ? (
+            <View style={styles.draftNotice}>
+              <View style={styles.draftTextContainer}>
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={styles.draftTitle}
+                >
+                  {draftNotice === "restored"
+                    ? "Draft restored"
+                    : "Draft saved on this device"}
+                </Text>
+                <Text style={styles.draftText}>
+                  Receipt files are never stored in the local draft.
+                </Text>
+              </View>
+              <TouchableOpacity
+                accessibilityLabel="Discard local expense draft"
+                accessibilityRole="button"
+                onPress={discardLocalDraft}
+              >
+                <Text style={styles.discardDraft}>Discard</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {!editing ? (
+            <>
+              <Text style={styles.sectionLabel}>Expense source *</Text>
+              <DoctorChoiceChips
+                onChange={(value) => {
+                  setEntryMode(value);
+                  setVisitId(null);
+                  setFromLocation("");
+                  setToLocation("");
+                  setExpenseCategory("public_transport");
+                  setFormError(null);
+                }}
+                options={[
+                  { label: "Completed visit", value: "visit" },
+                  { label: "Manual exception", value: "manual" },
+                ]}
+                value={entryMode}
+              />
+              {entryMode === "manual" ? (
+                <Text style={styles.manualHelp}>
+                  Use only when a completed visit cannot provide the route. A reason and receipt are required; approval is required before claiming.
+                </Text>
+              ) : null}
+            </>
+          ) : null}
+          {editing || entryMode === "manual" ? (
             <AppDatePickerField
               error={
                 formError === "Select a valid expense date."
@@ -398,7 +743,7 @@ export default function DoctorExpenseFormScreen() {
             />
           )}
 
-          {!editing ? (
+          {!editing && entryMode === "visit" ? (
             <>
               <Text style={styles.sectionLabel}>
                 Completed patient visit *
@@ -443,7 +788,10 @@ export default function DoctorExpenseFormScreen() {
           ) : null}
 
           <DoctorField
-            editable={editing && expense?.visit_id === null}
+            editable={
+              (editing && expense?.visit_id === null) ||
+              (!editing && entryMode === "manual")
+            }
             error={
               formError === "From and to locations are required."
                 ? formError
@@ -454,7 +802,10 @@ export default function DoctorExpenseFormScreen() {
             onChangeText={setFromLocation}
           />
           <DoctorField
-            editable={editing && expense?.visit_id === null}
+            editable={
+              (editing && expense?.visit_id === null) ||
+              (!editing && entryMode === "manual")
+            }
             label="Travel to"
             value={selectedVisit?.to_location ?? toLocation}
             onChangeText={setToLocation}
@@ -471,6 +822,23 @@ export default function DoctorExpenseFormScreen() {
             }
           />
 
+          <Text style={styles.sectionLabel}>Expense category *</Text>
+          <DoctorChoiceChips
+            onChange={(value) => {
+              setExpenseCategory(value);
+              if (value === "mileage") setTransportMode("car");
+              setFormError(null);
+            }}
+            options={expenseCategories.filter(
+              (category) =>
+                entryMode === "visit" || category.value !== "mileage"
+            )}
+            value={expenseCategory}
+          />
+          {formError === "Mileage requires a completed visit with a verified route." ? (
+            <Text style={styles.choiceError}>{formError}</Text>
+          ) : null}
+
           <Text style={styles.sectionLabel}>Transport mode *</Text>
           <DoctorChoiceChips
             onChange={(value) => {
@@ -484,22 +852,34 @@ export default function DoctorExpenseFormScreen() {
             <Text style={styles.choiceError}>{formError}</Text>
           ) : null}
 
-          <DoctorField
-            error={
-              formError === "Enter an actual fare greater than zero."
-                ? formError
-                : null
-            }
-            keyboardType="decimal-pad"
-            label="Actual fare"
-            placeholder="0.00"
-            required
-            value={fare}
-            onChangeText={(value) => {
-              setFare(value);
-              setFormError(null);
-            }}
-          />
+          {expenseCategory === "mileage" ? (
+            <DoctorField
+              editable={false}
+              label="Calculated reimbursement"
+              value={
+                expense?.rate_applied && expense.distance_km
+                  ? `${expense.distance_km.toFixed(2)} km × INR ${expense.rate_applied.toFixed(2)} = INR ${expense.fare.toFixed(2)}`
+                  : "Calculated from verified distance and active policy"
+              }
+            />
+          ) : (
+            <DoctorField
+              error={
+                formError === "Enter an actual fare greater than zero."
+                  ? formError
+                  : null
+              }
+              keyboardType="decimal-pad"
+              label="Actual fare"
+              placeholder="0.00"
+              required
+              value={fare}
+              onChangeText={(value) => {
+                setFare(value);
+                setFormError(null);
+              }}
+            />
+          )}
 
           <Text style={styles.sectionLabel}>Receipt (optional)</Text>
           <TouchableOpacity
@@ -533,6 +913,45 @@ export default function DoctorExpenseFormScreen() {
           {formError === "Receipt files must be 5 MB or smaller." ? (
             <Text style={styles.choiceError}>{formError}</Text>
           ) : null}
+          {formError === "Attach a receipt for a manual expense." ? (
+            <Text style={styles.choiceError}>{formError}</Text>
+          ) : null}
+
+          {entryMode === "manual" ? (
+            <DoctorField
+              error={
+                formError === "Explain the manual expense in at least 10 characters."
+                  ? formError
+                  : null
+              }
+              label="Why is this manual?"
+              multiline
+              required
+              value={manualReason}
+              onChangeText={(value) => {
+                setManualReason(value);
+                setFormError(null);
+              }}
+            />
+          ) : null}
+
+          {editing && expense?.visit_id === null ? (
+            <DoctorField
+              error={
+                formError === "Explain the correction in at least 5 characters."
+                  ? formError
+                  : null
+              }
+              label="Correction summary"
+              multiline
+              required
+              value={correctionReason}
+              onChangeText={(value) => {
+                setCorrectionReason(value);
+                setFormError(null);
+              }}
+            />
+          ) : null}
 
           <DoctorField
             label="Remarks"
@@ -542,10 +961,13 @@ export default function DoctorExpenseFormScreen() {
           />
 
           <View style={styles.notice}>
-            <Text style={styles.noticeTitle}>Route verified</Text>
+            <Text style={styles.noticeTitle}>
+              {entryMode === "visit" ? "Route verified" : "Manual exception review"}
+            </Text>
             <Text style={styles.noticeText}>
-              Locations and distance come from attendance and patient
-              visit GPS. Enter only the actual fare paid.
+              {entryMode === "visit"
+                ? "Locations and distance come from attendance and patient visit GPS. Mileage is calculated by the server; actual-fare categories use the amount entered."
+                : "Typed routes are weaker evidence, so this expense cannot enter a claim until an administrator approves it."}
             </Text>
           </View>
 
@@ -554,16 +976,16 @@ export default function DoctorExpenseFormScreen() {
             accessibilityState={{
               disabled:
                 mutation.isPending ||
-                (!editing && availableVisits.length === 0),
+                (!editing && entryMode === "visit" && availableVisits.length === 0),
             }}
             disabled={
               mutation.isPending ||
-              (!editing && availableVisits.length === 0)
+              (!editing && entryMode === "visit" && availableVisits.length === 0)
             }
             style={[
               styles.submitButton,
               (mutation.isPending ||
-                (!editing && availableVisits.length === 0)) &&
+                (!editing && entryMode === "visit" && availableVisits.length === 0)) &&
                 styles.disabledButton,
             ]}
             onPress={submit}
@@ -597,12 +1019,51 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     paddingBottom: spacing.sectionLg,
   },
+  draftNotice: {
+    alignItems: "center",
+    backgroundColor: colors.primarySurface,
+    borderColor: colors.primaryBorder,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    marginBottom: spacing.xl,
+    padding: spacing.lg,
+  },
+  draftTextContainer: {
+    flex: 1,
+  },
+  draftTitle: {
+    color: colors.primaryDark,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  draftText: {
+    color: colors.textMutedDark,
+    fontSize: typography.size.small,
+    marginTop: spacing.xs,
+  },
+  discardDraft: {
+    color: colors.danger,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.extrabold,
+  },
   sectionLabel: {
     color: colors.textMutedDark,
     fontSize: typography.size.small,
     fontWeight: typography.weight.extrabold,
     marginBottom: spacing.sm,
     textTransform: "uppercase",
+  },
+  manualHelp: {
+    backgroundColor: colors.warningSurface,
+    borderRadius: radius.control,
+    color: colors.warningDark,
+    fontSize: typography.size.small,
+    lineHeight: typography.lineHeight.smallRelaxed,
+    marginBottom: spacing.xl,
+    marginTop: spacing.sm,
+    padding: spacing.lg,
   },
   choiceError: {
     color: colors.danger,

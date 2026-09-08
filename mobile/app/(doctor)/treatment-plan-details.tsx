@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -34,7 +35,7 @@ const getApprovalMessage = (status: string): string => {
   }
 
   if (status === "rejected") {
-    return "Rejected by admin. This submitted plan is read-only.";
+    return "Changes were requested. Review the reason, correct the plan, and resubmit it.";
   }
 
   if (status === "submitted" || status === "pending") {
@@ -133,6 +134,29 @@ export default function DoctorTreatmentPlanDetailsScreen() {
             <Text style={styles.approvalText}>
               {getApprovalMessage(plan.status)}
             </Text>
+            {plan.available_actions.includes("correct_and_resubmit") ? (
+              <>
+                <Text style={styles.reasonLabel}>What to correct</Text>
+                <Text style={styles.reasonText}>
+                  {plan.rejection_reason ||
+                    "Please review and correct this treatment plan."}
+                </Text>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  style={styles.correctButton}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/(doctor)/treatment-plan-create",
+                      params: { id: String(plan.id) },
+                    })
+                  }
+                >
+                  <Text style={styles.correctButtonText}>
+                    Correct and Resubmit
+                  </Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
           </View>
 
           <View style={styles.detailsCard}>
@@ -272,6 +296,32 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.control,
     paddingHorizontal: spacing.xl,
+  },
+  reasonLabel: {
+    color: colors.danger,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.extrabold,
+    marginTop: spacing.lg,
+    textTransform: "uppercase",
+  },
+  reasonText: {
+    color: colors.textStrong,
+    fontSize: typography.size.bodySmall,
+    lineHeight: typography.lineHeight.bodyRelaxed,
+    marginTop: spacing.xs,
+  },
+  correctButton: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: radius.control,
+    marginTop: spacing.lg,
+    minHeight: 48,
+    justifyContent: "center",
+  },
+  correctButtonText: {
+    color: colors.surface,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
   },
   sectionTitle: {
     color: colors.textPrimary,

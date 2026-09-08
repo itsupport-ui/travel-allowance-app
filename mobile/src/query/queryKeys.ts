@@ -30,6 +30,7 @@ export const queryKeys = {
   claims: {
     all: ["claims"] as const,
     mine: ["claims", "mine"] as const,
+    readiness: ["claims", "readiness"] as const,
     detail: (claimId: number) =>
       ["claims", "detail", claimId] as const,
   },
@@ -103,6 +104,7 @@ export const queryKeys = {
     claims: {
       all: ["doctor", "claims"] as const,
       mine: ["doctor", "claims", "mine"] as const,
+      readiness: ["doctor", "claims", "readiness"] as const,
       detail: (claimId: number) =>
         ["doctor", "claims", "detail", claimId] as const,
     },

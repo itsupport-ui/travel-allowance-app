@@ -2,12 +2,21 @@ from datetime import date
 
 from sqlalchemy import func
 
-from app.models.settings import Settings
 from app.models.therapist_workday import TherapistWorkDay
 from app.models.treatment_schedule import TreatmentSchedule
 from app.models.travel import TravelEntry
 from app.services.maps_service import calculate_distance_km
 from app.services.schedule_location_service import validate_patient_arrival
+from app.services.location_policy_service import get_location_policy
+from app.utils.timezone import india_now
+from app.services.reimbursement_policy_service import (
+    CALCULATION_VERSION,
+    ROUNDING_MODE,
+    decimal_value,
+    distance,
+    get_reimbursement_policy,
+    money,
+)
 from app.utils.uploads import (
     delete_stored_upload,
     store_validated_upload,
@@ -30,6 +39,7 @@ def create_auto_travel_entry(
     transport_mode="vehicle",
     bill_amount=None,
     invoice_file=None,
+    skip_location_validation=False,
 ):
     """Create a travel entry without committing the caller's transaction."""
     selected_transport_mode = (transport_mode or "vehicle").lower()
@@ -60,14 +70,17 @@ def create_auto_travel_entry(
     if arrival_latitude is None or arrival_longitude is None:
         raise ValueError("Current location is required to complete the treatment.")
 
-    validate_patient_arrival(
-        arrival_latitude=arrival_latitude,
-        arrival_longitude=arrival_longitude,
-        patient_latitude=schedule.patient_latitude,
-        patient_longitude=schedule.patient_longitude,
-    )
+    today = india_now().date()
+    if not skip_location_validation:
+        location_policy = get_location_policy(db, today)
+        validate_patient_arrival(
+            arrival_latitude=arrival_latitude,
+            arrival_longitude=arrival_longitude,
+            patient_latitude=schedule.patient_latitude,
+            patient_longitude=schedule.patient_longitude,
+            radius_km=location_policy.geofence_radius_m / 1000,
+        )
 
-    today = date.today()
     previous_schedule = (
         db.query(TreatmentSchedule)
         .filter(
@@ -120,21 +133,21 @@ def create_auto_travel_entry(
             from_latitude = None
             from_longitude = None
 
-    distance_km = calculate_distance_km(
+    distance_km = distance(calculate_distance_km(
         from_address=from_address,
         to_address=schedule.patient_address,
         from_latitude=from_latitude,
         from_longitude=from_longitude,
         to_latitude=schedule.patient_latitude,
         to_longitude=schedule.patient_longitude,
-    )
+    ))
 
-    settings = db.query(Settings).first()
-    per_km_rate = settings.per_km_rate if settings else 3.0
+    policy = get_reimbursement_policy(db, today)
+    per_km_rate = money(policy.per_km_rate)
     travel_fare = (
-        round(distance_km * per_km_rate, 2)
+        money(distance_km * per_km_rate)
         if selected_transport_mode == "vehicle"
-        else float(bill_amount)
+        else money(decimal_value(bill_amount))
     )
     invoice_path = None
 
@@ -153,11 +166,16 @@ def create_auto_travel_entry(
             total_km=distance_km,
             per_km_rate=per_km_rate,
             travel_fare=travel_fare,
+            policy_id=policy.id,
+            calculation_version=CALCULATION_VERSION,
+            rounding_mode=ROUNDING_MODE,
             patient_visited=True,
             patient_name=schedule.patient_name,
             transport_mode=selected_transport_mode,
             bill_amount=(
-                None if selected_transport_mode == "vehicle" else bill_amount
+                None
+                if selected_transport_mode == "vehicle"
+                else money(decimal_value(bill_amount))
             ),
             invoice_file=invoice_path,
             status="draft",

@@ -13,6 +13,7 @@ export const DEFAULT_SCHEDULE_INSTRUCTIONS =
   "Wear face mask and cap during treatment";
 
 export const createInitialScheduleForm = (): ScheduleFormState => ({
+  cadenceDays: 1,
   doctorId: null,
   endDate: null,
   estimatedDurationMinutes: 60,
@@ -89,6 +90,7 @@ export const scheduleResponseToForm = (
       : 60;
 
   return {
+  cadenceDays: 1,
   doctorId: schedule.doctor_id,
   endDate: parseScheduleDate(schedule.end_date),
   estimatedDurationMinutes,
@@ -166,6 +168,13 @@ export const validateScheduleForm = (
       errors.treatmentDate = "Treatment date cannot be in the past.";
     }
   } else {
+    if (
+      !Number.isInteger(form.cadenceDays) ||
+      form.cadenceDays < 1 ||
+      form.cadenceDays > 31
+    ) {
+      errors.cadenceDays = "Days between visits must be from 1 to 31.";
+    }
     if (!form.startDate) {
       errors.startDate = "Start date is required.";
     } else if (
@@ -224,6 +233,7 @@ export const buildCreateScheduleRequest = (
   }
 
   return {
+    cadence_days: form.scheduleType === "recurring" ? form.cadenceDays : 1,
     doctor_id: form.doctorId,
     end_date:
       form.scheduleType === "recurring" && form.endDate

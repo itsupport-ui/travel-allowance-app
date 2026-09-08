@@ -2,34 +2,89 @@ import { useEffect, useState } from "react"
 import TherapistLayout from "../layouts/TherapistLayout"
 import { getTodayTravels } from "../services/travelService"
 import { useNavigate } from "react-router-dom"
-import { submitClaim } from "../services/claimService"
+import {
+  getClaimPreview,
+  submitClaim,
+} from "../services/claimService"
 import toast from "react-hot-toast"
+
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0)
+
+
+const getErrorMessage = (error, fallback) => {
+  const detail = error.response?.data?.detail
+  return typeof detail === "string" ? detail : fallback
+}
 
 function TodayTravelPage() {
   const navigate = useNavigate()
   const [travels, setTravels] = useState([])
+  const [readiness, setReadiness] = useState(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [loadError, setLoadError] = useState("")
+
+  const loadPage = async () => {
+    const token = localStorage.getItem("token")
+    const [travelData, previewData] = await Promise.all([
+      getTodayTravels(token),
+      getClaimPreview(token),
+    ])
+    setTravels(travelData)
+    setReadiness(previewData)
+    setLoadError("")
+  }
 
   useEffect(() => {
-    const fetchTravels = async () => {
-      try {
-        const token = localStorage.getItem("token")
-        const data = await getTodayTravels(token)
-        setTravels(data)
-      } catch {
-        toast.error("Failed to load travel data")
-      }
-    }
-
-    fetchTravels()
+    // Initial API hydration; state changes occur after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadPage()
+      .catch((error) => {
+        const message = getErrorMessage(
+          error,
+          "Unable to load today's travel and claim preview."
+        )
+        setLoadError(message)
+        toast.error(message)
+      })
+      .finally(() => setIsLoading(false))
   }, [])
 
   const handleSubmitClaim = async () => {
+    if (!readiness?.can_submit) {
+      return
+    }
+    const action = readiness.submission_mode === "resubmit"
+      ? "Resubmit"
+      : "Submit"
+    const shouldSubmit = window.confirm(
+      `${action} ${readiness.eligible_record_count} travel ${
+        readiness.eligible_record_count === 1 ? "entry" : "entries"
+      } totalling ${formatCurrency(readiness.total_amount)}?`
+    )
+    if (!shouldSubmit) return
+
     try {
+      setIsSubmitting(true)
       const token = localStorage.getItem("token")
       await submitClaim(token)
+      await loadPage()
       toast.success("Claim submitted successfully 🚀")
-    } catch {
-      toast.error("Failed to submit claim")
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Failed to submit claim"))
+      try {
+        await loadPage()
+      } catch {
+        // Keep the submission error visible; the page-level retry remains.
+      }
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -49,11 +104,104 @@ function TodayTravelPage() {
           </div>
           <button
             onClick={handleSubmitClaim}
-            className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-medium px-6 py-3 rounded-lg transition dynamic-shadow text-center"
+            disabled={!readiness?.can_submit || isSubmitting}
+            className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-medium px-6 py-3 rounded-lg transition dynamic-shadow text-center disabled:cursor-not-allowed disabled:bg-gray-300"
           >
-            Submit Claim
+            {isSubmitting
+              ? "Submitting..."
+              : readiness?.submission_mode === "resubmit"
+                ? "Resubmit Claim"
+                : "Submit Claim"}
           </button>
         </div>
+
+        {loadError && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">
+            <span>{loadError}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setIsLoading(true)
+                loadPage()
+                  .catch((error) => setLoadError(getErrorMessage(error, "Unable to refresh claim preview.")))
+                  .finally(() => setIsLoading(false))
+              }}
+              className="rounded-lg border border-red-300 bg-white px-3 py-2 font-semibold"
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
+        <section
+          aria-busy={isLoading}
+          className="mb-6 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm"
+          data-testid="therapist-claim-readiness"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">Today&apos;s claim preview</h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Server-calculated for {readiness?.business_date || "today"}; eligibility and totals are rechecked when you submit.
+              </p>
+            </div>
+            {readiness && (
+              <span className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${
+                readiness.state === "ready"
+                  ? "bg-green-100 text-green-800"
+                  : readiness.state === "already_submitted"
+                    ? "bg-blue-100 text-blue-800"
+                    : "bg-amber-100 text-amber-800"
+              }`}>
+                {readiness.state.replaceAll("_", " ")}
+              </span>
+            )}
+          </div>
+
+          {isLoading && !readiness ? (
+            <p className="mt-5 text-sm text-gray-500">Calculating eligible travel and rates...</p>
+          ) : readiness ? (
+            <>
+              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                {[
+                  ["Eligible entries", readiness.eligible_record_count],
+                  ["Distance", `${readiness.total_km} KM`],
+                  ["Travel fare", formatCurrency(readiness.travel_total)],
+                  ["Allowance", formatCurrency(readiness.daily_allowance)],
+                  ["Claim total", formatCurrency(readiness.total_amount)],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-xl bg-gray-50 p-3">
+                    <p className="text-xs font-semibold text-gray-500">{label}</p>
+                    <p className="mt-1 font-bold text-gray-900">{value}</p>
+                  </div>
+                ))}
+              </div>
+              {readiness.policy_version && (
+                <p className="mt-3 text-xs text-gray-500">
+                  Policy v{readiness.policy_version} · {formatCurrency(readiness.per_km_rate)} per KM · {readiness.rounding_mode}
+                </p>
+              )}
+              {readiness.rejection_reason && readiness.submission_mode === "resubmit" && (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="alert">
+                  <strong>Changes requested:</strong> {readiness.rejection_reason}
+                </div>
+              )}
+              {readiness.blocking_reasons.map((blocker) => (
+                <div key={blocker.code} className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" role="alert">
+                  {blocker.affected_count > 0 && (
+                    <strong>{blocker.affected_count} affected item{blocker.affected_count === 1 ? "" : "s"}. </strong>
+                  )}
+                  {blocker.message}
+                </div>
+              ))}
+              {readiness.state === "already_submitted" && (
+                <p className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
+                  Today&apos;s claim is already {readiness.existing_claim_status}. Open My Claims to follow its review status.
+                </p>
+              )}
+            </>
+          ) : null}
+        </section>
 
         {/* ==================== 1. MOBILE LOGS STACK (Visible on Mobile/Tablet) ==================== */}
         <div className="lg:hidden space-y-4">

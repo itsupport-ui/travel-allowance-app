@@ -8,6 +8,7 @@ import {
 } from "react-native-safe-area-context";
 
 import "../src/services/notificationTask";
+import { OfflineSyncStatus } from "../src/components/offline/OfflineSyncStatus";
 import { QueryProvider } from "../src/query/QueryProvider";
 import { queryClient } from "../src/query/queryClient";
 import { queryKeys } from "../src/query/queryKeys";
@@ -213,9 +214,11 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="schedule-details" />
             <Stack.Screen name="travel-details" />
+            <Stack.Screen name="manual-travel-edit" />
             <Stack.Screen name="claim-details" />
             <Stack.Screen name="doctor-details" />
           </Stack>
+          <OfflineSyncStatus />
         </SafeAreaProvider>
       </QueryProvider>
     </KeyboardProvider>

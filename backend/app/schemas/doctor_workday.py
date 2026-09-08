@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class DoctorStartDayRequest(BaseModel):
@@ -15,6 +15,19 @@ class DoctorEndDayRequest(BaseModel):
     end_latitude: float
     end_longitude: float
     device_timestamp: datetime | None = None
+    early_end_reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator("early_end_reason")
+    @classmethod
+    def normalize_early_end_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if len(normalized) < 5:
+            raise ValueError("Early end reason must be at least 5 characters")
+        return normalized
 
 
 class DoctorTodayWorkdayResponse(BaseModel):
@@ -37,6 +50,13 @@ class DoctorTodayWorkdayResponse(BaseModel):
     should_prompt_end: bool
     auto_logout_enabled: bool
     auto_logout_grace_minutes: int
+    available_actions: list[str] = Field(default_factory=list)
+    blocking_reasons: list[str] = Field(default_factory=list)
+    next_action: str | None = None
+    active_visit_id: int | None = None
+    ended_early: bool = False
+    end_reason: str | None = None
+    early_end_review_status: str | None = None
 
 
 class DoctorStartDayResponse(BaseModel):
@@ -53,6 +73,9 @@ class DoctorEndDayResponse(BaseModel):
     completed_visits_count: int
     pending_visits_count: int
     total_distance_km: float
+    ended_early: bool = False
+    end_reason: str | None = None
+    early_end_review_status: str | None = None
 
 
 class DoctorTravelWaypointResponse(BaseModel):

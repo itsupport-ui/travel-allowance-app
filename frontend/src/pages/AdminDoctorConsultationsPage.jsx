@@ -3,12 +3,20 @@ import toast from "react-hot-toast"
 
 import AdminLayout from "../layouts/AdminLayout"
 import {
+  ConsultationLifecycleDialog,
+  ConsultationTimeline,
+} from "../components/consultations/ConsultationLifecycleDialog"
+import {
+  cancelDoctorConsultation,
   confirmDoctorConsultation,
   createDoctorConsultation,
   createVisitFromConsultation,
   getConsultationDoctors,
+  getDoctorConsultationHistory,
   getDoctorConsultations,
   rejectDoctorConsultation,
+  rescheduleDoctorConsultation,
+  scheduleDoctorConsultationFollowUp,
 } from "../services/doctorConsultationService"
 
 
@@ -125,6 +133,8 @@ function AdminDoctorConsultationsPage() {
   const [actionId, setActionId] = useState(null)
   const [modal, setModal] = useState(null)
   const [selectedConsultation, setSelectedConsultation] = useState(null)
+  const [lifecycleMode, setLifecycleMode] = useState(null)
+  const [history, setHistory] = useState([])
   const [consultationForm, setConsultationForm] = useState(
     initialConsultationForm
   )
@@ -234,10 +244,79 @@ function AdminDoctorConsultationsPage() {
     setModal("visit")
   }
 
+  const openLifecycleModal = (consultation, mode) => {
+    setSelectedConsultation(consultation)
+    setLifecycleMode(mode)
+  }
+
+  const openHistoryModal = async (consultation) => {
+    try {
+      setActionId(consultation.id)
+      setSelectedConsultation(consultation)
+      setModal("history")
+      const token = localStorage.getItem("token")
+      const eventData = await getDoctorConsultationHistory(
+        consultation.id,
+        token
+      )
+      setHistory(eventData || [])
+    } catch (error) {
+      setModal(null)
+      setSelectedConsultation(null)
+      toast.error(getErrorMessage(error, "Unable to load consultation history"))
+    } finally {
+      setActionId(null)
+    }
+  }
+
   const closeModal = () => {
     if (actionId !== null) return
     setModal(null)
     setSelectedConsultation(null)
+    setHistory([])
+  }
+
+  const closeLifecycleModal = () => {
+    if (actionId !== null) return
+    setLifecycleMode(null)
+    setSelectedConsultation(null)
+  }
+
+  const submitLifecycle = async (payload) => {
+    if (!selectedConsultation || !lifecycleMode) return
+    try {
+      setActionId(selectedConsultation.id)
+      const token = localStorage.getItem("token")
+      if (lifecycleMode === "cancel") {
+        await cancelDoctorConsultation(
+          selectedConsultation.id,
+          payload,
+          token
+        )
+        toast.success("Consultation cancelled with history retained")
+      } else if (lifecycleMode === "reschedule") {
+        await rescheduleDoctorConsultation(
+          selectedConsultation.id,
+          payload,
+          token
+        )
+        toast.success("Replacement consultation scheduled")
+      } else {
+        await scheduleDoctorConsultationFollowUp(
+          selectedConsultation.id,
+          payload,
+          token
+        )
+        toast.success("Follow-up consultation scheduled")
+      }
+      setLifecycleMode(null)
+      setSelectedConsultation(null)
+      await loadConsultations()
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to update consultation"))
+    } finally {
+      setActionId(null)
+    }
   }
 
   const handleConsultationChange = (event) => {
@@ -282,7 +361,11 @@ function AdminDoctorConsultationsPage() {
     try {
       setActionId(consultation.id)
       const token = localStorage.getItem("token")
-      await confirmDoctorConsultation(consultation.id, token)
+      await confirmDoctorConsultation(
+        consultation.id,
+        token,
+        consultation.lifecycle_version
+      )
       toast.success("Consultation confirmed")
       await loadConsultations()
     } catch (error) {
@@ -302,7 +385,8 @@ function AdminDoctorConsultationsPage() {
       await rejectDoctorConsultation(
         selectedConsultation.id,
         rejectionReason,
-        token
+        token,
+        selectedConsultation.lifecycle_version
       )
       toast.success("Consultation rejected")
       setModal(null)
@@ -325,6 +409,7 @@ function AdminDoctorConsultationsPage() {
         {
           ...visitForm,
           remarks: visitForm.remarks || null,
+          lifecycle_version: selectedConsultation.lifecycle_version,
         },
         token
       )
@@ -363,6 +448,7 @@ function AdminDoctorConsultationsPage() {
       consultation.status === "completed" &&
       !converted &&
       isActionableDecision
+    const actions = new Set(consultation.available_actions || [])
 
     return (
       <div
@@ -370,6 +456,44 @@ function AdminDoctorConsultationsPage() {
           mobile ? "grid grid-cols-2" : "justify-end"
         }`}
       >
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={() => openHistoryModal(consultation)}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          History
+        </button>
+        {actions.has("reschedule") && (
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => openLifecycleModal(consultation, "reschedule")}
+            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+          >
+            Reschedule
+          </button>
+        )}
+        {actions.has("cancel") && (
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => openLifecycleModal(consultation, "cancel")}
+            className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        )}
+        {actions.has("schedule_follow_up") && (
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => openLifecycleModal(consultation, "follow_up")}
+            className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+          >
+            Schedule follow-up
+          </button>
+        )}
         {canUpdateDecision && (
           <button
             type="button"
@@ -894,6 +1018,52 @@ function AdminDoctorConsultationsPage() {
             </div>
           </form>
         </Modal>
+      )}
+
+      {modal === "history" && selectedConsultation && (
+        <Modal
+          title="Consultation history"
+          description={`${selectedConsultation.patient_name} · consultation #${selectedConsultation.id}`}
+          onClose={closeModal}
+        >
+          <div className="space-y-5">
+            {selectedConsultation.follow_up_date && (
+              <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900">
+                Follow-up due {formatDate(selectedConsultation.follow_up_date)} at{" "}
+                {selectedConsultation.follow_up_time?.slice(0, 5)}
+                {selectedConsultation.follow_up_reason
+                  ? ` · ${selectedConsultation.follow_up_reason}`
+                  : ""}
+              </div>
+            )}
+            {selectedConsultation.cancellation_reason && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+                {selectedConsultation.cancellation_code?.replaceAll("_", " ")}: {" "}
+                {selectedConsultation.cancellation_reason}
+              </div>
+            )}
+            <ConsultationTimeline events={history} />
+            <div className="flex justify-end border-t border-slate-100 pt-4">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {lifecycleMode && selectedConsultation && (
+        <ConsultationLifecycleDialog
+          consultation={selectedConsultation}
+          mode={lifecycleMode}
+          busy={actionId === selectedConsultation.id}
+          onClose={closeLifecycleModal}
+          onSubmit={submitLifecycle}
+        />
       )}
     </AdminLayout>
   )

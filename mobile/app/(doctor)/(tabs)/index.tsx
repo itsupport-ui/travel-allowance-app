@@ -27,6 +27,7 @@ import { queryKeys } from "../../../src/query/queryKeys";
 import { getDoctorDashboardSummary } from "../../../src/services/doctorWorkflowService";
 import { getApiErrorMessage } from "../../../src/services/errorHandler";
 import { reverseGeocode } from "../../../src/services/mapsService";
+import { isOfflineMutationQueuedError } from "../../../src/services/offlineMutationQueue";
 import {
   endDoctorWorkday,
   getTodayDoctorWorkday,
@@ -175,7 +176,9 @@ export default function DoctorHomeScreen() {
     },
     onError: (error) => {
       Alert.alert(
-        "Unable to Start Workday",
+        isOfflineMutationQueuedError(error)
+          ? "Saved for Sync"
+          : "Unable to Start Workday",
         getApiErrorMessage(error, "Unable to start your workday.")
       );
     },
@@ -185,7 +188,7 @@ export default function DoctorHomeScreen() {
     },
   });
   const endMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (earlyEndReason?: string) => {
       await requestLocationPermission();
       const coordinates = await getCurrentLocation();
       let address: string | undefined;
@@ -202,11 +205,14 @@ export default function DoctorHomeScreen() {
         end_address: address,
         end_latitude: coordinates.latitude,
         end_longitude: coordinates.longitude,
+        early_end_reason: earlyEndReason,
       });
     },
     onError: (error) => {
       Alert.alert(
-        "Unable to End Workday",
+        isOfflineMutationQueuedError(error)
+          ? "Saved for Sync"
+          : "Unable to End Workday",
         getApiErrorMessage(error, "Unable to end your workday.")
       );
     },
@@ -219,6 +225,9 @@ export default function DoctorHomeScreen() {
           `Completed visits: ${response.completed_visits_count}`,
           `Pending visits: ${response.pending_visits_count}`,
           `Distance: ${response.total_distance_km.toFixed(2)} km`,
+          ...(response.early_end_review_status === "pending"
+            ? ["Your early closure is awaiting administrator review."]
+            : []),
         ].join("\n"),
         [
           {
@@ -245,35 +254,55 @@ export default function DoctorHomeScreen() {
   );
   const doctorName = doctor?.username?.trim() || "Doctor";
   const doctorInitial = doctorName.charAt(0).toUpperCase() || "D";
-  const executeEnd = useCallback(() => {
+  const executeEnd = useCallback((earlyEndReason?: string) => {
     if (
       endingRef.current ||
       endPending ||
-      !workdayQuery.data?.can_end_workday
+      !workdayQuery.data?.is_active
     ) {
       return;
     }
     endingRef.current = true;
-    mutateEnd();
+    mutateEnd(earlyEndReason);
   }, [
     endPending,
     mutateEnd,
-    workdayQuery.data?.can_end_workday,
+    workdayQuery.data?.is_active,
   ]);
   const confirmEnd = useCallback(() => {
+    if (!workdayQuery.data?.is_active) return;
+    if (!workdayQuery.data.can_end_workday) {
+      Alert.alert(
+        "End Workday Early",
+        `The standard end time is ${workdayQuery.data.workday_end_time}. Choose the reason saved with attendance.`,
+        [
+          { style: "cancel", text: "Cancel" },
+          {
+            onPress: () => executeEnd("Assigned work completed early"),
+            text: "Work Complete",
+          },
+          {
+            onPress: () => executeEnd("Personal or medical reason"),
+            style: "destructive",
+            text: "Personal/Medical",
+          },
+        ]
+      );
+      return;
+    }
     Alert.alert(
       "End Workday",
       "Attendance will close and you will be logged out.",
       [
         { style: "cancel", text: "Cancel" },
         {
-          onPress: executeEnd,
+          onPress: () => executeEnd(),
           style: "destructive",
           text: "End Workday",
         },
       ]
     );
-  }, [executeEnd]);
+  }, [executeEnd, workdayQuery.data]);
 
   useEffect(() => {
     let active = true;
@@ -401,7 +430,8 @@ export default function DoctorHomeScreen() {
           {workdayQuery.data?.is_active &&
           !workdayQuery.data.can_end_workday ? (
             <Text style={styles.attendanceHint}>
-              End available at {workdayQuery.data.workday_end_time}
+              Standard end: {workdayQuery.data.workday_end_time}. Early closure
+              requires a reason.
             </Text>
           ) : null}
         </View>
@@ -423,8 +453,7 @@ export default function DoctorHomeScreen() {
             )}
             <Text style={styles.attendanceButtonText}>Start Day</Text>
           </TouchableOpacity>
-        ) : workdayQuery.data?.is_active &&
-          workdayQuery.data.can_end_workday ? (
+        ) : workdayQuery.data?.is_active ? (
           <TouchableOpacity
             accessibilityRole="button"
             disabled={endPending}
@@ -440,7 +469,9 @@ export default function DoctorHomeScreen() {
                 size={18}
               />
             )}
-            <Text style={styles.attendanceButtonText}>End Day</Text>
+            <Text style={styles.attendanceButtonText}>
+              {workdayQuery.data.can_end_workday ? "End Day" : "End Early"}
+            </Text>
           </TouchableOpacity>
         ) : null}
       </View>

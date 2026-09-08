@@ -18,7 +18,13 @@ export const getTreatmentSession = async (
   coordinates,
 ) => {
   const query = coordinates
-    ? `?latitude=${encodeURIComponent(coordinates.latitude)}&longitude=${encodeURIComponent(coordinates.longitude)}`
+    ? `?${new URLSearchParams({
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        gps_accuracy_m: coordinates.gps_accuracy_m,
+        device_timestamp:
+          coordinates.device_timestamp || new Date().toISOString(),
+      }).toString()}`
     : ""
   const response = await fetch(
     `${API_URL}/treatment-sessions/${scheduleId}${query}`,
@@ -43,7 +49,9 @@ export const punchInTreatment = async (
       body: JSON.stringify({
         latitude: coordinates.latitude,
         longitude: coordinates.longitude,
+        gps_accuracy_m: coordinates.gps_accuracy_m,
         device_timestamp: new Date().toISOString(),
+        location_exception_id: coordinates.location_exception_id || null,
       }),
     },
   )
@@ -61,6 +69,12 @@ export const punchOutTreatment = async (
   formData.append("latitude", payload.latitude)
   formData.append("longitude", payload.longitude)
   formData.append("device_timestamp", new Date().toISOString())
+  if (payload.gps_accuracy_m) {
+    formData.append("gps_accuracy_m", payload.gps_accuracy_m)
+  }
+  if (payload.location_exception_id) {
+    formData.append("location_exception_id", payload.location_exception_id)
+  }
 
   if (payload.bill_amount !== null && payload.bill_amount !== undefined) {
     formData.append("bill_amount", payload.bill_amount)

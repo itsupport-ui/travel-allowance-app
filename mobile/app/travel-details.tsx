@@ -20,7 +20,9 @@ import { TravelSkeleton } from "../src/components/skeletons/ScreenSkeletons";
 import { queryKeys } from "../src/query/queryKeys";
 import { getApiErrorMessage } from "../src/services/errorHandler";
 import {
+  cancelManualTravel,
   downloadTravelInvoice,
+  getManualTravelReviewHistory,
   getTravelById,
 } from "../src/services/travelService";
 import { formatDateForDisplay } from "../src/utils/date";
@@ -110,6 +112,14 @@ export default function TravelDetailsScreen() {
       return getTravelById(travelId);
     },
   });
+  const reviewHistoryQuery = useQuery({
+    enabled: travelId !== null && travelQuery.data?.schedule_id === null,
+    queryKey: ["travel", "review-history", travelId],
+    queryFn: () => {
+      if (travelId === null) return Promise.resolve([]);
+      return getManualTravelReviewHistory(travelId);
+    },
+  });
   const invoiceMutation = useMutation({
     mutationFn: async () => {
       if (travelId === null || !travelQuery.data?.invoice_file) {
@@ -151,6 +161,20 @@ export default function TravelDetailsScreen() {
           "Unable to download this invoice."
         )
       );
+    },
+  });
+  const cancelMutation = useMutation({
+    mutationFn: async () => {
+      if (travelId === null) throw new Error("A valid travel ID is required.");
+      await cancelManualTravel(travelId);
+    },
+    onSuccess: () => {
+      Alert.alert("Travel Cancelled", "The audit history was retained.", [
+        { text: "Done", onPress: () => router.replace("/therapist/travel" as Href) },
+      ]);
+    },
+    onError: (error) => {
+      Alert.alert("Unable to Cancel", getApiErrorMessage(error, "Refresh and try again."));
     },
   });
 
@@ -249,6 +273,51 @@ export default function TravelDetailsScreen() {
               </Text>
             </View>
           </View>
+
+          {travel.schedule_id === null ? (
+            <View style={styles.reviewCard}>
+              <Text style={styles.reviewTitle}>
+                Review: {formatLabel(travel.manual_review_status)}
+              </Text>
+              <Text style={styles.reviewMeta}>Revision {travel.manual_revision}</Text>
+              <Text style={styles.reviewReason}>
+                Why manual: {travel.manual_reason || "Not recorded"}
+              </Text>
+              {travel.manual_review_reason ? (
+                <Text style={styles.reviewNote}>
+                  Reviewer note: {travel.manual_review_reason}
+                </Text>
+              ) : null}
+              {travel.available_actions.includes("edit") ? (
+                <View style={styles.reviewActions}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    style={styles.editButton}
+                    onPress={() => router.push(
+                      `/manual-travel-edit?id=${travel.id}` as Href
+                    )}
+                  >
+                    <Text style={styles.editText}>Correct Entry</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    disabled={cancelMutation.isPending}
+                    style={styles.cancelButton}
+                    onPress={() => Alert.alert(
+                      "Cancel Manual Travel?",
+                      "The entry will not be claimable, but its review history will remain.",
+                      [
+                        { text: "Keep Entry", style: "cancel" },
+                        { text: "Cancel Entry", style: "destructive", onPress: () => cancelMutation.mutate() },
+                      ]
+                    )}
+                  >
+                    <Text style={styles.cancelText}>Cancel Entry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
 
           <Text style={styles.sectionTitle}>Route</Text>
           <View style={styles.card}>
@@ -354,6 +423,26 @@ export default function TravelDetailsScreen() {
               </View>
             </>
           ) : null}
+
+          {reviewHistoryQuery.data?.length ? (
+            <>
+              <Text style={styles.sectionTitle}>Review History</Text>
+              <View style={styles.card}>
+                {reviewHistoryQuery.data.map((event, index) => (
+                  <View key={event.id}>
+                    {index > 0 ? <View style={styles.divider} /> : null}
+                    <Text style={styles.historyTitle}>
+                      {formatLabel(event.event_type)} · Revision {event.revision}
+                    </Text>
+                    <Text style={styles.historyReason}>{event.reason}</Text>
+                    <Text style={styles.historyMeta}>
+                      {event.actor_name || `User #${event.actor_id}`} · {new Date(event.created_at).toLocaleString()}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          ) : null}
         </ScrollView>
       ) : (
         <View style={styles.centerState}>
@@ -442,6 +531,26 @@ const styles = StyleSheet.create({
     fontWeight: typography.weight.extrabold,
     marginBottom: spacing.md,
   },
+  reviewCard: {
+    backgroundColor: colors.blueSurface,
+    borderColor: colors.border,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    marginBottom: spacing.xxl,
+    padding: spacing.lg,
+  },
+  reviewTitle: { color: colors.textStrong, fontSize: typography.size.body, fontWeight: typography.weight.extrabold },
+  reviewMeta: { color: colors.textMuted, fontSize: typography.size.tiny, marginTop: spacing.xs },
+  reviewReason: { color: colors.textPrimary, fontSize: typography.size.small, marginTop: spacing.md },
+  reviewNote: { color: colors.warningDark, fontSize: typography.size.small, fontWeight: typography.weight.bold, marginTop: spacing.sm },
+  reviewActions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  editButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.control, flex: 1, justifyContent: "center", minHeight: 44 },
+  editText: { color: colors.surface, fontSize: typography.size.small, fontWeight: typography.weight.extrabold },
+  cancelButton: { alignItems: "center", borderColor: colors.danger, borderRadius: radius.control, borderWidth: 1, flex: 1, justifyContent: "center", minHeight: 44 },
+  cancelText: { color: colors.danger, fontSize: typography.size.small, fontWeight: typography.weight.extrabold },
+  historyTitle: { color: colors.textStrong, fontSize: typography.size.small, fontWeight: typography.weight.extrabold },
+  historyReason: { color: colors.textPrimary, fontSize: typography.size.small, marginTop: spacing.xs },
+  historyMeta: { color: colors.textMuted, fontSize: typography.size.tiny, marginTop: spacing.xs },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.control,

@@ -1,6 +1,8 @@
 import { colors, radius, shadows, spacing, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { File, Paths } from "expo-file-system";
+import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { router, useLocalSearchParams } from "expo-router";
 import { useMemo } from "react";
@@ -45,6 +47,14 @@ const getProofMimeType = (proofName: string): string => {
   return "image/jpeg";
 };
 
+const escapeHtml = (value: unknown): string =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
 export default function DoctorClaimDetailsScreen() {
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const claimId = useMemo(() => parsePositiveId(params.id), [params.id]);
@@ -86,6 +96,43 @@ export default function DoctorClaimDetailsScreen() {
         error instanceof Error
           ? error.message
           : getApiErrorMessage(error, "Unable to open this receipt.")
+      );
+    },
+  });
+  const reportMutation = useMutation({
+    mutationFn: async () => {
+      const claim = claimQuery.data;
+      if (!claim) throw new Error("Claim details are unavailable.");
+      if (!(await Sharing.isAvailableAsync())) {
+        throw new Error("File sharing is unavailable on this device.");
+      }
+      const expenseRows = claim.expenses
+        .map(
+          (expense) => `<tr><td>${escapeHtml(expense.expense_date)}</td><td>${escapeHtml(expense.from_location)}</td><td>${escapeHtml(expense.to_location)}</td><td>${escapeHtml(formatDoctorLabel(expense.transport_mode))}</td><td class="number">${escapeHtml(formatDoctorCurrency(expense.approved_amount ?? expense.fare))}</td><td>${expense.proof_file ? "Attached" : "Not attached"}</td></tr>`
+        )
+        .join("");
+      const html = `<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:Arial,sans-serif;color:#1f2937;padding:28px}h1{color:#14532d;margin-bottom:4px}.meta{color:#6b7280;margin-bottom:24px}.summary{background:#f3f4f6;padding:16px;margin-bottom:20px}.reason{background:#fef2f2;color:#991b1b;padding:14px;margin:16px 0}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border:1px solid #e5e7eb;padding:8px;text-align:left}th{background:#166534;color:white}.number{text-align:right}</style></head><body><h1>Doctor Claim #${claim.id}</h1><p class="meta">Business date ${escapeHtml(claim.claim_date)} · Revision ${claim.revision || 1}</p><div class="summary"><strong>Status:</strong> ${escapeHtml(formatDoctorLabel(claim.status))}<br><strong>Submitted:</strong> ${escapeHtml(formatDoctorDateTime(claim.submitted_at))}<br><strong>Expenses:</strong> ${claim.expense_count}<br><strong>Total:</strong> ${escapeHtml(formatDoctorCurrency(claim.total_amount))}</div>${claim.rejection_reason ? `<div class="reason"><strong>Correction / rejection reason:</strong><br>${escapeHtml(claim.rejection_reason)}</div>` : ""}<table><thead><tr><th>Date</th><th>From</th><th>To</th><th>Transport</th><th>Fare</th><th>Receipt</th></tr></thead><tbody>${expenseRows || '<tr><td colspan="6">No expense rows</td></tr>'}</tbody></table></body></html>`;
+      const generated = await Print.printToFileAsync({ html });
+      const generatedFile = new File(generated.uri);
+      const reportFile = new File(
+        Paths.cache,
+        `doctor-claim-${claim.id}-${claim.claim_date}.pdf`
+      );
+      if (reportFile.exists) reportFile.delete();
+      generatedFile.move(reportFile);
+      await Sharing.shareAsync(reportFile.uri, {
+        dialogTitle: `Doctor claim #${claim.id}`,
+        mimeType: "application/pdf",
+        UTI: "com.adobe.pdf",
+      });
+      return reportFile.name;
+    },
+    onError: (error) => {
+      Alert.alert(
+        "Unable to Export Claim",
+        error instanceof Error
+          ? error.message
+          : "The PDF statement could not be generated."
       );
     },
   });
@@ -209,6 +256,22 @@ export default function DoctorClaimDetailsScreen() {
             </View>
           </View>
 
+          <TouchableOpacity
+            accessibilityRole="button"
+            disabled={reportMutation.isPending}
+            style={styles.reportButton}
+            onPress={() => reportMutation.mutate()}
+          >
+            {reportMutation.isPending ? (
+              <ActivityIndicator color={colors.surface} size="small" />
+            ) : (
+              <Ionicons color={colors.surface} name="download-outline" size={19} />
+            )}
+            <Text style={styles.reportButtonText}>
+              {reportMutation.isPending ? "Generating PDF..." : "Save / Share PDF Statement"}
+            </Text>
+          </TouchableOpacity>
+
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Included expenses</Text>
             <Text style={styles.count}>{claim.expenses.length}</Text>
@@ -238,7 +301,7 @@ export default function DoctorClaimDetailsScreen() {
                       </Text>
                     </View>
                     <Text style={styles.expenseFare}>
-                      {formatDoctorCurrency(expense.fare)}
+                      {formatDoctorCurrency(expense.approved_amount ?? expense.fare)}
                     </Text>
                   </View>
                   <Text style={styles.expenseMeta}>
@@ -305,6 +368,21 @@ const styles = StyleSheet.create({
     shadowOffset: shadows.offset.y2,
     shadowOpacity: shadows.opacity.card,
     shadowRadius: shadows.radius.card,
+  },
+  reportButton: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: radius.control,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "center",
+    marginTop: spacing.lg,
+    minHeight: 50,
+  },
+  reportButtonText: {
+    color: colors.surface,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
   },
   summaryHeader: {
     alignItems: "center",

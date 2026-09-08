@@ -1,6 +1,7 @@
 import { AxiosError } from "axios";
 
 import { api } from "../api/apiClient";
+import { waitForReportExportJob } from "./reportExportJob";
 import type {
   AdminReportFilters,
   AdminReportSummary,
@@ -8,7 +9,6 @@ import type {
   ReportClaimStatus,
   ReportInsightDirection,
 } from "../types/adminReport";
-import type { ClaimResponse } from "../types/claim";
 import { getToken } from "../utils/storage";
 
 interface ApiErrorBody {
@@ -149,33 +149,6 @@ const normalizeError = (error: unknown): AdminReportServiceError => {
   return new AdminReportServiceError("Unable to load report metrics.");
 };
 
-const dateMatchesFilters = (
-  date: string,
-  filters: AdminReportFilters
-): boolean =>
-  (!filters.fromDate || date >= filters.fromDate) &&
-  (!filters.toDate || date <= filters.toDate);
-
-const filterClaims = (
-  claims: ClaimResponse[],
-  filters: AdminReportFilters
-): ClaimResponse[] =>
-  claims.filter((claim) => {
-    const matchesDate = dateMatchesFilters(
-      claim.claim_date,
-      filters
-    );
-    const matchesStatus =
-      filters.status === "all" ||
-      claim.status.toLocaleLowerCase() === filters.status;
-    const matchesTherapist =
-      filters.therapistName === null ||
-      claim.therapist_name?.toLocaleLowerCase() ===
-        filters.therapistName.toLocaleLowerCase();
-
-    return matchesDate && matchesStatus && matchesTherapist;
-  });
-
 const normalizeOverview = (
   response: AdminReportOverviewResponse
 ): AdminReportSummary => ({
@@ -262,16 +235,228 @@ export const getAdminReportSummary = async (
   }
 };
 
-export const getAdminReportClaims = async (
-  filters: AdminReportFilters
-): Promise<ClaimResponse[]> => {
+export interface AdminClaimRegisterDownload {
+  content: Uint8Array;
+  fileName: string;
+  mimeType: string;
+  rowCount: number;
+}
+
+interface AdminClaimRegisterPreviewResponse {
+  expires_at: string;
+  row_count: number;
+  snapshot_id: string;
+  total_amount: number;
+  summary: Record<string, number | string>;
+  warnings: string[];
+}
+
+interface ReportExportJobResponse {
+  id: string;
+  status: "completed" | "expired" | "failed" | "processing" | "queued";
+  download_url: string | null;
+}
+
+export interface AdminClaimRegisterPreview {
+  expiresAt: string;
+  rowCount: number;
+  snapshotId: string;
+  totalAmount: number;
+  summary: Record<string, number | string>;
+  warnings: string[];
+}
+
+export interface AdminReportExportHistoryItem {
+  id: string;
+  snapshot_id: string;
+  report_type:
+    | "consolidated_claims"
+    | "organization_attendance"
+    | "organization_expenses"
+    | "organization_clinical_activity"
+    | "organization_exceptions"
+    | "organization_performance";
+  requester_name: string;
+  format: "csv" | "xlsx" | "pdf";
+  row_count: number;
+  total_amount: number;
+  summary: Record<string, number | string>;
+  snapshot_expires_at: string;
+  filename: string;
+  size_bytes: number;
+  checksum_sha256: string;
+  download_count: number;
+  last_downloaded_at: string;
+}
+
+export interface AdminReportExportEvent {
+  id: string;
+  requester_name: string;
+  snapshot_id: string | null;
+  export_job_id: string | null;
+  report_type: AdminReportExportHistoryItem["report_type"] | null;
+  scope: "organization" | "self" | null;
+  format: "csv" | "xlsx" | "pdf" | null;
+  event_type:
+    | "generation_completed"
+    | "generation_queued"
+    | "generation_reused"
+    | "generation_failed"
+    | "download_succeeded"
+    | "download_failed";
+  outcome: "success" | "failure";
+  error_code: string | null;
+  occurred_at: string;
+}
+
+export interface ReportOperationsHealth {
+  status: "healthy" | "degraded";
+  storage_backend: "database" | "s3";
+  external_storage_configured: boolean;
+  queued_jobs: number;
+  processing_jobs: number;
+  stale_processing_jobs: number;
+  failed_jobs_last_24h: number;
+  expired_artifacts_pending_cleanup: number;
+  oldest_pending_seconds: number | null;
+  checked_at: string;
+}
+
+export const getReportOperationsHealth = async (): Promise<ReportOperationsHealth> => {
   try {
     const headers = await getAuthHeaders();
-    const response = await api.get<ClaimResponse[]>("/claims/all", {
-      headers,
-    });
+    const response = await api.get<ReportOperationsHealth>(
+      "/reports/operations/health",
+      { headers }
+    );
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+};
 
-    return filterClaims(response.data, filters);
+export const getAdminReportExportHistory = async (): Promise<
+  AdminReportExportHistoryItem[]
+> => {
+  try {
+    const headers = await getAuthHeaders();
+    const response = await api.get<AdminReportExportHistoryItem[]>(
+      "/reports/exports/history",
+      { headers, params: { limit: 8, scope: "organization" } }
+    );
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+};
+
+export const getAdminReportExportEvents = async (): Promise<
+  AdminReportExportEvent[]
+> => {
+  try {
+    const headers = await getAuthHeaders();
+    const response = await api.get<AdminReportExportEvent[]>(
+      "/reports/exports/events",
+      { headers, params: { limit: 20, scope: "organization" } }
+    );
+    return response.data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+};
+
+export const previewAdminClaimRegister = async (
+  filters: AdminReportFilters,
+  reportType:
+    | "consolidated_claims"
+    | "organization_attendance"
+    | "organization_expenses"
+    | "organization_clinical_activity"
+    | "organization_exceptions"
+    | "organization_performance" = "consolidated_claims",
+  exportStatus:
+    | "all"
+    | "pending"
+    | "approved"
+    | "rejected"
+    | "active"
+    | "completed"
+    | "ended_early"
+    | "draft"
+    | "submitted"
+    | "scheduled"
+    | "in_progress"
+    | "missed"
+    | "cancelled"
+    | "open"
+    | "needs_review"
+    | "needs_correction"
+    | "manual" = filters.status,
+  exportRole: "all" | "therapist" | "doctor" = "all",
+  exportStaffId: number | null = null
+): Promise<AdminClaimRegisterPreview> => {
+  try {
+    const headers = await getAuthHeaders();
+    const response = await api.post<AdminClaimRegisterPreviewResponse>(
+      "/reports/preview",
+      {
+        doctor_id: exportRole === "doctor" ? exportStaffId : null,
+        from_date: filters.fromDate,
+        report_type: reportType,
+        role: exportRole,
+        status: exportStatus,
+        therapist_id:
+          exportRole === "therapist" ? exportStaffId : null,
+        to_date: filters.toDate,
+      },
+      { headers }
+    );
+    return {
+      expiresAt: response.data.expires_at,
+      rowCount: response.data.row_count,
+      snapshotId: response.data.snapshot_id,
+      totalAmount: response.data.total_amount,
+      summary: response.data.summary,
+      warnings: response.data.warnings,
+    };
+  } catch (error) {
+    throw normalizeError(error);
+  }
+};
+
+export const downloadAdminClaimRegister = async (
+  snapshotId: string,
+  format: "csv" | "xlsx" | "pdf" = "csv"
+): Promise<AdminClaimRegisterDownload> => {
+  try {
+    const headers = await getAuthHeaders();
+    const job = await api.post<ReportExportJobResponse>(
+      "/reports/exports",
+      {
+        format,
+        idempotency_key: `${snapshotId}:${format}`,
+        snapshot_id: snapshotId,
+      },
+      { headers }
+    );
+    const readyJob = await waitForReportExportJob(api, job.data, { headers });
+    const response = await api.get<ArrayBuffer>(
+      readyJob.download_url,
+      {
+        headers,
+        responseType: "arraybuffer",
+      }
+    );
+    const disposition = String(response.headers["content-disposition"] ?? "");
+    const fileName =
+      disposition.match(/filename="?([^";]+)"?/i)?.[1] ??
+      `claim-register.${format}`;
+    return {
+      content: new Uint8Array(response.data),
+      fileName,
+      mimeType: String(response.headers["content-type"] ?? "application/octet-stream"),
+      rowCount: Number(response.headers["x-report-row-count"] ?? 0),
+    };
   } catch (error) {
     throw normalizeError(error);
   }

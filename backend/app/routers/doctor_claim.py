@@ -1,5 +1,5 @@
 from datetime import date, datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -16,6 +16,7 @@ from app.schemas.doctor_claim import (
     DoctorClaimRejectRequest,
     DoctorClaimResponse,
 )
+from app.schemas.claim_readiness import DoctorClaimReadinessResponse
 from app.utils.auth import (
     get_current_user,
     require_permission,
@@ -25,8 +26,18 @@ from app.utils.permissions import role_has_permission
 from app.utils.uploads import resolve_stored_upload
 from app.utils.workflow_transitions import (
     DOCTOR_CLAIM_STATUS_TRANSITIONS,
-    validate_editable_status,
     validate_status_transition,
+)
+from app.utils.timezone import india_now
+from app.utils.domain_errors import DomainHTTPException
+from app.services.reimbursement_policy_service import (
+    CALCULATION_VERSION,
+    ROUNDING_MODE,
+)
+from app.services.domain_audit_service import record_domain_audit_event
+from app.services.claim_readiness_service import (
+    build_doctor_claim_readiness,
+    raise_for_claim_readiness,
 )
 
 
@@ -57,80 +68,100 @@ def _get_current_doctor(db: Session, current_user: User) -> Doctor:
     return doctor
 
 
+@router.get(
+    "/preview",
+    response_model=DoctorClaimReadinessResponse,
+)
+def preview_doctor_claim(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["doctor"])),
+):
+    doctor = _get_current_doctor(db, current_user)
+    return build_doctor_claim_readiness(
+        db,
+        doctor_id=doctor.id,
+        business_date=india_now().date(),
+    ).response()
+
+
 @router.post(
     "/submit",
     response_model=DoctorClaimDetailsResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def submit_doctor_claim(
+    response: Response,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["doctor"])),
 ):
-    today = date.today()
+    today = india_now().date()
 
     try:
         doctor = _get_current_doctor(db, current_user)
-        existing_claim = (
-            db.query(DoctorClaim)
-            .filter(
-                DoctorClaim.doctor_id == doctor.id,
-                DoctorClaim.claim_date == today,
-            )
-            .with_for_update()
-            .first()
+        readiness = build_doctor_claim_readiness(
+            db,
+            doctor_id=doctor.id,
+            business_date=today,
+            lock=True,
         )
+        existing_claim = readiness.existing_claim
         if (
-            existing_claim is not None
+            readiness.state == "already_submitted"
+            and existing_claim is not None
         ):
-            validate_editable_status(
-                entity="Doctor claim",
-                current_status=existing_claim.status,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Doctor claim for today already exists "
-                    f"with status '{existing_claim.status}'"
-                ),
-            )
+            response.headers["X-Idempotent-Replay"] = "true"
+            response.status_code = status.HTTP_200_OK
+            return existing_claim
 
-        expenses = (
-            db.query(DoctorExpense)
-            .filter(
-                DoctorExpense.doctor_id == doctor.id,
-                DoctorExpense.expense_date == today,
-                DoctorExpense.status == "draft",
-                DoctorExpense.claim_id.is_(None),
-            )
-            .with_for_update()
-            .all()
-        )
-        if not expenses:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No draft expenses found for today",
-            )
-
-        total_amount = round(
-            sum(expense.fare for expense in expenses),
-            2,
-        )
+        raise_for_claim_readiness(readiness)
+        expenses = readiness.eligible_records
         submitted_at = datetime.now(timezone.utc)
 
-        claim = DoctorClaim(
+        prior_status = (
+            existing_claim.status if existing_claim is not None else "draft"
+        )
+        claim = existing_claim or DoctorClaim(
             doctor_id=doctor.id,
             claim_date=today,
-            total_amount=total_amount,
-            expense_count=len(expenses),
-            status="pending",
             submitted_at=submitted_at,
         )
+        claim.total_amount = readiness.expense_total
+        claim.expense_count = len(expenses)
+        claim.status = "pending"
+        claim.submitted_at = submitted_at
+        claim.approved_at = None
+        claim.approved_by = None
+        claim.rejection_reason = None
+        claim.calculation_version = CALCULATION_VERSION
+        claim.rounding_mode = ROUNDING_MODE
+        claim.included_expense_ids = [expense.id for expense in expenses]
+        if existing_claim is not None:
+            claim.revision = int(claim.revision or 1) + 1
         db.add(claim)
         db.flush()
 
         for expense in expenses:
             expense.claim_id = claim.id
             expense.status = "submitted"
+
+        record_domain_audit_event(
+            db,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            domain="financial",
+            entity_type="doctor_claim",
+            entity_id=claim.id,
+            action=("resubmitted" if existing_claim is not None else "submitted"),
+            business_date=claim.claim_date,
+            from_state=prior_status,
+            to_state="pending",
+            related_entity_type="doctor",
+            related_entity_id=doctor.id,
+            details={
+                "revision": int(claim.revision or 1),
+                "record_count": len(expenses),
+            },
+        )
 
         db.flush()
         db.refresh(claim)
@@ -485,10 +516,26 @@ def approve_doctor_claim(
             transitions=DOCTOR_CLAIM_STATUS_TRANSITIONS,
         )
 
+        prior_status = claim.status
         claim.status = "approved"
         claim.approved_at = datetime.now(timezone.utc)
         claim.approved_by = current_user.id
         claim.rejection_reason = None
+        record_domain_audit_event(
+            db,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            domain="financial",
+            entity_type="doctor_claim",
+            entity_id=claim.id,
+            action="approved",
+            business_date=claim.claim_date,
+            from_state=prior_status,
+            to_state="approved",
+            related_entity_type="doctor",
+            related_entity_id=claim.doctor_id,
+            details={"revision": int(claim.revision or 1)},
+        )
 
         db.flush()
         db.refresh(claim)
@@ -536,6 +583,7 @@ def reject_doctor_claim(
             transitions=DOCTOR_CLAIM_STATUS_TRANSITIONS,
         )
 
+        prior_status = claim.status
         expenses = (
             db.query(DoctorExpense)
             .filter(DoctorExpense.claim_id == claim.id)
@@ -551,6 +599,26 @@ def reject_doctor_claim(
         claim.approved_by = None
         claim.rejection_reason = (
             reject_data.rejection_reason.strip()
+        )
+        record_domain_audit_event(
+            db,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            domain="financial",
+            entity_type="doctor_claim",
+            entity_id=claim.id,
+            action="changes_requested",
+            business_date=claim.claim_date,
+            from_state=prior_status,
+            to_state="rejected",
+            reason_code="review_changes_requested",
+            reason=reject_data.rejection_reason,
+            related_entity_type="doctor",
+            related_entity_id=claim.doctor_id,
+            details={
+                "revision": int(claim.revision or 1),
+                "released_record_count": len(expenses),
+            },
         )
 
         db.flush()

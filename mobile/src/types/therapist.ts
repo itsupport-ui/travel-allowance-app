@@ -23,4 +23,6 @@ export interface UpdateTherapistPayload {
   email: string;
   is_active: boolean;
   password?: string;
+  deactivation_reason?: string | null;
+  override_request_id?: number | null;
 }

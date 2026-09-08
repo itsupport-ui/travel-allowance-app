@@ -1,0 +1,85 @@
+name: Quality gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests and migrations
+    runs-on: ubuntu-latest
+    env:
+      CORS_ORIGINS: http://localhost:4173
+      DATABASE_URL: sqlite:///./ci-app.db
+      GOOGLE_MAPS_API_KEY: ci-test-key
+      JWT_SECRET_KEY: ci-only-secret-not-for-production
+      UPLOAD_ROOT: /tmp/travel-allowance-test-uploads
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q
+      - run: alembic heads
+
+  web:
+    name: Web lint, build, and browser tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+          node-version: "22"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run test:e2e
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: ignore
+          name: playwright-failure-artifacts
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          retention-days: 7
+
+  mobile:
+    name: Android client unit tests, lint, and types
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+          node-version: "22"
+      - run: npm ci
+      - run: npm run test:unit
+      - run: npm run lint
+      - run: npx tsc --noEmit

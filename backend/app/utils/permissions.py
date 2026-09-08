@@ -3,6 +3,10 @@ ALL_PERMISSIONS = "*"
 
 ROLE_PERMISSIONS = {
     "admin": {
+        "audit.view",
+        "follow_ups.manage",
+        "staff_overrides.request",
+        "staff_overrides.decide",
         "consultations.manage",
         "doctor_visits.manage",
         "treatment_plans.approve",

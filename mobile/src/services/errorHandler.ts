@@ -261,8 +261,16 @@ const isNetworkError = (error: unknown): boolean =>
   isAxiosError(error) && !error.response;
 
 const getErrorCode = (error: unknown): string | undefined => {
-  if (isAxiosError(error) && typeof error.code === "string") {
-    return error.code;
+  if (isAxiosError(error)) {
+    const responseCode = isRecord(error.response?.data)
+      ? error.response.data.code
+      : undefined;
+    if (typeof responseCode === "string") {
+      return responseCode;
+    }
+    if (typeof error.code === "string") {
+      return error.code;
+    }
   }
 
   if (isRecord(error) && typeof error.code === "string") {

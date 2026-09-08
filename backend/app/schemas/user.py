@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 
@@ -16,8 +16,7 @@ class UserResponse(BaseModel):
     is_active: bool
     permissions: list[str] = Field(default_factory=list)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class LoginRequest(BaseModel):
     email: str
@@ -35,8 +34,7 @@ class TherapistResponse(BaseModel):
     role: str
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TherapistUpdate(BaseModel):
@@ -44,6 +42,8 @@ class TherapistUpdate(BaseModel):
     email: EmailStr
     is_active: bool
     password: str | None = Field(default=None, min_length=8, max_length=128)
+    deactivation_reason: str | None = Field(default=None, max_length=500)
+    override_request_id: int | None = Field(default=None, ge=1)
 
     @field_validator("username")
     @classmethod

@@ -36,9 +36,26 @@ interface ReportDashboardProps {
 interface ReportExportPanelProps {
   csvExporting: boolean;
   disabled: boolean;
+  excelExporting: boolean;
   onExportCsv: () => void;
+  onExportExcel: () => void;
   onExportPdf: () => void;
+  onPreview: () => void;
   pdfExporting: boolean;
+  reportType:
+    | "consolidated_claims"
+    | "organization_attendance"
+    | "organization_expenses"
+    | "organization_clinical_activity"
+    | "organization_exceptions"
+    | "organization_performance";
+  preview: {
+    expiresAt: string;
+    rowCount: number;
+    summary: Record<string, number | string>;
+    totalAmount: number;
+  } | null;
+  previewing: boolean;
 }
 
 interface KpiDefinition {
@@ -253,9 +270,15 @@ export const ReportExportPanel = memo(
   ({
     csvExporting,
     disabled,
+    excelExporting,
     onExportCsv,
+    onExportExcel,
     onExportPdf,
+    onPreview,
     pdfExporting,
+    reportType,
+    preview,
+    previewing,
   }: ReportExportPanelProps) => (
     <View style={styles.exportPanel}>
       <View style={styles.exportHeading}>
@@ -269,21 +292,89 @@ export const ReportExportPanel = memo(
         <View style={styles.exportHeadingText}>
           <Text style={styles.exportTitle}>Export report</Text>
           <Text style={styles.exportSubtitle}>
-            Uses the currently applied filters
+            Preview the applied filters before choosing a format
           </Text>
         </View>
       </View>
+      <TouchableOpacity
+        accessibilityLabel={`Preview filtered ${reportType === "consolidated_claims" ? "claim" : reportType === "organization_attendance" ? "attendance" : reportType === "organization_expenses" ? "travel and expense" : reportType === "organization_clinical_activity" ? "clinical activity" : reportType === "organization_performance" ? "staff performance" : "operational exception"} export`}
+        accessibilityRole="button"
+        accessibilityState={{ busy: previewing, disabled }}
+        disabled={disabled}
+        onPress={onPreview}
+        style={[
+          styles.previewButton,
+          disabled ? styles.disabledControl : null,
+        ]}
+      >
+        {previewing ? (
+          <ActivityIndicator color={colors.surface} size="small" />
+        ) : (
+          <Ionicons color={colors.surface} name="eye-outline" size={18} />
+        )}
+        <Text style={styles.exportButtonText}>
+          {previewing ? "Previewing..." : "Preview export"}
+        </Text>
+      </TouchableOpacity>
+      {preview ? (
+        <View accessibilityLiveRegion="polite" style={styles.previewSummary}>
+          <Text style={styles.previewTotal}>
+            {preview.rowCount.toLocaleString("en-IN")} {reportType === "consolidated_claims" ? "claim" : reportType === "organization_attendance" ? "workday" : reportType === "organization_expenses" ? "entry" : reportType === "organization_clinical_activity" ? "activity" : reportType === "organization_performance" ? "staff member" : "exception"}
+            {preview.rowCount === 1 ? "" : "s"}
+            {reportType === "consolidated_claims"
+              ? ` · ${new Intl.NumberFormat("en-IN", {
+                  currency: "INR",
+                  style: "currency",
+                }).format(preview.totalAmount)}`
+              : reportType === "organization_attendance"
+                ? ` · ${Number(preview.summary.total_work_minutes ?? 0).toLocaleString("en-IN")} worked minutes`
+                : reportType === "organization_expenses"
+                  ? ` · ${new Intl.NumberFormat("en-IN", {
+                      currency: "INR",
+                      style: "currency",
+                    }).format(preview.totalAmount)} · ${Number(preview.summary.total_distance_km ?? 0).toLocaleString("en-IN")} km`
+                  : reportType === "organization_clinical_activity"
+                    ? ` · ${Number(preview.summary.total_clinical_minutes ?? 0).toLocaleString("en-IN")} clinical minutes`
+                    : reportType === "organization_performance"
+                      ? ` · ${Number(preview.summary.total_workdays ?? 0).toLocaleString("en-IN")} workdays · ${Number(preview.summary.completed_clinical_activities ?? 0).toLocaleString("en-IN")} completed activities`
+                      : ` · ${Number(preview.summary.overdue_exceptions ?? 0).toLocaleString("en-IN")} overdue`}
+          </Text>
+          <Text style={styles.previewExpiry}>
+            Exact snapshot available until {new Date(
+              preview.expiresAt
+            ).toLocaleString("en-IN")}.
+          </Text>
+          <Text style={styles.previewExpiry}>
+            {reportType === "consolidated_claims"
+              ? "Patient-identifying columns are excluded."
+              : reportType === "organization_attendance"
+                ? "Precise locations and patient-identifying data are excluded."
+                : reportType === "organization_expenses"
+                  ? "Addresses, coordinates, patient data, remarks, and proof paths are excluded."
+                  : reportType === "organization_clinical_activity"
+                    ? "Patients, diagnoses, notes, phone numbers, and locations are excluded."
+                    : reportType === "organization_performance"
+                      ? "Objective totals only; no ranking or composite score. Patients, locations, notes, and proof files are excluded."
+                      : "Patients, locations, clinical text, and free-text reasons are excluded."}
+          </Text>
+        </View>
+      ) : null}
       <View style={styles.exportActions}>
         <TouchableOpacity
           accessibilityLabel="Export filtered report as CSV"
           accessibilityRole="button"
-          accessibilityState={{ busy: csvExporting, disabled }}
+          accessibilityState={{
+            busy: csvExporting,
+            disabled: disabled || !preview || preview.rowCount === 0,
+          }}
           activeOpacity={0.82}
-          disabled={disabled}
+          disabled={disabled || !preview || preview.rowCount === 0}
           onPress={onExportCsv}
           style={[
             styles.exportButton,
-            disabled ? styles.disabledControl : null,
+            disabled || !preview || preview.rowCount === 0
+              ? styles.disabledControl
+              : null,
           ]}
         >
           {csvExporting ? (
@@ -302,14 +393,19 @@ export const ReportExportPanel = memo(
         <TouchableOpacity
           accessibilityLabel="Export filtered report as PDF"
           accessibilityRole="button"
-          accessibilityState={{ busy: pdfExporting, disabled }}
+          accessibilityState={{
+            busy: pdfExporting,
+            disabled: disabled || !preview || preview.rowCount === 0,
+          }}
           activeOpacity={0.82}
-          disabled={disabled}
+          disabled={disabled || !preview || preview.rowCount === 0}
           onPress={onExportPdf}
           style={[
             styles.exportButton,
             styles.pdfButton,
-            disabled ? styles.disabledControl : null,
+            disabled || !preview || preview.rowCount === 0
+              ? styles.disabledControl
+              : null,
           ]}
         >
           {pdfExporting ? (
@@ -325,32 +421,32 @@ export const ReportExportPanel = memo(
             {pdfExporting ? "Preparing..." : "PDF"}
           </Text>
         </TouchableOpacity>
-        <View
-          accessibilityLabel="Excel export is planned"
-          accessibilityState={{ disabled: true }}
-          style={[styles.futureExport, styles.disabledControl]}
+        <TouchableOpacity
+          accessibilityLabel="Export filtered report as Excel"
+          accessibilityRole="button"
+          accessibilityState={{
+            busy: excelExporting,
+            disabled: disabled || !preview || preview.rowCount === 0,
+          }}
+          activeOpacity={0.82}
+          disabled={disabled || !preview || preview.rowCount === 0}
+          onPress={onExportExcel}
+          style={[
+            styles.exportButton,
+            disabled || !preview || preview.rowCount === 0
+              ? styles.disabledControl
+              : null,
+          ]}
         >
-          <Ionicons
-            color={colors.textMuted}
-            name="apps-outline"
-            size={18}
-          />
-          <Text style={styles.futureExportText}>Excel</Text>
-          <Text style={styles.futureLabel}>Soon</Text>
-        </View>
-        <View
-          accessibilityLabel="Print export is planned"
-          accessibilityState={{ disabled: true }}
-          style={[styles.futureExport, styles.disabledControl]}
-        >
-          <Ionicons
-            color={colors.textMuted}
-            name="print-outline"
-            size={18}
-          />
-          <Text style={styles.futureExportText}>Print</Text>
-          <Text style={styles.futureLabel}>Soon</Text>
-        </View>
+          {excelExporting ? (
+            <ActivityIndicator color={colors.surface} size="small" />
+          ) : (
+            <Ionicons color={colors.surface} name="apps-outline" size={18} />
+          )}
+          <Text style={styles.exportButtonText}>
+            {excelExporting ? "Preparing..." : "Excel"}
+          </Text>
+        </TouchableOpacity>
       </View>
     </View>
   )
@@ -1149,6 +1245,36 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     marginTop: spacing.xl,
   },
+  previewButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.primary,
+    borderRadius: radius.control,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "center",
+    marginTop: spacing.xl,
+    minHeight: 44,
+    paddingHorizontal: spacing.xl,
+  },
+  previewSummary: {
+    backgroundColor: colors.primarySurface,
+    borderColor: colors.primaryBorder,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    marginTop: spacing.lg,
+    padding: spacing.lg,
+  },
+  previewTotal: {
+    color: colors.textPrimary,
+    fontSize: typography.size.body,
+    fontWeight: typography.weight.extrabold,
+  },
+  previewExpiry: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    marginTop: spacing.xs,
+  },
   exportButton: {
     alignItems: "center",
     backgroundColor: colors.primaryDark,
@@ -1167,29 +1293,6 @@ const styles = StyleSheet.create({
     color: colors.surface,
     fontSize: typography.size.smallLarge,
     fontWeight: typography.weight.extrabold,
-  },
-  futureExport: {
-    alignItems: "center",
-    backgroundColor: colors.neutral100,
-    borderColor: colors.border,
-    borderRadius: radius.control,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: spacing.sm,
-    minHeight: 46,
-    minWidth: 104,
-    paddingHorizontal: spacing.lg,
-  },
-  futureExportText: {
-    color: colors.textMuted,
-    fontSize: typography.size.smallLarge,
-    fontWeight: typography.weight.extrabold,
-  },
-  futureLabel: {
-    color: colors.textSubtle,
-    fontSize: typography.size.micro,
-    fontWeight: typography.weight.extrabold,
-    textTransform: "uppercase",
   },
   disabledControl: {
     opacity: 0.58,

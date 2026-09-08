@@ -15,6 +15,8 @@ from app.models.doctor_expense import DoctorExpense
 from app.models.doctor_travel_waypoint import DoctorTravelWaypoint
 from app.models.doctor_visit import DoctorVisit
 from app.models.doctor_workday import DoctorWorkDay
+from app.models.domain_audit_event import DomainAuditEvent
+from app.models.reimbursement_policy import ReimbursementPolicy
 from app.models.user import User
 from app.routers import (
     doctor_expense,
@@ -111,10 +113,23 @@ class DoctorAttendanceTravelExpenseTests(unittest.TestCase):
         )
 
         self.assertGreater(first.json()["workday_id"], 0)
-        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(duplicate.status_code, 201)
+        self.assertEqual(
+            duplicate.json()["workday_id"],
+            first.json()["workday_id"],
+        )
         self.assertEqual(self.db.query(DoctorWorkDay).count(), 1)
         waypoint = self.db.query(DoctorTravelWaypoint).one()
         self.assertEqual(waypoint.waypoint_type, "START")
+        self.assertEqual(
+            self.db.query(DomainAuditEvent)
+            .filter(
+                DomainAuditEvent.entity_type == "doctor_workday",
+                DomainAuditEvent.action == "started",
+            )
+            .count(),
+            1,
+        )
 
     def test_punch_in_requires_workday_and_geofence(self):
         visit = self.create_visit()
@@ -163,11 +178,16 @@ class DoctorAttendanceTravelExpenseTests(unittest.TestCase):
 
         self.assertEqual(punched_in.status_code, 200, punched_in.text)
         self.assertEqual(punched_in.json()["session_status"], "IN_PROGRESS")
-        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(duplicate.json()["session_status"], "IN_PROGRESS")
         self.assertEqual(punched_out.status_code, 200, punched_out.text)
         self.assertEqual(punched_out.json()["session_status"], "COMPLETED")
         self.assertEqual(punched_out.json()["visit_status"], "visited")
-        self.assertEqual(duplicate_out.status_code, 400)
+        self.assertEqual(duplicate_out.status_code, 200)
+        self.assertEqual(
+            duplicate_out.json()["session_status"],
+            "COMPLETED",
+        )
         self.assertEqual(self.db.query(DoctorTravelWaypoint).count(), 2)
 
     def test_punch_out_requires_punch_in(self):
@@ -187,6 +207,15 @@ class DoctorAttendanceTravelExpenseTests(unittest.TestCase):
         return_value=4.2,
     )
     def test_completed_visit_prefills_and_links_expense(self, _distance):
+        self.db.add(
+            ReimbursementPolicy(
+                version=1,
+                effective_from=date.today(),
+                per_km_rate=8,
+                daily_allowance=150,
+            )
+        )
+        self.db.commit()
         self.start_workday()
         visit = self.create_visit()
         self.client.post(
@@ -205,7 +234,7 @@ class DoctorAttendanceTravelExpenseTests(unittest.TestCase):
                 "expense_date": date.today().isoformat(),
                 "visit_id": str(visit.id),
                 "transport_mode": "car",
-                "fare": "150",
+                "expense_category": "mileage",
                 "remarks": "Parking included",
             },
         )
@@ -215,7 +244,7 @@ class DoctorAttendanceTravelExpenseTests(unittest.TestCase):
                 "expense_date": date.today().isoformat(),
                 "visit_id": str(visit.id),
                 "transport_mode": "car",
-                "fare": "150",
+                "expense_category": "mileage",
             },
         )
 
@@ -225,6 +254,9 @@ class DoctorAttendanceTravelExpenseTests(unittest.TestCase):
         self.assertEqual(expense.status_code, 201, expense.text)
         self.assertEqual(expense.json()["visit_id"], visit.id)
         self.assertEqual(expense.json()["distance_km"], 4.2)
+        self.assertEqual(expense.json()["fare"], 33.6)
+        self.assertEqual(expense.json()["rate_applied"], 8.0)
+        self.assertEqual(expense.json()["expense_category"], "mileage")
         self.assertEqual(duplicate.status_code, 400)
         stored = self.db.query(DoctorExpense).one()
         self.assertIsNotNone(stored.workday_id)
@@ -298,9 +330,56 @@ class DoctorAttendanceTravelExpenseTests(unittest.TestCase):
                 "end_longitude": 77.0,
             },
         )
+        duplicate_end = self.client.post(
+            "/doctor/workday/end",
+            json={
+                "end_address": "Different retry value",
+                "end_latitude": 13.03,
+                "end_longitude": 77.01,
+            },
+        )
 
         self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(duplicate_end.status_code, 200, duplicate_end.text)
+        self.assertEqual(
+            duplicate_end.json()["workday_id"],
+            response.json()["workday_id"],
+        )
         self.assertEqual(response.json()["total_visits_count"], 2)
         self.assertEqual(response.json()["completed_visits_count"], 1)
         self.assertEqual(response.json()["pending_visits_count"], 1)
         self.assertEqual(self.db.query(DoctorTravelWaypoint).count(), 2)
+
+    @patch(
+        "app.routers.doctor_workday.india_now",
+        return_value=datetime(2026, 7, 28, 16, 30, tzinfo=IST),
+    )
+    def test_doctor_can_end_early_with_an_audited_reason(self, _now):
+        workday = DoctorWorkDay(
+            doctor_id=self.doctor.id,
+            work_date=date(2026, 7, 28),
+            start_address="Start",
+            start_latitude=13.0,
+            start_longitude=77.0,
+            started_at=datetime(2026, 7, 28, 3, 30),
+            is_active=True,
+        )
+        self.db.add(workday)
+        self.db.commit()
+
+        response = self.client.post(
+            "/doctor/workday/end",
+            json={
+                "end_address": "Clinic",
+                "end_latitude": 13.02,
+                "end_longitude": 77.0,
+                "early_end_reason": "No further assigned visits",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["ended_early"])
+        self.assertEqual(
+            response.json()["end_reason"],
+            "No further assigned visits",
+        )

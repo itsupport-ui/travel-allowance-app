@@ -32,6 +32,8 @@ from app.services.maps_service import reverse_geocode_address
 from app.services.schedule_location_service import has_valid_coordinates
 from app.utils.auth import require_role
 from app.utils.timezone import india_now
+from app.utils.domain_errors import DomainHTTPException
+from app.services.domain_audit_service import record_domain_audit_event
 
 
 router = APIRouter(
@@ -69,8 +71,38 @@ def get_today_doctor_workday(
             started=False,
             work_date=now.date(),
             is_active=False,
+            available_actions=["start_workday"],
+            next_action="start_workday",
             **policy,
         )
+
+    active_visit = (
+        db.query(DoctorVisit.id)
+        .filter(
+            DoctorVisit.doctor_id == doctor.id,
+            DoctorVisit.status == "scheduled",
+            DoctorVisit.session_status == "IN_PROGRESS",
+        )
+        .first()
+        if workday.is_active
+        else None
+    )
+    available_actions: list[str] = []
+    blocking_reasons: list[str] = []
+    next_action = None
+    if workday.is_active and active_visit is not None:
+        available_actions = ["resume_visit"]
+        blocking_reasons = ["ACTIVE_VISIT_BLOCKS_WORKDAY_END"]
+        next_action = "punch_out_active_visit"
+    elif workday.is_active:
+        available_actions = ["view_visits"]
+        next_action = "view_visits"
+        if policy["can_end_workday"]:
+            available_actions.append("end_workday")
+            next_action = "end_workday"
+        else:
+            available_actions.append("end_workday_early_with_reason")
+            blocking_reasons = ["EARLY_END_REASON_REQUIRED"]
 
     return DoctorTodayWorkdayResponse(
         started=True,
@@ -82,11 +114,20 @@ def get_today_doctor_workday(
         start_longitude=workday.start_longitude,
         is_active=workday.is_active,
         ended_at=workday.ended_at,
+        ended_early=workday.ended_early,
+        end_reason=workday.end_reason,
+        early_end_review_status=workday.early_end_review_status,
         total_work_minutes=workday.total_work_minutes,
         total_visits_count=workday.total_visits_count,
         completed_visits_count=workday.completed_visits_count,
         pending_visits_count=workday.pending_visits_count,
         total_distance_km=workday.total_distance_km,
+        available_actions=available_actions,
+        blocking_reasons=blocking_reasons,
+        next_action=next_action,
+        active_visit_id=(
+            active_visit[0] if active_visit is not None else None
+        ),
         **{
             **policy,
             "can_end_workday": (
@@ -119,10 +160,19 @@ def start_doctor_workday(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The captured current location is invalid.",
         )
-    if get_doctor_workday(db, doctor.id, now.date()) is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Workday has already been started for today.",
+    existing_workday = get_doctor_workday(db, doctor.id, now.date())
+    if existing_workday is not None:
+        if existing_workday.is_active:
+            return DoctorStartDayResponse(
+                message="Doctor workday is already active.",
+                workday_id=existing_workday.id,
+            )
+        raise DomainHTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            code="WORKDAY_ALREADY_COMPLETED",
+            message="Workday has already been completed for today.",
+            recoverable=False,
+            suggested_action="view_workday_summary",
         )
 
     started_at = datetime.now(timezone.utc)
@@ -147,6 +197,20 @@ def start_doctor_workday(
         address=payload.start_address.strip(),
         recorded_at=started_at,
     )
+    record_domain_audit_event(
+        db,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        domain="attendance",
+        entity_type="doctor_workday",
+        entity_id=workday.id,
+        action="started",
+        business_date=workday.work_date,
+        from_state="not_started",
+        to_state="active",
+        related_entity_type="doctor",
+        related_entity_id=doctor.id,
+    )
     db.commit()
     return DoctorStartDayResponse(
         message="Doctor workday started successfully.",
@@ -164,13 +228,18 @@ def end_doctor_workday(
     current_user: User = Depends(require_role(["doctor"])),
 ):
     now = india_now()
-    if now.time().replace(tzinfo=None) < WORKDAY_END_TIME:
-        raise HTTPException(
+    ended_early = now.time().replace(tzinfo=None) < WORKDAY_END_TIME
+    if ended_early and not payload.early_end_reason:
+        raise DomainHTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "The workday can be ended at or after "
+            code="EARLY_END_REASON_REQUIRED",
+            message=(
+                "Enter a reason to end the workday before "
                 f"{WORKDAY_END_TIME.strftime('%H:%M')}."
             ),
+            recoverable=True,
+            suggested_action="provide_early_end_reason",
+            blocking_fields=["early_end_reason"],
         )
     if not has_valid_coordinates(
         payload.end_latitude,
@@ -193,9 +262,43 @@ def end_doctor_workday(
         .first()
     )
     if workday is None:
-        raise HTTPException(
+        completed_workday = (
+            db.query(DoctorWorkDay)
+            .filter(
+                DoctorWorkDay.doctor_id == doctor.id,
+                DoctorWorkDay.work_date == now.date(),
+                DoctorWorkDay.is_active.is_(False),
+                DoctorWorkDay.ended_at.is_not(None),
+            )
+            .order_by(DoctorWorkDay.id.desc())
+            .first()
+        )
+        if completed_workday is not None:
+            return DoctorEndDayResponse(
+                message="Doctor workday was already ended successfully.",
+                workday_id=completed_workday.id,
+                ended_at=completed_workday.ended_at,
+                total_work_minutes=completed_workday.total_work_minutes or 0,
+                total_visits_count=completed_workday.total_visits_count or 0,
+                completed_visits_count=(
+                    completed_workday.completed_visits_count or 0
+                ),
+                pending_visits_count=(
+                    completed_workday.pending_visits_count or 0
+                ),
+                total_distance_km=completed_workday.total_distance_km or 0,
+                ended_early=completed_workday.ended_early,
+                end_reason=completed_workday.end_reason,
+                early_end_review_status=(
+                    completed_workday.early_end_review_status
+                ),
+            )
+        raise DomainHTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No active workday was found for today.",
+            code="WORKDAY_NOT_ACTIVE",
+            message="No active workday was found for today.",
+            recoverable=True,
+            suggested_action="refresh_workday_status",
         )
     active_visit = (
         db.query(DoctorVisit.id)
@@ -208,9 +311,13 @@ def end_doctor_workday(
         .first()
     )
     if active_visit is not None:
-        raise HTTPException(
+        raise DomainHTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Punch out from the active visit before ending the workday.",
+            code="ACTIVE_VISIT_BLOCKS_WORKDAY_END",
+            message="Punch out from the active visit before ending the workday.",
+            recoverable=True,
+            suggested_action="punch_out_active_visit",
+            blocking_fields=["active_visit_id"],
         )
 
     visits = db.query(DoctorVisit).filter(
@@ -243,6 +350,9 @@ def end_doctor_workday(
         recorded_at=ended_at,
     )
     workday.ended_at = ended_at
+    workday.ended_early = ended_early
+    workday.end_reason = payload.early_end_reason
+    workday.early_end_review_status = "pending" if ended_early else None
     workday.end_address = end_address
     workday.end_latitude = payload.end_latitude
     workday.end_longitude = payload.end_longitude
@@ -259,6 +369,26 @@ def end_doctor_workday(
     db.flush()
     workday.total_distance_km = total_workday_distance(db, workday.id)
     workday.is_active = False
+    record_domain_audit_event(
+        db,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        domain="attendance",
+        entity_type="doctor_workday",
+        entity_id=workday.id,
+        action="ended",
+        business_date=workday.work_date,
+        from_state="active",
+        to_state="ended_early" if ended_early else "completed",
+        reason_code="early_closure" if ended_early else None,
+        reason=payload.early_end_reason if ended_early else None,
+        related_entity_type="doctor",
+        related_entity_id=doctor.id,
+        details={
+            "completed_count": completed_visits,
+            "pending_count": pending_visits,
+        },
+    )
     db.commit()
     db.refresh(workday)
 
@@ -271,6 +401,9 @@ def end_doctor_workday(
         completed_visits_count=workday.completed_visits_count or 0,
         pending_visits_count=workday.pending_visits_count or 0,
         total_distance_km=workday.total_distance_km or 0,
+        ended_early=workday.ended_early,
+        end_reason=workday.end_reason,
+        early_end_review_status=workday.early_end_review_status,
     )
 
 

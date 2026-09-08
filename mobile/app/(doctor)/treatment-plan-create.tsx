@@ -1,7 +1,7 @@
 import { colors, radius, spacing, typography } from "@/src/theme";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { router } from "expo-router";
-import { useMemo, useRef, useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -23,18 +23,74 @@ import {
 import { queryKeys } from "../../src/query/queryKeys";
 import {
   createTreatmentPlan,
+  getTreatmentPlan,
   getMyDoctorVisits,
   getMyTreatmentPlans,
+  resubmitTreatmentPlan,
 } from "../../src/services/doctorWorkflowService";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
 import {
   formatDoctorDate,
   nullableDoctorText,
+  parsePositiveId,
 } from "../../src/utils/doctorWorkflow";
+import {
+  buildFormDraftKey,
+  loadFormDraft,
+  removeFormDraft,
+  saveFormDraft,
+} from "../../src/utils/formDraftStorage";
+import { getStoredUser } from "../../src/utils/storage";
+
+interface TreatmentPlanFormDraft {
+  chiefComplaint: string;
+  diagnosis: string;
+  duration: string;
+  frequency: string;
+  medicines: string;
+  remarks: string;
+  selectedVisitId: number | null;
+  sessionsRequired: string;
+  specialInstructions: string;
+  treatmentPlan: string;
+}
+
+const isTreatmentPlanFormDraft = (
+  value: unknown
+): value is TreatmentPlanFormDraft => {
+  if (typeof value !== "object" || value === null) return false;
+  const draft = value as Partial<TreatmentPlanFormDraft>;
+  return (
+    typeof draft.chiefComplaint === "string" &&
+    typeof draft.diagnosis === "string" &&
+    typeof draft.duration === "string" &&
+    typeof draft.frequency === "string" &&
+    typeof draft.medicines === "string" &&
+    typeof draft.remarks === "string" &&
+    (draft.selectedVisitId === null ||
+      typeof draft.selectedVisitId === "number") &&
+    typeof draft.sessionsRequired === "string" &&
+    typeof draft.specialInstructions === "string" &&
+    typeof draft.treatmentPlan === "string"
+  );
+};
 
 export default function CreateDoctorTreatmentPlanScreen() {
+  const params = useLocalSearchParams<{ id?: string | string[] }>();
+  const correctionPlanId = useMemo(
+    () => parsePositiveId(params.id),
+    [params.id]
+  );
+  const isCorrection = correctionPlanId !== null;
   const queryClient = useQueryClient();
   const submittingRef = useRef(false);
+  const draftInitializedRef = useRef(false);
+  const [draftKey, setDraftKey] = useState<string | null>(null);
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftTouched, setDraftTouched] = useState(false);
+  const [draftNotice, setDraftNotice] = useState<"restored" | "saved" | null>(
+    null
+  );
   const [chiefComplaint, setChiefComplaint] = useState("");
   const [diagnosis, setDiagnosis] = useState("");
   const [duration, setDuration] = useState("");
@@ -48,6 +104,19 @@ export default function CreateDoctorTreatmentPlanScreen() {
   const [sessionsRequired, setSessionsRequired] = useState("");
   const [specialInstructions, setSpecialInstructions] = useState("");
   const [treatmentPlan, setTreatmentPlan] = useState("");
+  const correctionQuery = useQuery({
+    enabled: isCorrection,
+    queryFn: () => {
+      if (correctionPlanId === null) {
+        throw new Error("A valid treatment plan ID is required.");
+      }
+      return getTreatmentPlan(correctionPlanId);
+    },
+    queryKey:
+      correctionPlanId === null
+        ? ["doctor", "treatment-plans", "correction", "invalid"]
+        : queryKeys.doctor.treatmentPlans.detail(correctionPlanId),
+  });
   const plansQuery = useQuery({
     queryFn: getMyTreatmentPlans,
     queryKey: queryKeys.doctor.treatmentPlans.all,
@@ -68,27 +137,150 @@ export default function CreateDoctorTreatmentPlanScreen() {
   const selectedVisit = eligibleVisits.find(
     (visit) => visit.id === selectedVisitId
   );
+  useEffect(() => {
+    const plan = correctionQuery.data;
+    if (!plan || plan.status !== "rejected") return;
+    setChiefComplaint(plan.chief_complaint ?? "");
+    setDiagnosis(plan.diagnosis ?? "");
+    setDuration(plan.duration ?? "");
+    setFrequency(plan.frequency ?? "");
+    setMedicines(plan.medicines ?? "");
+    setRemarks(plan.remarks ?? "");
+    setSessionsRequired(
+      plan.sessions_required == null ? "" : String(plan.sessions_required)
+    );
+    setSpecialInstructions(plan.special_instructions ?? "");
+    setTreatmentPlan(plan.treatment_plan ?? "");
+  }, [correctionQuery.data]);
+  useEffect(() => {
+    if (draftInitializedRef.current) return;
+    if (isCorrection && !correctionQuery.data) return;
+    draftInitializedRef.current = true;
+    let active = true;
+
+    const initializeDraft = async () => {
+      const user = await getStoredUser();
+      if (!active || !user) {
+        if (active) setDraftReady(true);
+        return;
+      }
+      const key = buildFormDraftKey(
+        user.id,
+        isCorrection
+          ? `doctor-treatment-plan-correction-${correctionPlanId}`
+          : "doctor-treatment-plan-create"
+      );
+      setDraftKey(key);
+      try {
+        const stored = await loadFormDraft<TreatmentPlanFormDraft>(key);
+        if (!active || !stored || !isTreatmentPlanFormDraft(stored.data)) {
+          if (stored) await removeFormDraft(key);
+          if (active) setDraftReady(true);
+          return;
+        }
+        Alert.alert(
+          "Restore treatment plan draft?",
+          `An encrypted draft from ${new Date(stored.savedAt).toLocaleString()} is available on this device.`,
+          [
+            {
+              onPress: () => {
+                void removeFormDraft(key);
+                setDraftReady(true);
+              },
+              style: "destructive",
+              text: "Discard",
+            },
+            {
+              onPress: () => {
+                setChiefComplaint(stored.data.chiefComplaint);
+                setDiagnosis(stored.data.diagnosis);
+                setDuration(stored.data.duration);
+                setFrequency(stored.data.frequency);
+                setMedicines(stored.data.medicines);
+                setRemarks(stored.data.remarks);
+                setSelectedVisitId(stored.data.selectedVisitId);
+                setSessionsRequired(stored.data.sessionsRequired);
+                setSpecialInstructions(stored.data.specialInstructions);
+                setTreatmentPlan(stored.data.treatmentPlan);
+                setDraftNotice("restored");
+                setDraftTouched(true);
+                setDraftReady(true);
+              },
+              text: "Restore",
+            },
+          ],
+          { cancelable: false }
+        );
+      } catch {
+        if (active) setDraftReady(true);
+      }
+    };
+
+    void initializeDraft();
+    return () => {
+      active = false;
+    };
+  }, [correctionPlanId, correctionQuery.data, isCorrection]);
+
+  useEffect(() => {
+    if (!draftReady || !draftTouched || !draftKey) return undefined;
+    const timeout = setTimeout(() => {
+      void saveFormDraft<TreatmentPlanFormDraft>(draftKey, {
+        chiefComplaint,
+        diagnosis,
+        duration,
+        frequency,
+        medicines,
+        remarks,
+        selectedVisitId,
+        sessionsRequired,
+        specialInstructions,
+        treatmentPlan,
+      })
+        .then(() => setDraftNotice("saved"))
+        .catch(() => setDraftNotice(null));
+    }, 700);
+    return () => clearTimeout(timeout);
+  }, [
+    chiefComplaint,
+    diagnosis,
+    draftKey,
+    draftReady,
+    draftTouched,
+    duration,
+    frequency,
+    medicines,
+    remarks,
+    selectedVisitId,
+    sessionsRequired,
+    specialInstructions,
+    treatmentPlan,
+  ]);
   const mutation = useMutation({
     mutationFn: async () => {
-      if (!selectedVisit) {
+      if (!isCorrection && !selectedVisit) {
         throw new Error("Select a completed doctor visit.");
       }
 
-      return createTreatmentPlan({
+      const request = {
         chief_complaint: nullableDoctorText(chiefComplaint),
         diagnosis: nullableDoctorText(diagnosis),
-        doctor_id: selectedVisit.doctor_id,
-        doctor_visit_id: selectedVisit.id,
         duration: nullableDoctorText(duration),
         frequency: nullableDoctorText(frequency),
         medicines: nullableDoctorText(medicines),
-        patient_name: selectedVisit.patient_name,
         remarks: nullableDoctorText(remarks),
         sessions_required: sessionsRequired.trim()
           ? Number(sessionsRequired)
           : null,
         special_instructions: nullableDoctorText(specialInstructions),
         treatment_plan: nullableDoctorText(treatmentPlan),
+      };
+      if (isCorrection && correctionPlanId !== null) {
+        return resubmitTreatmentPlan(correctionPlanId, request);
+      }
+      return createTreatmentPlan({
+        ...request,
+        doctor_visit_id: selectedVisit!.id,
       });
     },
     onError: (error) => {
@@ -98,6 +290,7 @@ export default function CreateDoctorTreatmentPlanScreen() {
       );
     },
     onSuccess: async (plan) => {
+      if (draftKey) await removeFormDraft(draftKey);
       queryClient.setQueryData(
         queryKeys.doctor.treatmentPlans.detail(plan.id),
         plan
@@ -111,8 +304,10 @@ export default function CreateDoctorTreatmentPlanScreen() {
         }),
       ]);
       Alert.alert(
-        "Treatment Plan Submitted",
-        "The plan is awaiting admin approval.",
+        isCorrection ? "Plan Resubmitted" : "Treatment Plan Submitted",
+        isCorrection
+          ? "Your corrected revision is awaiting admin review."
+          : "The plan is awaiting admin approval.",
         [
           {
             onPress: () =>
@@ -140,6 +335,7 @@ export default function CreateDoctorTreatmentPlanScreen() {
     const visit = eligibleVisits.find((item) => item.id === visitId);
     setSelectedVisitId(visitId);
     setChiefComplaint(visit?.chief_complaint ?? "");
+    setDraftTouched(true);
     setFormError(null);
   };
   const submit = () => {
@@ -147,7 +343,7 @@ export default function CreateDoctorTreatmentPlanScreen() {
       return;
     }
 
-    if (!selectedVisit) {
+    if (!isCorrection && !selectedVisit) {
       setFormError("Select a completed doctor visit.");
       return;
     }
@@ -167,20 +363,22 @@ export default function CreateDoctorTreatmentPlanScreen() {
   };
 
   if (
-    (plansQuery.isPending && !plansQuery.data) ||
-    (visitsQuery.isPending && !visitsQuery.data)
+    (!isCorrection && plansQuery.isPending && !plansQuery.data) ||
+    (!isCorrection && visitsQuery.isPending && !visitsQuery.data) ||
+    (isCorrection && correctionQuery.isPending && !correctionQuery.data)
   ) {
     return <DoctorLoadingState label="Loading eligible visits..." />;
   }
 
   if (
-    (plansQuery.error && !plansQuery.data) ||
-    (visitsQuery.error && !visitsQuery.data)
+    (!isCorrection && plansQuery.error && !plansQuery.data) ||
+    (!isCorrection && visitsQuery.error && !visitsQuery.data) ||
+    (isCorrection && correctionQuery.error && !correctionQuery.data)
   ) {
-    const error = plansQuery.error ?? visitsQuery.error;
+    const error = correctionQuery.error ?? plansQuery.error ?? visitsQuery.error;
     return (
       <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
-        <DoctorBackHeader onBack={goBack} title="Create Treatment Plan" />
+        <DoctorBackHeader onBack={goBack} title={isCorrection ? "Correct Treatment Plan" : "Create Treatment Plan"} />
         <DoctorErrorState
           message={getApiErrorMessage(
             error,
@@ -188,8 +386,8 @@ export default function CreateDoctorTreatmentPlanScreen() {
           )}
           onRetry={() =>
             void Promise.all([
-              plansQuery.refetch(),
-              visitsQuery.refetch(),
+              isCorrection ? correctionQuery.refetch() : plansQuery.refetch(),
+              isCorrection ? Promise.resolve() : visitsQuery.refetch(),
             ])
           }
           title="Visits unavailable"
@@ -200,8 +398,8 @@ export default function CreateDoctorTreatmentPlanScreen() {
 
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
-      <DoctorBackHeader onBack={goBack} title="Create Treatment Plan" />
-      {eligibleVisits.length === 0 ? (
+      <DoctorBackHeader onBack={goBack} title={isCorrection ? "Correct Treatment Plan" : "Create Treatment Plan"} />
+      {!isCorrection && eligibleVisits.length === 0 ? (
         <View style={styles.emptyContainer}>
           <DoctorEmptyState
             description="A visit must be marked visited and cannot already have a treatment plan."
@@ -214,8 +412,43 @@ export default function CreateDoctorTreatmentPlanScreen() {
           <FormScrollView
             contentContainerStyle={styles.content}
           >
-            <Text style={styles.sectionLabel}>Completed doctor visit *</Text>
-            <View style={styles.visitList}>
+            {draftNotice ? (
+              <View style={styles.draftNotice}>
+                <View style={styles.draftTextContainer}>
+                  <Text accessibilityLiveRegion="polite" style={styles.draftTitle}>
+                    {draftNotice === "restored"
+                      ? "Encrypted draft restored"
+                      : "Encrypted draft saved"}
+                  </Text>
+                  <Text style={styles.draftText}>
+                    This clinical draft stays in device-bound secure storage and is removed after submission or sign-out.
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  accessibilityLabel="Discard encrypted treatment plan draft"
+                  accessibilityRole="button"
+                  onPress={() => {
+                    if (draftKey) void removeFormDraft(draftKey);
+                    setDraftNotice(null);
+                    setDraftTouched(false);
+                  }}
+                >
+                  <Text style={styles.discardDraft}>Discard</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+            {isCorrection ? (
+              <View style={styles.correctionNotice}>
+                <Text style={styles.correctionTitle}>Correction requested</Text>
+                <Text style={styles.correctionText}>
+                  {correctionQuery.data?.rejection_reason ||
+                    "Please review and correct this treatment plan."}
+                </Text>
+              </View>
+            ) : (
+              <>
+              <Text style={styles.sectionLabel}>Completed doctor visit *</Text>
+              <View style={styles.visitList}>
               {eligibleVisits.map((visit) => {
                 const selected = selectedVisitId === visit.id;
 
@@ -249,34 +482,48 @@ export default function CreateDoctorTreatmentPlanScreen() {
                   </TouchableOpacity>
                 );
               })}
-            </View>
-            {formError === "Select a completed doctor visit." ? (
+              </View>
+              {formError === "Select a completed doctor visit." ? (
               <Text style={styles.formError}>{formError}</Text>
-            ) : null}
+              ) : null}
+              </>
+            )}
 
             <DoctorField
               label="Diagnosis"
               multiline
               value={diagnosis}
-              onChangeText={setDiagnosis}
+              onChangeText={(value) => {
+                setDiagnosis(value);
+                setDraftTouched(true);
+              }}
             />
             <DoctorField
               label="Chief complaint"
               multiline
               value={chiefComplaint}
-              onChangeText={setChiefComplaint}
+              onChangeText={(value) => {
+                setChiefComplaint(value);
+                setDraftTouched(true);
+              }}
             />
             <DoctorField
               label="Treatment plan"
               multiline
               value={treatmentPlan}
-              onChangeText={setTreatmentPlan}
+              onChangeText={(value) => {
+                setTreatmentPlan(value);
+                setDraftTouched(true);
+              }}
             />
             <DoctorField
               label="Medicines"
               multiline
               value={medicines}
-              onChangeText={setMedicines}
+              onChangeText={(value) => {
+                setMedicines(value);
+                setDraftTouched(true);
+              }}
             />
             <DoctorField
               error={
@@ -290,6 +537,7 @@ export default function CreateDoctorTreatmentPlanScreen() {
               value={sessionsRequired}
               onChangeText={(value) => {
                 setSessionsRequired(value);
+                setDraftTouched(true);
                 setFormError(null);
               }}
             />
@@ -297,32 +545,44 @@ export default function CreateDoctorTreatmentPlanScreen() {
               label="Frequency"
               placeholder="e.g. 3 times weekly"
               value={frequency}
-              onChangeText={setFrequency}
+              onChangeText={(value) => {
+                setFrequency(value);
+                setDraftTouched(true);
+              }}
             />
             <DoctorField
               label="Duration"
               placeholder="e.g. 4 weeks"
               value={duration}
-              onChangeText={setDuration}
+              onChangeText={(value) => {
+                setDuration(value);
+                setDraftTouched(true);
+              }}
             />
             <DoctorField
               label="Special instructions"
               multiline
               value={specialInstructions}
-              onChangeText={setSpecialInstructions}
+              onChangeText={(value) => {
+                setSpecialInstructions(value);
+                setDraftTouched(true);
+              }}
             />
             <DoctorField
               label="Remarks"
               multiline
               value={remarks}
-              onChangeText={setRemarks}
+              onChangeText={(value) => {
+                setRemarks(value);
+                setDraftTouched(true);
+              }}
             />
 
             <View style={styles.notice}>
               <Text style={styles.noticeText}>
-                Submission sends this plan for admin approval. The
-                backend does not provide a Doctor edit endpoint after
-                submission.
+                {isCorrection
+                  ? "Resubmitting keeps the same plan and records a new revision for admin review."
+                  : "Submission sends this plan for admin approval."}
               </Text>
             </View>
 
@@ -342,7 +602,9 @@ export default function CreateDoctorTreatmentPlanScreen() {
               <Text style={styles.submitText}>
                 {mutation.isPending
                   ? "Submitting..."
-                  : "Submit for Approval"}
+                  : isCorrection
+                    ? "Resubmit Corrected Plan"
+                    : "Submit for Approval"}
               </Text>
             </TouchableOpacity>
           </FormScrollView>
@@ -375,6 +637,51 @@ const styles = StyleSheet.create({
     fontWeight: typography.weight.extrabold,
     marginBottom: spacing.sm,
     textTransform: "uppercase",
+  },
+  correctionNotice: {
+    backgroundColor: colors.dangerSurface,
+    borderRadius: radius.control,
+    marginBottom: spacing.xl,
+    padding: spacing.lg,
+  },
+  correctionTitle: {
+    color: colors.danger,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.extrabold,
+    textTransform: "uppercase",
+  },
+  correctionText: {
+    color: colors.textStrong,
+    fontSize: typography.size.bodySmall,
+    lineHeight: typography.lineHeight.bodyRelaxed,
+    marginTop: spacing.xs,
+  },
+  draftNotice: {
+    alignItems: "flex-start",
+    backgroundColor: colors.primarySurface,
+    borderRadius: radius.control,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+    marginBottom: spacing.xl,
+    padding: spacing.lg,
+  },
+  draftTextContainer: { flex: 1 },
+  draftTitle: {
+    color: colors.primary,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.extrabold,
+  },
+  draftText: {
+    color: colors.textMutedDark,
+    fontSize: typography.size.small,
+    lineHeight: typography.lineHeight.s19,
+    marginTop: spacing.xs,
+  },
+  discardDraft: {
+    color: colors.danger,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.extrabold,
   },
   visitList: {
     gap: spacing.md,

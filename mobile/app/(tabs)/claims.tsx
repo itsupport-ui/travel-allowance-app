@@ -14,6 +14,7 @@ import {
 } from "react-native";
 
 import { ClaimStatusBadge } from "../../src/components/ClaimStatusBadge";
+import { MyClaimsReportActions } from "../../src/components/reports/MyClaimsReportActions";
 import { ClaimsSkeleton } from "../../src/components/skeletons/ScreenSkeletons";
 import { queryKeys } from "../../src/query/queryKeys";
 import { getMyClaims } from "../../src/services/claimService";
@@ -238,6 +239,28 @@ export default function ClaimsScreen() {
           <View>
             <Text style={styles.title}>My Claims</Text>
 
+            <MyClaimsReportActions />
+
+            <TouchableOpacity
+              accessibilityHint="Opens the travel expense report for a month or custom date range"
+              accessibilityLabel="Open travel expense report"
+              accessibilityRole="button"
+              activeOpacity={0.82}
+              onPress={() => router.push("/(tabs)/travel-expense-report")}
+              style={styles.travelReportButton}
+            >
+              <View style={styles.travelReportIcon}>
+                <Ionicons color={PRIMARY} name="car-outline" size={20} />
+              </View>
+              <View style={styles.travelReportText}>
+                <Text style={styles.travelReportTitle}>Travel Expense Report</Text>
+                <Text style={styles.travelReportSubtitle}>
+                  Preview and export your travel expenses by month or range
+                </Text>
+              </View>
+              <Ionicons color={colors.textMuted} name="chevron-forward" size={20} />
+            </TouchableOpacity>
+
             <View style={styles.summaryGrid}>
               <SummaryCard
                 label="Pending"
@@ -326,6 +349,44 @@ const styles = StyleSheet.create({
     fontWeight: typography.weight.extrabold,
     marginBottom: spacing.xl,
     marginTop: spacing.lg,
+  },
+  travelReportButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    flexDirection: "row",
+    marginBottom: spacing.xl,
+    minHeight: 64,
+    padding: spacing.lg,
+    elevation: shadows.elevation.card,
+    shadowColor: shadows.color,
+    shadowOffset: shadows.offset.y2,
+    shadowOpacity: shadows.opacity.card,
+    shadowRadius: shadows.radius.card,
+  },
+  travelReportIcon: {
+    alignItems: "center",
+    backgroundColor: colors.primarySurface,
+    borderRadius: radius.control,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
+  travelReportText: {
+    flex: 1,
+    marginHorizontal: spacing.lg,
+  },
+  travelReportTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  travelReportSubtitle: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    marginTop: spacing.xs,
   },
   summaryGrid: {
     flexDirection: "row",

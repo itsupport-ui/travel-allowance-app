@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import date, time, datetime
 
 class TreatmentScheduleCreate(BaseModel):
@@ -24,6 +24,7 @@ class TreatmentScheduleCreate(BaseModel):
     start_date: date | None = None
 
     end_date: date | None = None
+    cadence_days: int = Field(default=1, ge=1, le=31)
 
     in_time: time
 
@@ -43,6 +44,9 @@ class TreatmentScheduleResponse(BaseModel):
     id: int
 
     treatment_plan_id: int | None = None
+    series_id: int | None = None
+    occurrence_date: date | None = None
+    generated_occurrences: int | None = None
 
     patient_name: str    
     patient_reference_id: str | None = None
@@ -106,8 +110,11 @@ class TreatmentScheduleResponse(BaseModel):
 
     arrival_warning: str | None = None
 
-    class Config:
-        from_attributes = True
+    available_actions: list[str] = Field(default_factory=list)
+    blocking_reasons: list[str] = Field(default_factory=list)
+    next_action: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CompleteTreatmentRequest(BaseModel):

@@ -42,6 +42,17 @@ class DoctorWorkDay(Base):
     )
     is_active = Column(Boolean, nullable=False, default=True)
     ended_at = Column(DateTime(timezone=True), nullable=True)
+    ended_early = Column(Boolean, nullable=False, default=False)
+    end_reason = Column(String, nullable=True)
+    early_end_review_status = Column(String, nullable=True, index=True)
+    early_end_reviewed_by = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+    early_end_review_reason = Column(String, nullable=True)
+    early_end_reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    early_end_review_version = Column(Integer, nullable=False, default=1)
     end_address = Column(String, nullable=True)
     end_latitude = Column(Float, nullable=True)
     end_longitude = Column(Float, nullable=True)

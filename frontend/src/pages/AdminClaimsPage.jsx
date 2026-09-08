@@ -34,6 +34,7 @@ function AdminClaimsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [decision, setDecision] = useState(null)
+  const [rejectionReason, setRejectionReason] = useState("")
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -86,10 +87,11 @@ function AdminClaimsPage() {
       if (decision.action === "approve") {
         await approveClaim(decision.claim.id, token)
       } else {
-        await rejectClaim(decision.claim.id, token)
+        await rejectClaim(decision.claim.id, token, rejectionReason.trim())
       }
       toast.success(`Claim ${decision.action}d`)
       setDecision(null)
+      setRejectionReason("")
       loadClaims()
     } catch (requestError) {
       toast.error(getErrorMessage(requestError, "Unable to update claim"))
@@ -215,14 +217,20 @@ function AdminClaimsPage() {
                     <>
                       <button
                         type="button"
-                        onClick={() => setDecision({ action: "approve", claim })}
+                        onClick={() => {
+                          setRejectionReason("")
+                          setDecision({ action: "approve", claim })
+                        }}
                         className="rounded-md bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-800"
                       >
                         Approve
                       </button>
                       <button
                         type="button"
-                        onClick={() => setDecision({ action: "reject", claim })}
+                        onClick={() => {
+                          setRejectionReason("")
+                          setDecision({ action: "reject", claim })
+                        }}
                         className="rounded-md bg-rose-700 px-3 py-2 text-xs font-bold text-white hover:bg-rose-800"
                       >
                         Reject
@@ -256,9 +264,34 @@ function AdminClaimsPage() {
         confirmLabel={decision?.action === "approve" ? "Approve claim" : "Reject claim"}
         destructive={decision?.action === "reject"}
         busy={saving}
-        onClose={() => setDecision(null)}
+        confirmDisabled={
+          decision?.action === "reject" && !rejectionReason.trim()
+        }
+        onClose={() => {
+          setDecision(null)
+          setRejectionReason("")
+        }}
         onConfirm={applyDecision}
-      />
+      >
+        {decision?.action === "reject" && (
+          <label className="mt-4 block text-sm font-semibold text-slate-700">
+            What must the therapist correct?
+            <textarea
+              autoFocus
+              required
+              maxLength={500}
+              rows={4}
+              value={rejectionReason}
+              onChange={(event) => setRejectionReason(event.target.value)}
+              placeholder="Give a specific, actionable reason"
+              className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100"
+            />
+            <span className="mt-1 block text-right text-xs font-normal text-slate-400">
+              {rejectionReason.length}/500
+            </span>
+          </label>
+        )}
+      </ConfirmDialog>
     </AdminLayout>
   )
 }

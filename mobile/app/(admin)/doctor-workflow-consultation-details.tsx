@@ -33,11 +33,15 @@ import {
   createVisitFromConsultation,
   getConsultationDoctors,
   getDoctorConsultation,
+  getDoctorConsultationHistory,
   getDoctorVisit,
   rejectDoctorConsultation,
 } from "../../src/services/doctorWorkflowService";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
-import type { DoctorConsultation } from "../../src/types/doctorWorkflow";
+import type {
+  DoctorConsultation,
+  DoctorConsultationEvent,
+} from "../../src/types/doctorWorkflow";
 import {
   formatDoctorDate,
   formatDoctorDateTime,
@@ -89,6 +93,14 @@ export default function AdminDoctorConsultationDetailsScreen() {
   });
 
   const consultation = consultationQuery.data;
+  const historyQuery = useQuery({
+    enabled: consultationId !== null,
+    queryFn: () => {
+      if (consultationId === null) return [];
+      return getDoctorConsultationHistory(consultationId);
+    },
+    queryKey: ["admin", "doctor-workflow", "consultation-history", consultationId],
+  });
   const doctorsQuery = useQuery({
     queryFn: getConsultationDoctors,
     queryKey: queryKeys.adminDoctorWorkflow.doctors,
@@ -114,7 +126,8 @@ export default function AdminDoctorConsultationDetailsScreen() {
   };
 
   const confirmMutation = useMutation({
-    mutationFn: confirmDoctorConsultation,
+    mutationFn: ({ id, version }: { id: number; version: number }) =>
+      confirmDoctorConsultation(id, version),
     onError: (error) =>
       Alert.alert("Unable to Confirm", getApiErrorMessage(error, "Unable to confirm this consultation.")),
     onSuccess: async () => {
@@ -126,7 +139,11 @@ export default function AdminDoctorConsultationDetailsScreen() {
   const rejectMutation = useMutation({
     mutationFn: async () => {
       if (!consultation) throw new Error("Consultation is unavailable.");
-      return rejectDoctorConsultation(consultation.id, rejectionReason.trim());
+      return rejectDoctorConsultation(
+        consultation.id,
+        rejectionReason.trim(),
+        consultation.lifecycle_version
+      );
     },
     onError: (error) =>
       Alert.alert("Unable to Reject", getApiErrorMessage(error, "Unable to reject this consultation.")),
@@ -145,6 +162,7 @@ export default function AdminDoctorConsultationDetailsScreen() {
         remarks: nullableDoctorText(visitForm.remarks),
         visit_date: visitForm.visit_date.trim(),
         visit_time: visitForm.visit_time.trim(),
+        lifecycle_version: consultation.lifecycle_version,
       });
     },
     onError: (error) =>
@@ -185,7 +203,14 @@ export default function AdminDoctorConsultationDetailsScreen() {
       `Confirm the patient decision for ${consultation.patient_name}?`,
       [
         { style: "cancel", text: "Cancel" },
-        { onPress: () => confirmMutation.mutate(consultation.id), text: "Confirm" },
+        {
+          onPress: () =>
+            confirmMutation.mutate({
+              id: consultation.id,
+              version: consultation.lifecycle_version,
+            }),
+          text: "Confirm",
+        },
       ]
     );
   };
@@ -264,9 +289,9 @@ export default function AdminDoctorConsultationDetailsScreen() {
         refreshControl={
           <RefreshControl
             colors={[colors.primary]}
-            refreshing={consultationQuery.isRefetching || visitQuery.isRefetching}
+            refreshing={consultationQuery.isRefetching || visitQuery.isRefetching || historyQuery.isRefetching}
             tintColor={colors.primary}
-            onRefresh={() => void Promise.all([consultationQuery.refetch(), visitQuery.refetch()])}
+            onRefresh={() => void Promise.all([consultationQuery.refetch(), visitQuery.refetch(), historyQuery.refetch()])}
           />
         }
         showsVerticalScrollIndicator={false}
@@ -298,6 +323,9 @@ export default function AdminDoctorConsultationDetailsScreen() {
           <DoctorDetailRow label="Patient decision" value={<StatusBadge status={consultation.patient_decision} />} />
           <DoctorDetailRow label="Created date" value={formatDoctorDateTime(consultation.created_at)} />
           {consultation.rejection_reason ? <DoctorDetailRow label="Rejection reason" value={consultation.rejection_reason} /> : null}
+          {consultation.follow_up_date ? <DoctorDetailRow label="Follow-up due" value={`${formatDoctorDate(consultation.follow_up_date)} at ${consultation.follow_up_time?.slice(0, 5) ?? "Not set"}`} /> : null}
+          {consultation.follow_up_reason ? <DoctorDetailRow label="Follow-up reason" value={consultation.follow_up_reason} /> : null}
+          {consultation.cancellation_reason ? <DoctorDetailRow label="Cancellation" value={`${consultation.cancellation_code?.replaceAll("_", " ")}: ${consultation.cancellation_reason}`} /> : null}
         </DetailSection>
 
         <DetailSection icon="medkit-outline" title="Visit information">
@@ -321,10 +349,19 @@ export default function AdminDoctorConsultationDetailsScreen() {
           )}
         </DetailSection>
 
-        <TimelineCard consultation={consultation} visitCreated={converted} visitCreatedAt={visitQuery.data?.created_at ?? null} />
+        <TimelineCard consultation={consultation} events={historyQuery.data ?? []} />
 
         <View style={styles.actionsCard}>
           <Text style={styles.sectionTitle}>Available actions</Text>
+          {consultation.available_actions?.includes("reschedule") ? (
+            <ActionButton disabled={busy} fullWidth icon="calendar-outline" label="Reschedule" onPress={() => router.push({ pathname: "/(admin)/doctor-workflow-consultation-lifecycle", params: { id: String(consultation.id), mode: "reschedule" } })} />
+          ) : null}
+          {consultation.available_actions?.includes("cancel") ? (
+            <ActionButton disabled={busy} destructive fullWidth icon="close-circle-outline" label="Cancel consultation" onPress={() => router.push({ pathname: "/(admin)/doctor-workflow-consultation-lifecycle", params: { id: String(consultation.id), mode: "cancel" } })} />
+          ) : null}
+          {consultation.available_actions?.includes("schedule_follow_up") ? (
+            <ActionButton disabled={busy} fullWidth icon="refresh-outline" label="Schedule follow-up" onPress={() => router.push({ pathname: "/(admin)/doctor-workflow-consultation-lifecycle", params: { id: String(consultation.id), mode: "follow_up" } })} />
+          ) : null}
           {canUpdateDecision ? (
             <View style={styles.actionRow}>
               <ActionButton disabled={busy} destructive icon="close-circle-outline" label="Reject" onPress={openReject} />
@@ -340,7 +377,7 @@ export default function AdminDoctorConsultationDetailsScreen() {
               <Text style={styles.actionNoticeText}>Visit already created</Text>
             </View>
           ) : null}
-          {!canUpdateDecision && !canCreateVisit && !converted ? (
+          {!canUpdateDecision && !canCreateVisit && !converted && (consultation.available_actions ?? []).length === 0 ? (
             <Text style={styles.mutedText}>No actions are available for this consultation state.</Text>
           ) : null}
         </View>
@@ -398,26 +435,22 @@ function DetailSection({
 
 function TimelineCard({
   consultation,
-  visitCreated,
-  visitCreatedAt,
+  events: lifecycleEvents,
 }: {
   consultation: DoctorConsultation;
-  visitCreated: boolean;
-  visitCreatedAt: string | null;
+  events: DoctorConsultationEvent[];
 }) {
-  const events: TimelineEvent[] = [
-    { icon: "add-circle-outline", label: "Consultation created", timestamp: consultation.created_at, tone: "primary" },
-    { icon: "calendar-outline", label: "Consultation scheduled", timestamp: `${consultation.scheduled_date}T${consultation.scheduled_time}`, tone: "blue" },
-  ];
-  if (consultation.patient_decision === "confirmed") {
-    events.push({ icon: "checkmark-circle-outline", label: "Patient confirmed", timestamp: consultation.completed_at, tone: "success" });
-  }
-  if (visitCreated) {
-    events.push({ icon: "medkit-outline", label: "Doctor visit created", timestamp: visitCreatedAt, tone: "teal" });
-  }
-  if (consultation.status === "completed") {
-    events.push({ icon: "checkmark-done-outline", label: "Consultation completed", timestamp: consultation.completed_at, tone: "success" });
-  }
+  const events: TimelineEvent[] = lifecycleEvents.length > 0
+    ? lifecycleEvents.map((event) => ({
+        icon: event.event_type === "visit_created" ? "medkit-outline" : "checkmark-circle-outline",
+        label: event.event_type.replaceAll("_", " "),
+        timestamp: event.created_at,
+        tone: event.event_type === "cancelled" ? "danger" : "primary",
+      }))
+    : [
+        { icon: "add-circle-outline", label: "Consultation created", timestamp: consultation.created_at, tone: "primary" },
+        { icon: "calendar-outline", label: "Consultation scheduled", timestamp: `${consultation.scheduled_date}T${consultation.scheduled_time}`, tone: "blue" },
+      ];
 
   return (
     <View style={styles.detailCard}>
@@ -445,6 +478,7 @@ function timelineColor(tone: string): string {
   if (tone === "blue") return colors.blue;
   if (tone === "success") return colors.green;
   if (tone === "teal") return colors.teal;
+  if (tone === "danger") return colors.danger;
   return colors.primary;
 }
 

@@ -59,6 +59,7 @@ def validate_patient_arrival(
     arrival_longitude: float,
     patient_latitude: float | None,
     patient_longitude: float | None,
+    radius_km: float = ARRIVAL_RADIUS_KM,
 ) -> float:
     if not has_valid_coordinates(patient_latitude, patient_longitude):
         raise ValueError(MISSING_PATIENT_LOCATION_MESSAGE)
@@ -73,10 +74,14 @@ def validate_patient_arrival(
         float(patient_longitude),
     )
 
-    if distance_km > ARRIVAL_RADIUS_KM:
+    if radius_km <= 0:
+        raise ValueError("The configured patient visit radius is invalid.")
+
+    if distance_km > radius_km:
         raise ValueError(
             f"You are {distance_km:.2f} km away from the patient's location. "
-            "Please reach the patient's destination before completing the treatment."
+            f"The allowed radius is {radius_km * 1000:.0f} metres. "
+            "Please reach the patient's destination before continuing."
         )
 
     return distance_km

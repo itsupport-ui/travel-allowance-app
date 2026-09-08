@@ -19,6 +19,19 @@ export const submitClaim =
     return response.data
 }
 
+export const getClaimPreview = async (token) => {
+  const response = await api.get(
+    "/claims/preview",
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  )
+
+  return response.data
+}
+
 export const getMyClaims =
   async (token) => {
 
@@ -134,13 +147,14 @@ export const getClaimDetails =
 export const rejectClaim =
   async (
     claimId,
-    token
+    token,
+    rejectionReason = "Please review and correct this claim."
   ) => {
 
     const response =
       await api.put(
         `/claims/${claimId}/reject`,
-        {},
+        { rejection_reason: rejectionReason },
         {
           headers: {
             Authorization:

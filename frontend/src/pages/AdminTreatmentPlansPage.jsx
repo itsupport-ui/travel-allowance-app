@@ -125,12 +125,24 @@ function AdminTreatmentPlansPage() {
     date_mode: "treatment_date",
     session_date: "",
     number_of_sessions: "1",
+    cadence_days: "1",
     in_time: "",
     out_time: "",
     priority: "normal",
     instructions: "",
     transport_mode: "vehicle",
   })
+
+  const cadenceFromFrequency = (frequency) => {
+    const value = (frequency || "").toLowerCase()
+    if (value.includes("month")) return 30
+    if (value.includes("week")) {
+      const count = Number(value.match(/(\d+)\s*(?:times|x)/)?.[1] || 1)
+      return Math.max(1, Math.ceil(7 / count))
+    }
+    if (value.includes("alternate") || value.includes("every other day")) return 2
+    return 1
+  }
 
   const visiblePlans = useMemo(
     () => (activeTab === "pending" ? pendingPlans : approvedPlans),
@@ -202,6 +214,7 @@ function AdminTreatmentPlansPage() {
       date_mode: "treatment_date",
       session_date: "",
       number_of_sessions: String(plan.sessions_required || 1),
+      cadence_days: String(cadenceFromFrequency(plan.frequency)),
       in_time: "",
       out_time: "",
       priority: "normal",
@@ -247,12 +260,12 @@ function AdminTreatmentPlansPage() {
         rejectionReason.trim(),
         token
       )
-      toast.success("Treatment plan rejected")
+      toast.success("Treatment plan returned for changes")
       setModal(null)
       setSelectedPlan(null)
       await loadPlans()
     } catch (error) {
-      toast.error(getErrorMessage(error, "Unable to reject plan"))
+      toast.error(getErrorMessage(error, "Unable to request plan changes"))
     } finally {
       setActionKey(null)
     }
@@ -303,6 +316,7 @@ function AdminTreatmentPlansPage() {
           number_of_sessions: Number(
             scheduleForm.number_of_sessions
           ),
+          cadence_days: Number(scheduleForm.cadence_days),
           in_time: scheduleForm.in_time,
           out_time: scheduleForm.out_time,
           priority: scheduleForm.priority,
@@ -344,6 +358,7 @@ function AdminTreatmentPlansPage() {
 
   const renderActions = (plan, mobile = false) => {
     const generated = isScheduleGenerated(plan, generatedPlanIds)
+    const actions = new Set(plan.available_actions || [])
     return (
       <div
         className={`flex flex-wrap gap-2 ${
@@ -357,26 +372,26 @@ function AdminTreatmentPlansPage() {
         >
           Review
         </button>
-        {activeTab === "pending" ? (
+        {actions.has("approve") || actions.has("request_changes") ? (
           <>
-            <button
+            {actions.has("approve") && <button
               type="button"
               disabled={actionKey === `approve-${plan.id}`}
               onClick={() => approvePlan(plan)}
               className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
             >
               Approve
-            </button>
-            <button
+            </button>}
+            {actions.has("request_changes") && <button
               type="button"
               disabled={actionKey === `reject-${plan.id}`}
               onClick={() => openReject(plan)}
               className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
             >
-              Reject
-            </button>
+              Request changes
+            </button>}
           </>
-        ) : (
+        ) : actions.has("generate_schedule") ? (
           <button
             type="button"
             disabled={actionKey === `schedule-${plan.id}` || generated}
@@ -387,7 +402,7 @@ function AdminTreatmentPlansPage() {
               ? getScheduleGeneratedLabel(plan)
               : "Generate Schedule"}
           </button>
-        )}
+        ) : null}
       </div>
     )
   }
@@ -642,13 +657,13 @@ function AdminTreatmentPlansPage() {
 
       {modal === "reject" && selectedPlan && (
         <Modal
-          title="Reject treatment plan"
+          title="Request treatment plan changes"
           description={`Return ${selectedPlan.patient_name}'s plan to the doctor.`}
           onClose={closeModal}
         >
           <form onSubmit={submitRejection} className="space-y-4">
             <div>
-              <label className={labelClass}>Rejection reason</label>
+              <label className={labelClass}>Required corrections</label>
               <textarea
                 required
                 rows="4"
@@ -675,8 +690,8 @@ function AdminTreatmentPlansPage() {
                 className="rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-50"
               >
                 {actionKey === `reject-${selectedPlan.id}`
-                  ? "Rejecting..."
-                  : "Reject plan"}
+                  ? "Requesting..."
+                  : "Request changes"}
               </button>
             </div>
           </form>
@@ -733,7 +748,7 @@ function AdminTreatmentPlansPage() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
               <div>
                 <label className={labelClass}>Sessions</label>
                 <input
@@ -742,6 +757,19 @@ function AdminTreatmentPlansPage() {
                   min="1"
                   name="number_of_sessions"
                   value={scheduleForm.number_of_sessions}
+                  onChange={handleScheduleChange}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Days between sessions</label>
+                <input
+                  required
+                  type="number"
+                  min="1"
+                  max="31"
+                  name="cadence_days"
+                  value={scheduleForm.cadence_days}
                   onChange={handleScheduleChange}
                   className={inputClass}
                 />

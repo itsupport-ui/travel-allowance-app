@@ -27,11 +27,7 @@ function TherapistDashboard() {
   })
   const [isLoading, setIsLoading] = useState(true)
 
-  useEffect(() => {
-    fetchSummary()
-  }, [])
-
-  const fetchSummary = async () => {
+  async function fetchSummary() {
     try {
       const token = localStorage.getItem("token")
       const data = await getDashboardSummary(token)
@@ -52,6 +48,12 @@ function TherapistDashboard() {
       setIsLoading(false)
     }
   }
+
+  useEffect(() => {
+    // Initial API hydration; state changes occur after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchSummary()
+  }, [])
 
   return (
     <TherapistLayout>
@@ -92,7 +94,7 @@ function TherapistDashboard() {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
                 
                 {/* Today's Tasks */}
-                <Link to="/today-schedule" className="group bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-sm hover:shadow-md hover:border-slate-200 transition-all duration-200 flex flex-col justify-between min-h-[110px] sm:min-h-[130px]">
+                <Link to="/therapist/schedules?view=today" className="group bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-sm hover:shadow-md hover:border-slate-200 transition-all duration-200 flex flex-col justify-between min-h-[110px] sm:min-h-[130px]">
                   <div className="flex justify-between items-start">
                     <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-tight">Today's Tasks</span>
                     <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 transition-colors group-hover:bg-indigo-600 group-hover:text-white">
@@ -130,7 +132,7 @@ function TherapistDashboard() {
                 </div>
 
                 {/* Upcoming */}
-                <Link to="/upcoming-schedule" className="group bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-sm hover:shadow-md hover:border-slate-200 transition-all duration-200 flex flex-col justify-between min-h-[110px] sm:min-h-[130px]">
+                <Link to="/therapist/schedules?view=upcoming" className="group bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-sm hover:shadow-md hover:border-slate-200 transition-all duration-200 flex flex-col justify-between min-h-[110px] sm:min-h-[130px]">
                   <div className="flex justify-between items-start">
                     <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-tight">Upcoming</span>
                     <div className="p-2 rounded-xl bg-violet-50 text-violet-600 transition-colors group-hover:bg-violet-600 group-hover:text-white">

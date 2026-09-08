@@ -142,6 +142,43 @@ export default function AdminScheduleDetailsScreen() {
 
   const cancel = useCallback(() => {
     if (!scheduleId || !schedule) return;
+    const performCancel = async (
+      scope: "this" | "future" | "series"
+    ) => {
+      setCancelling(true);
+      try {
+        setSchedule(await cancelAdminSchedule(scheduleId, scope));
+      } catch (requestError) {
+        if (await handleSessionExpiry(requestError)) return;
+        Alert.alert(
+          "Unable to Cancel",
+          requestError instanceof Error
+            ? requestError.message
+            : "Unable to cancel the appointment."
+        );
+      } finally {
+        setCancelling(false);
+      }
+    };
+    if (schedule.series_id) {
+      Alert.alert(
+        "Cancel Recurring Visit?",
+        "Choose whether to cancel only this visit or this and future unstarted visits.",
+        [
+          { style: "cancel", text: "Keep Appointment" },
+          {
+            onPress: () => void performCancel("this"),
+            text: "This Visit",
+          },
+          {
+            onPress: () => void performCancel("future"),
+            style: "destructive",
+            text: "This and Future",
+          },
+        ]
+      );
+      return;
+    }
     Alert.alert(
       "Cancel Appointment?",
       `${schedule.patient_name}'s appointment will be cancelled.`,
@@ -149,20 +186,7 @@ export default function AdminScheduleDetailsScreen() {
         { style: "cancel", text: "Keep Appointment" },
         {
           onPress: async () => {
-            setCancelling(true);
-            try {
-              setSchedule(await cancelAdminSchedule(scheduleId));
-            } catch (requestError) {
-              if (await handleSessionExpiry(requestError)) return;
-              Alert.alert(
-                "Unable to Cancel",
-                requestError instanceof Error
-                  ? requestError.message
-                  : "Unable to cancel the appointment."
-              );
-            } finally {
-              setCancelling(false);
-            }
+            await performCancel("this");
           },
           style: "destructive",
           text: "Cancel Appointment",
@@ -205,9 +229,14 @@ export default function AdminScheduleDetailsScreen() {
     );
   }
 
-  const editable = schedule.status === "scheduled";
+  const canEdit = schedule.available_actions.includes("edit");
+  const canCancel = schedule.available_actions.includes("cancel");
   const dateLabel =
-    schedule.schedule_type === "recurring"
+    schedule.series_id
+      ? formatDateForDisplay(
+          schedule.occurrence_date ?? schedule.treatment_date
+        )
+      : schedule.schedule_type === "recurring"
       ? `${formatDateForDisplay(schedule.start_date)} to ${formatDateForDisplay(
           schedule.end_date
         )}`
@@ -283,7 +312,7 @@ export default function AdminScheduleDetailsScreen() {
           <DetailRow
             icon="repeat-outline"
             label="Schedule Type"
-            value={formatLabel(schedule.schedule_type)}
+            value={schedule.series_id ? "Recurring Series Visit" : formatLabel(schedule.schedule_type)}
           />
         </Section>
 
@@ -345,9 +374,9 @@ export default function AdminScheduleDetailsScreen() {
         </Section>
       </ScrollView>
 
-      {editable ? (
+      {canEdit || canCancel ? (
         <View style={styles.actionBar}>
-          <TouchableOpacity
+          {canEdit ? <><TouchableOpacity
             accessibilityRole="button"
             onPress={() =>
               router.push({
@@ -380,8 +409,8 @@ export default function AdminScheduleDetailsScreen() {
               size={18}
             />
             <Text style={styles.secondaryButtonText}>Reschedule</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </TouchableOpacity></> : null}
+          {canCancel ? <TouchableOpacity
             accessibilityRole="button"
             disabled={cancelling}
             onPress={cancel}
@@ -397,7 +426,7 @@ export default function AdminScheduleDetailsScreen() {
               />
             )}
             <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> : null}
         </View>
       ) : null}
     </SafeAreaView>

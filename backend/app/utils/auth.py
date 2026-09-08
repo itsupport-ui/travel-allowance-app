@@ -1,18 +1,16 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.config import JWT_SECRET_KEY
+from app.config import ACCESS_TOKEN_EXPIRE_MINUTES, JWT_SECRET_KEY
 from app.models.user import User
 from app.utils.permissions import role_has_permission
 
 
 algorithm = "HS256"
-access_token_expire_minutes = 1440  # 24 hours
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 # i will import libraries for password hashing and JWT token generation 
@@ -25,13 +23,14 @@ def hash_password(password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
-def create_access_token(data: dict, expires_delta: timedelta = None):
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
+    issued_at = datetime.now(timezone.utc)
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = issued_at + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=access_token_expire_minutes)
-    to_encode.update({"exp": expire})
+        expire = issued_at + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire, "iat": issued_at})
     encoded_jwt = jwt.encode(
         to_encode,
         JWT_SECRET_KEY,

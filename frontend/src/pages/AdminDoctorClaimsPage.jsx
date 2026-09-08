@@ -694,7 +694,10 @@ function AdminDoctorClaimsPage() {
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="font-bold text-slate-900">
-                        {formatCurrency(expense.fare)}
+                        {formatCurrency(expense.approved_amount ?? expense.fare)}
+                        {expense.approved_amount != null && Number(expense.approved_amount) !== Number(expense.fare) && (
+                          <span className="block text-[10px] font-medium text-slate-500">Submitted {formatCurrency(expense.fare)}</span>
+                        )}
                       </p>
                       {expense.proof_file && (
                         <button

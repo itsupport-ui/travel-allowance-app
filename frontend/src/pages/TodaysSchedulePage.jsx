@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import toast from "react-hot-toast"
 import { 
   FaUserMd, 
@@ -16,6 +16,8 @@ import {
 
 import TherapistLayout from "../layouts/TherapistLayout"
 import ConfirmDialog from "../components/ui/ConfirmDialog"
+import LocationExceptionDialog from "../components/location/LocationExceptionDialog"
+import PageState from "../components/ui/PageState"
 import {
   getTodaySchedules,
   missedSchedule
@@ -25,6 +27,7 @@ import {
   punchInTreatment,
   punchOutTreatment,
 } from "../services/treatmentSessionService"
+import { requestLocationException } from "../services/locationExceptionService"
 
 const formatSessionTime = (value) =>
   value
@@ -56,9 +59,10 @@ const getElapsedSeconds = (session) => {
   return session.treatment_duration || 0
 }
 
-function TodaysSchedulePage() {
+function TodaysSchedulePage({ embedded = false }) {
   const [schedules, setSchedules] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState("")
   const [completionSchedule, setCompletionSchedule] = useState(null)
   const [completionForm, setCompletionForm] = useState({
     completion_notes: "",
@@ -72,7 +76,11 @@ function TodaysSchedulePage() {
   const [sessionError, setSessionError] = useState("")
   const [punchInTarget, setPunchInTarget] = useState(null)
   const [punchingIn, setPunchingIn] = useState(false)
+  const [exceptionTarget, setExceptionTarget] = useState(null)
+  const [exceptionReason, setExceptionReason] = useState("")
+  const [requestingException, setRequestingException] = useState(false)
   const [, setElapsedTick] = useState(0)
+  const PageLayout = embedded ? Fragment : TherapistLayout
 
   const getCurrentPosition = () => {
     if (!navigator.geolocation) {
@@ -112,6 +120,8 @@ function TodaysSchedulePage() {
       coordinates = {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
+        gps_accuracy_m: position.coords.accuracy,
+        device_timestamp: new Date(position.timestamp).toISOString(),
       }
     } catch (error) {
       setSessionError(
@@ -138,6 +148,8 @@ function TodaysSchedulePage() {
   }
 
   const fetchSchedules = async () => {
+    setLoading(true)
+    setLoadError("")
     try {
       const token = localStorage.getItem("token")
       const data = await getTodaySchedules(token)
@@ -145,7 +157,7 @@ function TodaysSchedulePage() {
       await loadSessionStates(data)
     } catch (error) {
       console.error(error)
-      toast.error("Failed to load schedule telemetry")
+      setLoadError(error.message || "Failed to load today's schedules")
     } finally {
       setLoading(false)
     }
@@ -166,6 +178,9 @@ function TodaysSchedulePage() {
       await punchInTreatment(punchInTarget.id, token, {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
+        gps_accuracy_m: position.coords.accuracy,
+        location_exception_id:
+          sessions[punchInTarget.id]?.location_exception_id,
       })
       toast.success("Treatment started")
       setPunchInTarget(null)
@@ -174,6 +189,51 @@ function TodaysSchedulePage() {
       toast.error(error.message || "Unable to punch in")
     } finally {
       setPunchingIn(false)
+    }
+  }
+
+  const openExceptionRequest = (schedule) => {
+    setExceptionTarget({
+      schedule,
+      action:
+        sessions[schedule.id]?.session_status === "IN_PROGRESS"
+          ? "punch_out"
+          : "punch_in",
+    })
+    setExceptionReason("")
+  }
+
+  const submitExceptionRequest = async (event) => {
+    event.preventDefault()
+    if (!exceptionTarget || exceptionReason.trim().length < 10) {
+      toast.error("Provide at least 10 characters explaining the GPS issue")
+      return
+    }
+    try {
+      setRequestingException(true)
+      const position = await getCurrentPosition()
+      const token = localStorage.getItem("token")
+      await requestLocationException(
+        {
+          target_type: "therapist_schedule",
+          target_id: exceptionTarget.schedule.id,
+          action: exceptionTarget.action,
+          reason: exceptionReason.trim(),
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          gps_accuracy_m: Math.max(position.coords.accuracy || 1, 1),
+          device_timestamp: new Date(position.timestamp).toISOString(),
+        },
+        token,
+      )
+      toast.success("Location exception sent for administrator review")
+      setExceptionTarget(null)
+      setExceptionReason("")
+      await fetchSchedules()
+    } catch (error) {
+      toast.error(error.response?.data?.detail || error.message || "Unable to request exception")
+    } finally {
+      setRequestingException(false)
     }
   }
 
@@ -222,7 +282,10 @@ function TodaysSchedulePage() {
         bill_amount: isVehicle ? null : Number(completionForm.bill_amount),
         invoice_file: isVehicle ? null : completionForm.invoice_file,
         latitude: position.coords.latitude,
-        longitude: position.coords.longitude
+        longitude: position.coords.longitude,
+        gps_accuracy_m: position.coords.accuracy,
+        location_exception_id:
+          sessions[completionSchedule.id]?.location_exception_id,
       })
 
       toast.success("Treatment punched out and completed")
@@ -271,32 +334,34 @@ function TodaysSchedulePage() {
 
   if (loading) {
     return (
-      <TherapistLayout>
+      <PageLayout>
         <div className="w-full max-w-3xl mx-auto px-1 sm:px-4 py-2 space-y-4 animate-pulse">
           <div className="h-12 bg-slate-200 rounded-xl w-1/3 mb-6"></div>
           <div className="h-48 bg-slate-200 rounded-2xl w-full"></div>
           <div className="h-48 bg-slate-200 rounded-2xl w-full"></div>
         </div>
-      </TherapistLayout>
+      </PageLayout>
     )
   }
 
   return (
-    <TherapistLayout>
+    <PageLayout>
       <div className="w-full max-w-3xl mx-auto px-1 sm:px-4 py-2">
 
         {/* Page Header Area */}
-        <div className="mb-6">
+        {!embedded && <div className="mb-6">
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight">
             Today's Schedule
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 font-medium">
             Your active assigned treatments and clinical visits scheduled for the current shift timeline.
           </p>
-        </div>
+        </div>}
 
         {/* Schedule Execution Framework */}
-        {schedules.length === 0 ? (
+        {loadError ? (
+          <PageState error={loadError} onRetry={fetchSchedules} />
+        ) : schedules.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-12 text-center max-w-md mx-auto my-6">
             <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center mx-auto mb-3 text-lg text-emerald-500">
               <FaCalendarCheck />
@@ -510,6 +575,16 @@ function TodaysSchedulePage() {
                       <FaCheckCircle className="text-[11px]" /> Punch Out
                     </button>
                   )}
+
+                  {sessions[schedule.id]?.can_request_location_exception && (
+                    <button
+                      type="button"
+                      onClick={() => openExceptionRequest(schedule)}
+                      className="w-full sm:flex-1 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs font-bold text-amber-900 transition hover:bg-amber-100"
+                    >
+                      Request location exception
+                    </button>
+                  )}
                   
                   <button
                     onClick={() => handleMissed(schedule.id)}
@@ -625,6 +700,16 @@ function TodaysSchedulePage() {
           </form>
         </div>
       )}
+      <LocationExceptionDialog
+        action={exceptionTarget?.action}
+        busy={requestingException}
+        open={Boolean(exceptionTarget)}
+        reason={exceptionReason}
+        targetLabel={exceptionTarget?.schedule?.patient_name || "this treatment"}
+        onClose={() => setExceptionTarget(null)}
+        onReasonChange={setExceptionReason}
+        onSubmit={submitExceptionRequest}
+      />
       <ConfirmDialog
         open={Boolean(punchInTarget)}
         title="Punch in to treatment?"
@@ -638,7 +723,7 @@ function TodaysSchedulePage() {
         onClose={() => setPunchInTarget(null)}
         onConfirm={handlePunchIn}
       />
-    </TherapistLayout>
+    </PageLayout>
   )
 }
 

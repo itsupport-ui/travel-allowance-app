@@ -1,34 +1,29 @@
-import { useEffect, useState } from "react"
-import toast from "react-hot-toast"
+import { Fragment, useEffect, useState } from "react"
 import {
   FaSearch,
-  FaCalendarAlt,
-  FaCheckCircle,
-  FaFileMedical,
-  FaClock,
   FaNotesMedical,
   FaSlidersH,
 } from "react-icons/fa"
 
 import TherapistLayout from "../layouts/TherapistLayout"
+import PageState from "../components/ui/PageState"
 import { getCompletedSchedules } from "../services/scheduleService"
 import { exportSchedulePdf } from "../utils/pdfExport"
 
-function TherapistCompletedSchedulesPage() {
+function TherapistCompletedSchedulesPage({ embedded = false }) {
 
   const [schedules, setSchedules] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
 
   const [patientSearch, setPatientSearch] = useState("")
   const [priorityFilter, setPriorityFilter] = useState("all")
   const [dateFilter, setDateFilter] = useState("")
+  const PageLayout = embedded ? Fragment : TherapistLayout
 
-  useEffect(() => {
-    fetchSchedules()
-  }, [])
-
-  const fetchSchedules = async () => {
-
+  async function fetchSchedules() {
+    setLoading(true)
+    setError("")
     try {
 
       const token = localStorage.getItem("token")
@@ -43,11 +38,17 @@ function TherapistCompletedSchedulesPage() {
     }
         catch (error) {
         console.error("Error fetching completed schedules:", error)
-        toast.error("Failed to load completed schedules")
+        setError(error.message || "Failed to load completed schedules")
     } finally {
         setLoading(false)
     }
   }
+
+  useEffect(() => {
+    // Initial API hydration; state changes occur after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchSchedules()
+  }, [])
 
     const filteredSchedules = (schedules || []).filter((schedule) => {
     
@@ -95,22 +96,32 @@ function TherapistCompletedSchedulesPage() {
 
   if (loading) {
     return (
-      <TherapistLayout>
+      <PageLayout>
         <div className="flex justify-center py-20">
           Loading...
         </div>
-      </TherapistLayout>
+      </PageLayout>
+    )
+  }
+
+  if (error) {
+    return (
+      <PageLayout>
+        <div className="mx-auto w-full max-w-5xl px-2 py-4 sm:px-4">
+          <PageState error={error} onRetry={fetchSchedules} />
+        </div>
+      </PageLayout>
     )
   }
 
   return (
-    <TherapistLayout>
+    <PageLayout>
 
       <div className="w-full max-w-5xl mx-auto px-2 sm:px-4 py-4">
 
         {/* Header */}
 
-        <div className="mb-6">
+        {!embedded && <div className="mb-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">
@@ -131,7 +142,7 @@ function TherapistCompletedSchedulesPage() {
               Download PDF
             </button>
           </div>
-        </div>
+        </div>}
 
         {/* Filters */}
 
@@ -348,7 +359,7 @@ function TherapistCompletedSchedulesPage() {
 
       </div>
 
-    </TherapistLayout>
+    </PageLayout>
   )
 }
 

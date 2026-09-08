@@ -1,5 +1,5 @@
 from datetime import date, datetime, time
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 class DoctorVisitCreate(BaseModel):
     patient_name: str
@@ -53,8 +53,7 @@ class DoctorVisitResponse(BaseModel):
     treatment_duration: int | None = None
     session_status: str = "NOT_STARTED"
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class DoctorVisitDashboardResponse(BaseModel):
     today_visits: int
@@ -67,6 +66,8 @@ class DoctorVisitDashboardResponse(BaseModel):
 class DoctorVisitSessionRequest(BaseModel):
     latitude: float
     longitude: float
+    gps_accuracy_m: float | None = Field(default=None, gt=0, le=5000)
+    location_exception_id: int | None = None
     device_timestamp: datetime | None = None
     remarks: str | None = None
 
@@ -86,6 +87,12 @@ class DoctorVisitSessionResponse(BaseModel):
     can_punch_in: bool
     can_punch_out: bool
     eligibility_message: str | None = None
+    location_exception_id: int | None = None
+    location_exception_status: str | None = None
+    can_request_location_exception: bool = False
+    location_policy_version: int | None = None
+    geofence_radius_m: float | None = None
+    gps_accuracy_threshold_m: float | None = None
 
 
 class DoctorVisitExpenseOption(BaseModel):

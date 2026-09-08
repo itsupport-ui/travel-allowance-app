@@ -26,6 +26,7 @@ const initialForm = {
   treatment_date: "",
   start_date: "",
   end_date: "",
+  cadence_days: "1",
   in_time: "",
   out_time: "",
   instructions: "",
@@ -108,6 +109,10 @@ function AdminCreateSchedulePage() {
               form.schedule_type === "recurring" ? form.start_date : undefined,
             end_date:
               form.schedule_type === "recurring" ? form.end_date : undefined,
+            cadence_days:
+              form.schedule_type === "recurring"
+                ? Number(form.cadence_days)
+                : 1,
             start_time: form.in_time,
             expected_end_time: form.out_time,
           }),
@@ -123,6 +128,7 @@ function AdminCreateSchedulePage() {
     return () => window.clearTimeout(timer)
   }, [
     form.end_date,
+    form.cadence_days,
     form.in_time,
     form.out_time,
     form.schedule_type,
@@ -171,6 +177,14 @@ function AdminCreateSchedulePage() {
     ) {
       return "Recurring schedules require a valid date range."
     }
+    if (
+      form.schedule_type === "recurring" &&
+      (!Number.isInteger(Number(form.cadence_days)) ||
+        Number(form.cadence_days) < 1 ||
+        Number(form.cadence_days) > 31)
+    ) {
+      return "Days between visits must be from 1 to 31."
+    }
     if (form.schedule_type === "one_time" && !form.treatment_date) {
       return "Treatment date is required."
     }
@@ -206,6 +220,10 @@ function AdminCreateSchedulePage() {
             form.schedule_type === "recurring" ? form.start_date : null,
           end_date:
             form.schedule_type === "recurring" ? form.end_date : null,
+          cadence_days:
+            form.schedule_type === "recurring"
+              ? Number(form.cadence_days)
+              : 1,
         },
         localStorage.getItem("token"),
       )
@@ -359,6 +377,10 @@ function AdminCreateSchedulePage() {
                   <label className={labelClass}>
                     End date
                     <input type="date" min={form.start_date} value={form.end_date} onChange={(event) => change("end_date", event.target.value)} className={inputClass} required />
+                  </label>
+                  <label className={labelClass}>
+                    Days between visits
+                    <input type="number" min="1" max="31" value={form.cadence_days} onChange={(event) => change("cadence_days", event.target.value)} className={inputClass} required />
                   </label>
                 </>
               )}

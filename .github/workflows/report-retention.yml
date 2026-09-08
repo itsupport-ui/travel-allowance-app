@@ -1,0 +1,41 @@
+name: Report artifact retention
+
+on:
+  schedule:
+    - cron: "0 20 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  purge-expired-report-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+      JWT_SECRET_KEY: retention-job-not-used
+      GOOGLE_MAPS_API_KEY: retention-job-not-used
+      CORS_ORIGINS: https://retention-job.invalid
+      UPLOAD_ROOT: ${{ runner.temp }}/travel-allowance-uploads
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Require production database secret
+        shell: bash
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "PRODUCTION_DATABASE_URL is required" >&2
+            exit 1
+          fi
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Delete expired artifacts and snapshots
+        run: python -m app.tasks.cleanup_report_exports

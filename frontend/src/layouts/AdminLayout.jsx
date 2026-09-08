@@ -13,6 +13,8 @@ import {
   FaFileInvoiceDollar,
   FaChartBar,
   FaUsers,
+  FaHistory,
+  FaTasks,
 } from "react-icons/fa";
 import {
   hasAnyPermission,
@@ -60,8 +62,10 @@ function AdminLayout({ children }) {
       <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between z-30 shadow-sm">
         <h1 className="text-lg font-bold text-white tracking-tight">Admin Console</h1>
         <button
+          type="button"
           onClick={() => setSidebarOpen(true)}
           className="bg-slate-800 hover:bg-slate-700 text-white p-2.5 rounded-xl transition shadow-sm active:scale-95"
+          aria-label="Open navigation menu"
         >
           <FaBars className="text-lg" />
         </button>
@@ -93,8 +97,10 @@ function AdminLayout({ children }) {
           
           {/* Mobile Close Button Icon */}
           <button 
+            type="button"
             onClick={closeSidebar}
             className="md:hidden text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+            aria-label="Close navigation menu"
           >
             <FaTimes className="text-lg" />
           </button>
@@ -126,8 +132,26 @@ function AdminLayout({ children }) {
             </Link>
           )}
 
+          {hasPermission("dashboards.view") && (
+            <Link to="/admin/reports/travel-expense" onClick={closeSidebar} className={getNavLinkClass("/admin/reports/travel-expense")}>
+              <FaFileInvoiceDollar className="text-base" /> Travel Expense Report
+            </Link>
+          )}
+
+          {hasPermission("audit.view") && (
+            <Link to="/admin/audit-log" onClick={closeSidebar} className={getNavLinkClass("/admin/audit-log")}>
+              <FaHistory className="text-base" /> Audit Log
+            </Link>
+          )}
+
+          {hasPermission("follow_ups.manage") && (
+            <Link to="/admin/follow-ups" onClick={closeSidebar} className={getNavLinkClass("/admin/follow-ups")}>
+              <FaTasks className="text-base" /> Follow-ups
+            </Link>
+          )}
+
           {canManageDoctorWorkflow && (
-            <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Doctor Workflow</div>
+            <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Doctor Workflow</div>
           )}
 
           {hasPermission("consultations.manage") && (
@@ -149,7 +173,7 @@ function AdminLayout({ children }) {
           )}
 
           {canViewSchedules && (
-            <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Schedules</div>
+            <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Schedules</div>
           )}
 
           {hasPermission("dashboards.view") && (
@@ -166,7 +190,7 @@ function AdminLayout({ children }) {
 
           {canManageUsers && (
             <>
-              <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Management</div>
+              <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Management</div>
 
               <Link to="/admin/settings" onClick={closeSidebar} className={getNavLinkClass("/admin/settings")}>
                 <FaCog className="text-base" /> Settings

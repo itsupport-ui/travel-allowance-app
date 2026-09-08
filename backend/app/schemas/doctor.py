@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from datetime import datetime
 
 
@@ -41,6 +41,8 @@ class DoctorUpdate(BaseModel):
     specialization: str | None = Field(default=None, max_length=120)
     phone: str | None = Field(default=None, max_length=24)
     active: bool
+    deactivation_reason: str | None = Field(default=None, max_length=500)
+    override_request_id: int | None = Field(default=None, ge=1)
 
     @field_validator("name")
     @classmethod
@@ -60,5 +62,4 @@ class DoctorResponse(BaseModel):
     active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

@@ -10,11 +10,7 @@ function AdminTodaySchedulePage() {
   const [schedules, setSchedules] = useState([])
   const [isLoading, setIsLoading] = useState(true)
 
-  useEffect(() => {
-    fetchSchedules()
-  }, [])
-
-  const fetchSchedules = async () => {
+  async function fetchSchedules() {
     try {
       const token = localStorage.getItem("token")
       const data = await getTodayAdminSchedules(token)
@@ -25,6 +21,12 @@ function AdminTodaySchedulePage() {
       setIsLoading(false)
     }
   }
+
+  useEffect(() => {
+    // Initial API hydration; state changes occur after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchSchedules()
+  }, [])
 
   // Priority Badge Visual Transformer
   const getPriorityBadge = (priority) => {

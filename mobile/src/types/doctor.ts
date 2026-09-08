@@ -40,4 +40,6 @@ export interface UpdateDoctorRequest {
   specialization?: string | null;
   phone?: string | null;
   active: boolean;
+  deactivation_reason?: string | null;
+  override_request_id?: number | null;
 }

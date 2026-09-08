@@ -38,3 +38,44 @@ export const updateDoctor = async (doctorId, payload) => {
   )
   return response.data
 }
+
+export const getStaffDeactivationReadiness = async (staffRole, staffId) => {
+  const response = await api.get(
+    `/staff/deactivation-readiness/${staffRole}/${staffId}`,
+    authConfig(),
+  )
+  return response.data
+}
+
+export const getStaffDeactivationOverrides = async (staffRole, staffId) => {
+  const response = await api.get("/staff/deactivation-overrides", {
+    ...authConfig(),
+    params: {
+      status: "all",
+      staff_role: staffRole,
+      staff_id: staffId,
+    },
+  })
+  return response.data
+}
+
+export const requestStaffDeactivationOverride = async (payload) => {
+  const response = await api.post(
+    "/staff/deactivation-overrides",
+    payload,
+    authConfig(),
+  )
+  return response.data
+}
+
+export const decideStaffDeactivationOverride = async (
+  requestId,
+  payload,
+) => {
+  const response = await api.put(
+    `/staff/deactivation-overrides/${requestId}/decision`,
+    payload,
+    authConfig(),
+  )
+  return response.data
+}

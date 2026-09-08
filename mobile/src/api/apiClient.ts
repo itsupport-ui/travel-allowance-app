@@ -39,6 +39,7 @@ const getSafeResponseBody = (data: unknown): unknown => {
 
   const body = data as Record<string, unknown>;
   return {
+    code: body.code,
     detail: body.detail,
     error: body.error,
     message: body.message,

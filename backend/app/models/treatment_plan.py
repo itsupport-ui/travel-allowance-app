@@ -36,6 +36,10 @@ class TreatmentPlan(Base):
     special_instructions = Column(String, nullable=True)
     remarks = Column(String, nullable=True)
     status = Column(TREATMENT_PLAN_STATUS, default="pending")
+    rejection_reason = Column(String, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    revision = Column(Integer, nullable=False, default=1, server_default="1")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     treatment_schedules = relationship(

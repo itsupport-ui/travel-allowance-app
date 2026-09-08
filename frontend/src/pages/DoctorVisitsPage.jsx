@@ -10,6 +10,7 @@ import {
 } from "react-icons/fa"
 
 import DoctorLayout from "../layouts/DoctorLayout"
+import LocationExceptionDialog from "../components/location/LocationExceptionDialog"
 import {
   getDoctorVisit,
   getDoctorVisitSession,
@@ -17,6 +18,7 @@ import {
   punchInDoctorVisit,
   punchOutDoctorVisit,
 } from "../services/doctorVisitService"
+import { requestLocationException } from "../services/locationExceptionService"
 
 
 const inputClass =
@@ -169,6 +171,8 @@ function DoctorVisitsPage() {
   const [session, setSession] = useState(null)
   const [sessionLoading, setSessionLoading] = useState(false)
   const [sessionError, setSessionError] = useState("")
+  const [exceptionReason, setExceptionReason] = useState("")
+  const [exceptionAction, setExceptionAction] = useState("punch_in")
   const [, setElapsedTick] = useState(0)
 
   const today = getLocalDate()
@@ -221,13 +225,12 @@ function DoctorVisitsPage() {
       setSessionLoading(true)
       setSessionError("")
       const token = localStorage.getItem("token")
-      let coordinates
-      if (visit.session_status !== "IN_PROGRESS") {
-        const position = await captureLocation()
-        coordinates = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        }
+      const position = await captureLocation()
+      const coordinates = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        gps_accuracy_m: position.coords.accuracy,
+        device_timestamp: new Date(position.timestamp).toISOString(),
       }
       const data = await getDoctorVisitSession(
         visit.id,
@@ -315,6 +318,8 @@ function DoctorVisitsPage() {
         {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
+          gps_accuracy_m: position.coords.accuracy,
+          location_exception_id: session?.location_exception_id,
         },
         token
       )
@@ -345,6 +350,8 @@ function DoctorVisitsPage() {
         {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
+          gps_accuracy_m: position.coords.accuracy,
+          location_exception_id: session?.location_exception_id,
           remarks: remarks.trim() || null,
         },
         token
@@ -363,6 +370,44 @@ function DoctorVisitsPage() {
       toast.success("Visit completed")
     } catch (error) {
       toast.error(getErrorMessage(error, "Unable to Punch Out"))
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const openExceptionRequest = () => {
+    setExceptionAction(
+      session?.session_status === "IN_PROGRESS" ? "punch_out" : "punch_in"
+    )
+    setExceptionReason("")
+    setModal("location-exception")
+  }
+
+  const submitExceptionRequest = async (event) => {
+    event.preventDefault()
+    if (!selectedVisit || exceptionReason.trim().length < 10) return
+    try {
+      setActionId(`exception-${selectedVisit.id}`)
+      const position = await captureLocation()
+      const token = localStorage.getItem("token")
+      await requestLocationException(
+        {
+          target_type: "doctor_visit",
+          target_id: selectedVisit.id,
+          action: exceptionAction,
+          reason: exceptionReason.trim(),
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          gps_accuracy_m: Math.max(position.coords.accuracy || 1, 1),
+          device_timestamp: new Date(position.timestamp).toISOString(),
+        },
+        token,
+      )
+      toast.success("Location exception sent for administrator review")
+      setModal("details")
+      await loadSession(selectedVisit)
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to request location exception"))
     } finally {
       setActionId(null)
     }
@@ -726,10 +771,31 @@ function DoctorVisitsPage() {
                     : "Punch Out"}
                 </button>
               )}
+              {session?.can_request_location_exception && (
+                <button
+                  type="button"
+                  disabled={actionId !== null}
+                  onClick={openExceptionRequest}
+                  className="rounded-xl border border-amber-300 bg-amber-50 px-5 py-2.5 text-sm font-bold text-amber-900 transition hover:bg-amber-100 disabled:opacity-50"
+                >
+                  Request location exception
+                </button>
+              )}
             </div>
           </div>
         </Modal>
       )}
+
+      <LocationExceptionDialog
+        action={exceptionAction}
+        busy={actionId === `exception-${selectedVisit?.id}`}
+        open={modal === "location-exception" && Boolean(selectedVisit)}
+        reason={exceptionReason}
+        targetLabel={selectedVisit?.patient_name || "this visit"}
+        onClose={() => setModal("details")}
+        onReasonChange={setExceptionReason}
+        onSubmit={submitExceptionRequest}
+      />
 
     </DoctorLayout>
   )

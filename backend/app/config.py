@@ -42,6 +42,14 @@ def _optional_int_env(name: str, default: int) -> int:
 
 
 JWT_SECRET_KEY = _required_env("JWT_SECRET_KEY")
+ACCESS_TOKEN_EXPIRE_MINUTES = _optional_int_env(
+    "ACCESS_TOKEN_EXPIRE_MINUTES",
+    480,
+)
+if not 15 <= ACCESS_TOKEN_EXPIRE_MINUTES <= 1440:
+    raise RuntimeError(
+        "ACCESS_TOKEN_EXPIRE_MINUTES must be between 15 and 1440"
+    )
 GOOGLE_MAPS_API_KEY = _required_env("GOOGLE_MAPS_API_KEY")
 CORS_ORIGINS = tuple(
     origin.strip()
@@ -59,3 +67,22 @@ WORKDAY_AUTO_LOGOUT_GRACE_MINUTES = _optional_int_env(
     "WORKDAY_AUTO_LOGOUT_GRACE_MINUTES",
     15,
 )
+REPORT_ASYNC_ROW_THRESHOLD = _optional_int_env(
+    "REPORT_ASYNC_ROW_THRESHOLD",
+    1000,
+)
+REPORT_ARTIFACT_STORAGE = os.getenv(
+    "REPORT_ARTIFACT_STORAGE", "database"
+).strip().lower()
+if REPORT_ARTIFACT_STORAGE not in {"database", "s3"}:
+    raise RuntimeError("REPORT_ARTIFACT_STORAGE must be 'database' or 's3'")
+REPORT_ARTIFACT_S3_BUCKET = os.getenv("REPORT_ARTIFACT_S3_BUCKET", "").strip()
+REPORT_ARTIFACT_S3_PREFIX = os.getenv(
+    "REPORT_ARTIFACT_S3_PREFIX", "private/report-exports"
+).strip().strip("/")
+REPORT_ARTIFACT_S3_ENDPOINT_URL = (
+    os.getenv("REPORT_ARTIFACT_S3_ENDPOINT_URL", "").strip() or None
+)
+REPORT_ARTIFACT_S3_REGION = os.getenv(
+    "REPORT_ARTIFACT_S3_REGION", "ap-south-1"
+).strip()

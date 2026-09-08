@@ -2,9 +2,10 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
-    Float,
+    JSON,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     UniqueConstraint,
 )
@@ -32,7 +33,7 @@ class DoctorClaim(Base):
         index=True,
     )
     claim_date = Column(Date, nullable=False, index=True)
-    total_amount = Column(Float, nullable=False)
+    total_amount = Column(Numeric(12, 2), nullable=False)
     expense_count = Column(Integer, nullable=False)
     status = Column(
         String,
@@ -45,6 +46,10 @@ class DoctorClaim(Base):
     approved_at = Column(DateTime(timezone=True), nullable=True)
     approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     rejection_reason = Column(String, nullable=True)
+    revision = Column(Integer, nullable=False, default=1, server_default="1")
+    calculation_version = Column(String, nullable=False, default="decimal-v1")
+    rounding_mode = Column(String, nullable=False, default="ROUND_HALF_UP")
+    included_expense_ids = Column(JSON, nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,

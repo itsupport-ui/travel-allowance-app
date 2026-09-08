@@ -4,6 +4,7 @@ import { api } from "../api/apiClient";
 import { appConfig } from "../config/env";
 import type {
   AdminDoctorClaim,
+  CancelDoctorConsultationRequest,
   CompleteDoctorConsultationRequest,
   CreateDoctorConsultationRequest,
   CreateDoctorVisitRequest,
@@ -16,6 +17,7 @@ import type {
   DoctorConsultationFilters,
   DoctorConsultation,
   DoctorConsultationDashboard,
+  DoctorConsultationEvent,
   DoctorDashboardSummary,
   DoctorExpense,
   DoctorProofAsset,
@@ -23,14 +25,20 @@ import type {
   DoctorVisitExpenseOption,
   DoctorVisitSession,
   DoctorVisitDashboard,
+  ManualDoctorExpenseReviewEvent,
   SaveDoctorExpenseRequest,
   TreatmentPlan,
   TreatmentPlanScheduleRequest,
+  ResubmitTreatmentPlanRequest,
+  RescheduleDoctorConsultationRequest,
+  ScheduleDoctorConsultationFollowUpRequest,
   UpdateDoctorVisitStatusRequest,
 } from "../types/doctorWorkflow";
 import type { Doctor } from "../types/doctor";
 import type { TherapistResponse } from "../types/therapist";
+import type { DoctorClaimReadiness } from "../types/claim";
 import { getToken } from "../utils/storage";
+import { executeOrQueueMutation } from "./offlineMutationQueue";
 
 const getAuthHeaders = async () => {
   const token = await getToken();
@@ -122,11 +130,14 @@ export const createDoctorConsultation = async (
 };
 
 export const confirmDoctorConsultation = async (
-  consultationId: number
+  consultationId: number,
+  lifecycleVersion?: number
 ): Promise<DoctorConsultation> => {
   const response = await api.put<DoctorConsultation>(
     `/doctor-consultations/${consultationId}/confirm`,
-    {},
+    lifecycleVersion === undefined
+      ? {}
+      : { lifecycle_version: lifecycleVersion },
     { headers: await getAuthHeaders() }
   );
   return response.data;
@@ -134,11 +145,17 @@ export const confirmDoctorConsultation = async (
 
 export const rejectDoctorConsultation = async (
   consultationId: number,
-  rejectionReason: string
+  rejectionReason: string,
+  lifecycleVersion?: number
 ): Promise<DoctorConsultation> => {
   const response = await api.put<DoctorConsultation>(
     `/doctor-consultations/${consultationId}/reject`,
-    { rejection_reason: rejectionReason },
+    {
+      rejection_reason: rejectionReason,
+      ...(lifecycleVersion === undefined
+        ? {}
+        : { lifecycle_version: lifecycleVersion }),
+    },
     { headers: await getAuthHeaders() }
   );
   return response.data;
@@ -230,10 +247,58 @@ export const updateDoctorVisitStatus = async (
   return response.data;
 };
 
+export const getDoctorConsultationHistory = async (
+  consultationId: number
+): Promise<DoctorConsultationEvent[]> => {
+  const response = await api.get<DoctorConsultationEvent[]>(
+    `/doctor-consultations/${consultationId}/history`,
+    { headers: await getAuthHeaders() }
+  );
+  return response.data;
+};
+
+export const cancelDoctorConsultation = async (
+  consultationId: number,
+  request: CancelDoctorConsultationRequest
+): Promise<DoctorConsultation> => {
+  const response = await api.put<DoctorConsultation>(
+    `/doctor-consultations/${consultationId}/cancel`,
+    request,
+    { headers: await getAuthHeaders() }
+  );
+  return response.data;
+};
+
+export const rescheduleDoctorConsultation = async (
+  consultationId: number,
+  request: RescheduleDoctorConsultationRequest
+): Promise<DoctorConsultation> => {
+  const response = await api.post<DoctorConsultation>(
+    `/doctor-consultations/${consultationId}/reschedule`,
+    request,
+    { headers: await getAuthHeaders() }
+  );
+  return response.data;
+};
+
+export const scheduleDoctorConsultationFollowUp = async (
+  consultationId: number,
+  request: ScheduleDoctorConsultationFollowUpRequest
+): Promise<DoctorConsultation> => {
+  const response = await api.post<DoctorConsultation>(
+    `/doctor-consultations/${consultationId}/schedule-follow-up`,
+    request,
+    { headers: await getAuthHeaders() }
+  );
+  return response.data;
+};
+
 export const getDoctorVisitSession = async (
   visitId: number,
   latitude?: number,
-  longitude?: number
+  longitude?: number,
+  gpsAccuracyM?: number,
+  deviceTimestamp?: string
 ): Promise<DoctorVisitSession> => {
   const response = await api.get<DoctorVisitSession>(
     `/doctor-visits/${visitId}/session`,
@@ -242,7 +307,12 @@ export const getDoctorVisitSession = async (
       params:
         latitude === undefined || longitude === undefined
           ? undefined
-          : { latitude, longitude },
+          : {
+              latitude,
+              longitude,
+              gps_accuracy_m: gpsAccuracyM,
+              device_timestamp: deviceTimestamp,
+            },
     }
   );
   return response.data;
@@ -251,18 +321,35 @@ export const getDoctorVisitSession = async (
 export const punchInDoctorVisit = async (
   visitId: number,
   latitude: number,
-  longitude: number
+  longitude: number,
+  gpsAccuracyM?: number | null,
+  locationExceptionId?: number | null
 ): Promise<DoctorVisitSession> => {
-  const response = await api.post<DoctorVisitSession>(
-    `/doctor-visits/${visitId}/punch-in`,
-    {
-      device_timestamp: new Date().toISOString(),
-      latitude,
-      longitude,
+  const body = {
+    device_timestamp: new Date().toISOString(),
+    latitude,
+    longitude,
+    gps_accuracy_m: gpsAccuracyM,
+    location_exception_id: locationExceptionId,
+  };
+  return executeOrQueueMutation({
+    body,
+    execute: async (operationId) => {
+      const response = await api.post<DoctorVisitSession>(
+        `/doctor-visits/${visitId}/punch-in`,
+        body,
+        {
+          headers: {
+            ...(await getAuthHeaders()),
+            "X-Idempotency-Key": operationId,
+          },
+        }
+      );
+      return response.data;
     },
-    { headers: await getAuthHeaders() }
-  );
-  return response.data;
+    operationType: "doctor_visit_punch_in",
+    targetId: visitId,
+  });
 };
 
 export const punchOutDoctorVisit = async (
@@ -271,17 +358,32 @@ export const punchOutDoctorVisit = async (
     latitude: number;
     longitude: number;
     remarks: string | null;
+    gps_accuracy_m?: number | null;
+    location_exception_id?: number | null;
   }
 ): Promise<DoctorVisitSession> => {
-  const response = await api.post<DoctorVisitSession>(
-    `/doctor-visits/${visitId}/punch-out`,
-    {
-      ...request,
-      device_timestamp: new Date().toISOString(),
+  const body = {
+    ...request,
+    device_timestamp: new Date().toISOString(),
+  };
+  return executeOrQueueMutation({
+    body,
+    execute: async (operationId) => {
+      const response = await api.post<DoctorVisitSession>(
+        `/doctor-visits/${visitId}/punch-out`,
+        body,
+        {
+          headers: {
+            ...(await getAuthHeaders()),
+            "X-Idempotency-Key": operationId,
+          },
+        }
+      );
+      return response.data;
     },
-    { headers: await getAuthHeaders() }
-  );
-  return response.data;
+    operationType: "doctor_visit_punch_out",
+    targetId: visitId,
+  });
 };
 
 export const getTodayCompletedDoctorVisits = async (): Promise<
@@ -299,10 +401,19 @@ export const createTreatmentPlan = async (
 ): Promise<TreatmentPlan> => {
   const response = await api.post<TreatmentPlan>(
     "/treatment-plans/",
-    {
-      id: 0,
-      ...request,
-    },
+    request,
+    { headers: await getAuthHeaders() }
+  );
+  return response.data;
+};
+
+export const resubmitTreatmentPlan = async (
+  planId: number,
+  request: ResubmitTreatmentPlanRequest
+): Promise<TreatmentPlan> => {
+  const response = await api.put<TreatmentPlan>(
+    `/treatment-plans/${planId}/resubmit`,
+    request,
     { headers: await getAuthHeaders() }
   );
   return response.data;
@@ -405,8 +516,20 @@ const buildExpenseFormData = (
     formData.append("to_location", request.to_location);
   }
   formData.append("transport_mode", request.transport_mode);
-  formData.append("fare", String(request.fare));
+  if (request.fare !== null) {
+    formData.append("fare", String(request.fare));
+  }
   formData.append("remarks", request.remarks);
+  formData.append("expense_category", request.expense_category);
+  if (request.manual_reason) {
+    formData.append("manual_reason", request.manual_reason);
+  }
+  if (request.correction_reason) {
+    formData.append("correction_reason", request.correction_reason);
+  }
+  if (request.version !== undefined) {
+    formData.append("version", String(request.version));
+  }
   appendProof(formData, request.proof_file);
   return formData;
 };
@@ -460,6 +583,43 @@ export const deleteDoctorExpense = async (
   });
 };
 
+export const listManualDoctorExpenseReviews = async (
+  status = "pending"
+): Promise<DoctorExpense[]> => {
+  const response = await api.get<DoctorExpense[]>(
+    "/doctor-expenses/manual-review",
+    { headers: await getAuthHeaders(), params: { status } }
+  );
+  return response.data;
+};
+
+export const decideManualDoctorExpense = async (
+  expenseId: number,
+  payload: {
+    decision: "approved" | "changes_requested";
+    reason: string;
+    version: number;
+    approved_amount?: number;
+  }
+): Promise<DoctorExpense> => {
+  const response = await api.put<DoctorExpense>(
+    `/doctor-expenses/manual-review/${expenseId}/decision`,
+    payload,
+    { headers: await getAuthHeaders() }
+  );
+  return response.data;
+};
+
+export const getManualDoctorExpenseReviewHistory = async (
+  expenseId: number
+): Promise<ManualDoctorExpenseReviewEvent[]> => {
+  const response = await api.get<ManualDoctorExpenseReviewEvent[]>(
+    `/doctor-expenses/${expenseId}/review-history`,
+    { headers: await getAuthHeaders() }
+  );
+  return response.data;
+};
+
 export const getMyDoctorClaims = async (): Promise<DoctorClaim[]> => {
   const response = await api.get<DoctorClaim[]>("/doctor-claims/my", {
     headers: await getAuthHeaders(),
@@ -511,12 +671,23 @@ export const getDoctorClaim = async (
 
 export const submitDoctorClaim =
   async (): Promise<DoctorClaimDetails> => {
-    const response = await api.post<DoctorClaimDetails>(
-      "/doctor-claims/submit",
-      {},
-      { headers: await getAuthHeaders() }
-    );
-    return response.data;
+    return executeOrQueueMutation({
+      body: {},
+      execute: async (operationId) => {
+        const response = await api.post<DoctorClaimDetails>(
+          "/doctor-claims/submit",
+          {},
+          {
+            headers: {
+              ...(await getAuthHeaders()),
+              "X-Idempotency-Key": operationId,
+            },
+          }
+        );
+        return response.data;
+      },
+      operationType: "doctor_claim_submit",
+    });
   };
 
 export const approveDoctorClaim = async (
@@ -545,6 +716,31 @@ export const rejectDoctorClaim = async (
 const getProofExtension = (proofName: string): string => {
   const match = proofName.toLowerCase().match(/\.(pdf|jpe?g|png)$/);
   return match?.[0] ?? "";
+};
+
+export const getDoctorClaimReadiness =
+  async (): Promise<DoctorClaimReadiness> => {
+    const response = await api.get<DoctorClaimReadiness>(
+      "/doctor-claims/preview",
+      { headers: await getAuthHeaders() }
+    );
+    return response.data;
+  };
+
+export const downloadDoctorExpenseProof = async (
+  expenseId: number,
+  proofName: string
+): Promise<File> => {
+  const destination = new File(
+    Paths.cache,
+    `doctor-expense-${expenseId}-proof${getProofExtension(proofName)}`
+  );
+  const downloadedFile = await File.downloadFileAsync(
+    `${appConfig.apiUrl}/doctor-expenses/${expenseId}/proof`,
+    destination,
+    { headers: await getAuthHeaders(), idempotent: true }
+  );
+  return new File(downloadedFile.uri);
 };
 
 export const downloadDoctorClaimProof = async (

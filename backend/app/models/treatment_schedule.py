@@ -7,6 +7,7 @@ from sqlalchemy import (
     Integer,
     String,
     Time,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -14,6 +15,13 @@ from app.database import Base
 
 class TreatmentSchedule(Base):
     __tablename__ = "treatment_schedules"
+    __table_args__ = (
+        UniqueConstraint(
+            "series_id",
+            "occurrence_date",
+            name="uq_treatment_schedule_series_occurrence",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     patient_name = Column(String, nullable=False)
@@ -80,4 +88,15 @@ class TreatmentSchedule(Base):
     treatment_plan = relationship(
         "TreatmentPlan",
         back_populates="treatment_schedules",
+    )
+    series_id = Column(
+        Integer,
+        ForeignKey("treatment_schedule_series.id"),
+        nullable=True,
+        index=True,
+    )
+    occurrence_date = Column(Date, nullable=True, index=True)
+    series = relationship(
+        "TreatmentScheduleSeries",
+        back_populates="occurrences",
     )

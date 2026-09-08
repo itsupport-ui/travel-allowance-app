@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.models.doctor import Doctor
 from app.models.treatment_schedule import TreatmentSchedule
+from app.models.treatment_schedule_series import TreatmentScheduleSeries
 from app.models.user import User
 from app.routers.admin_schedules import router
 from app.utils.auth import get_current_user
@@ -129,7 +130,28 @@ class AdminSchedulesApiTests(unittest.TestCase):
         self.assertEqual(body["items"][0]["patient_name"], "Patient Alpha")
         self.assertEqual(body["items"][0]["duration_minutes"], 60)
         self.assertEqual(body["items"][0]["area"], "Anna Nagar")
+        self.assertEqual(
+            body["items"][0]["available_actions"],
+            ["view_details", "edit", "cancel"],
+        )
+        self.assertEqual(body["items"][0]["blocking_reasons"], [])
+        self.assertEqual(body["items"][0]["next_action"], "edit")
         self.assertNotIn("transport_mode", body["items"][0])
+
+    def test_in_progress_schedule_does_not_advertise_edit_or_cancel(self):
+        self.schedule.session_status = "IN_PROGRESS"
+        self.db.commit()
+
+        response = self.client.get("/admin-schedules/review")
+
+        self.assertEqual(response.status_code, 200)
+        item = response.json()["items"][0]
+        self.assertEqual(
+            item["available_actions"],
+            ["view_details", "monitor_session"],
+        )
+        self.assertEqual(item["blocking_reasons"], ["SESSION_IN_PROGRESS"])
+        self.assertEqual(item["next_action"], "monitor_session")
 
     def test_availability_detects_overlap(self):
         response = self.client.get(
@@ -147,6 +169,28 @@ class AdminSchedulesApiTests(unittest.TestCase):
         body = response.json()
         self.assertFalse(body["available"])
         self.assertEqual(body["conflicts"][0]["id"], self.schedule.id)
+
+    def test_recurring_availability_checks_only_cadence_dates(self):
+        gap_date = date.today() + timedelta(days=1)
+        self.schedule.treatment_date = gap_date
+        self.db.commit()
+
+        response = self.client.get(
+            "/admin-schedules/therapist-availability",
+            params={
+                "therapist_id": self.therapist.id,
+                "schedule_type": "recurring",
+                "start_date": date.today().isoformat(),
+                "end_date": (date.today() + timedelta(days=2)).isoformat(),
+                "cadence_days": 2,
+                "start_time": "10:00:00",
+                "expected_end_time": "11:00:00",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["available"])
+        self.assertEqual(response.json()["conflicts"], [])
 
     def test_review_marks_conflicting_schedules(self):
         second = self.create_schedule(
@@ -187,6 +231,49 @@ class AdminSchedulesApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "cancelled")
+
+    def test_cancel_future_scope_preserves_earlier_series_occurrences(self):
+        series = TreatmentScheduleSeries(
+            start_date=date.today(),
+            end_date=date.today() + timedelta(days=2),
+            cadence_days=1,
+            created_by=self.admin.id,
+        )
+        self.db.add(series)
+        self.db.flush()
+        self.schedule.series_id = series.id
+        self.schedule.occurrence_date = date.today()
+        future = self.create_schedule(
+            patient_name="Future series patient",
+            treatment_date=date.today() + timedelta(days=1),
+            start=time(10, 0),
+            end=time(11, 0),
+        )
+        future.series_id = series.id
+        future.occurrence_date = future.treatment_date
+        later = self.create_schedule(
+            patient_name="Later series patient",
+            treatment_date=date.today() + timedelta(days=2),
+            start=time(10, 0),
+            end=time(11, 0),
+        )
+        later.series_id = series.id
+        later.occurrence_date = later.treatment_date
+        self.db.commit()
+
+        response = self.client.put(
+            f"/admin-schedules/{future.id}/cancel",
+            params={"scope": "future"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["generated_occurrences"], 2)
+        self.db.refresh(self.schedule)
+        self.db.refresh(future)
+        self.db.refresh(later)
+        self.assertEqual(self.schedule.status, "scheduled")
+        self.assertEqual(future.status, "cancelled")
+        self.assertEqual(later.status, "cancelled")
 
     def test_upcoming_view_is_paginated(self):
         self.create_schedule(

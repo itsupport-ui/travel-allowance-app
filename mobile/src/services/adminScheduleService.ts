@@ -19,7 +19,9 @@ import { formatScheduleDate, formatScheduleTime } from "../utils/scheduleForm";
 import { getToken } from "../utils/storage";
 
 interface ApiReviewItem {
+  available_actions: string[];
   area: string;
+  blocking_reasons: string[];
   clinical_notes: string | null;
   doctor_id: number;
   doctor_name: string;
@@ -41,6 +43,7 @@ interface ApiReviewItem {
   start_date: string | null;
   start_time: string;
   status: AdminScheduleReviewItem["status"];
+  next_action: string | null;
   therapist_id: number;
   therapist_name: string;
   treatment_name: string;
@@ -172,7 +175,9 @@ export const createEmptyAdminScheduleFilters =
 const mapReviewItem = (
   item: ApiReviewItem
 ): AdminScheduleReviewItem => ({
+  availableActions: item.available_actions,
   area: item.area,
+  blockingReasons: item.blocking_reasons,
   clinicalNotes: item.clinical_notes,
   doctorId: item.doctor_id,
   doctorName: item.doctor_name,
@@ -194,6 +199,7 @@ const mapReviewItem = (
   startDate: item.start_date,
   startTime: item.start_time,
   status: item.status,
+  nextAction: item.next_action,
   therapistId: item.therapist_id,
   therapistName: item.therapist_name,
   treatmentName: item.treatment_name,
@@ -278,6 +284,7 @@ export const getAdminScheduleFormOptions =
   };
 
 interface AvailabilityInput {
+  cadenceDays: number;
   endDate: Date | null;
   excludeScheduleId?: number;
   expectedEndTime: Date;
@@ -297,6 +304,7 @@ export const getTherapistAvailability = async (
       {
         headers: await getAuthHeaders(),
         params: {
+          cadence_days: input.cadenceDays,
           end_date: input.endDate
             ? formatScheduleDate(input.endDate)
             : undefined,
@@ -336,13 +344,17 @@ export const getTherapistAvailability = async (
 };
 
 export const cancelAdminSchedule = async (
-  scheduleId: number
+  scheduleId: number,
+  scope: "this" | "future" | "series" = "this"
 ): Promise<ScheduleResponse> => {
   try {
     const response = await api.put<ScheduleResponse>(
       `/admin-schedules/${scheduleId}/cancel`,
       undefined,
-      { headers: await getAuthHeaders() }
+      {
+        headers: await getAuthHeaders(),
+        params: { scope },
+      }
     );
     return response.data;
   } catch (error) {

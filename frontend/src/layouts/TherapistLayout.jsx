@@ -4,15 +4,13 @@ import {
   FaHome,
   FaCar,
   FaFileInvoice,
+  FaFileInvoiceDollar,
   FaPlusCircle,
   FaSignOutAlt,
   FaBars,
   FaTimes,
-  FaCalendarDay,
   FaCalendarAlt,
   FaUserCircle,
-  FaCalendarTimes,
-  FaCalendarCheck,
   FaPlay,
   FaStopCircle,
 } from "react-icons/fa";
@@ -35,6 +33,7 @@ function TherapistLayout({ children }) {
   const [workday, setWorkday] = useState(null);
   const [confirmingEnd, setConfirmingEnd] = useState(false);
   const [endingDay, setEndingDay] = useState(false);
+  const [earlyEndReason, setEarlyEndReason] = useState("");
 
   const loadWorkday = async () => {
     try {
@@ -57,7 +56,7 @@ function TherapistLayout({ children }) {
   }, []);
 
   const handleLogout = () => {
-    if (workday?.is_active && workday.can_end_workday) {
+    if (workday?.is_active) {
       setConfirmingEnd(true);
       return;
     }
@@ -86,10 +85,15 @@ function TherapistLayout({ children }) {
         {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
+          earlyEndReason: workday?.can_end_workday
+            ? undefined
+            : earlyEndReason.trim(),
         },
       );
       toast.success(
-        `Workday ended: ${result.completed_schedules_count} completed, ${result.pending_schedules_count} pending`,
+        result.early_end_review_status === "pending"
+          ? `Workday ended and sent for review: ${result.completed_schedules_count} completed, ${result.pending_schedules_count} pending`
+          : `Workday ended: ${result.completed_schedules_count} completed, ${result.pending_schedules_count} pending`,
         { duration: 5000 },
       );
       localStorage.removeItem("token");
@@ -101,7 +105,7 @@ function TherapistLayout({ children }) {
     } finally {
       setEndingDay(false);
     }
-  }, [navigate]);
+  }, [earlyEndReason, navigate, workday]);
 
   useEffect(() => {
     if (
@@ -191,12 +195,13 @@ function TherapistLayout({ children }) {
         
         <div className="flex items-center gap-2">
           {/* Start Day Button - Mobile Quick Access */}
-          {workday?.is_active && workday.can_end_workday ? (
+          {workday?.is_active ? (
             <button
               onClick={() => setConfirmingEnd(true)}
               className="bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition active:scale-95"
             >
-              <FaStopCircle className="text-[10px]" /> End Day
+              <FaStopCircle className="text-[10px]" />
+              {workday.can_end_workday ? "End Day" : "End Early"}
             </button>
           ) : !workday?.started ? (
             <button
@@ -246,8 +251,10 @@ function TherapistLayout({ children }) {
             </div>
           </div>
           <button 
+            type="button"
             onClick={closeSidebar}
             className="md:hidden text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-50 transition"
+            aria-label="Close navigation menu"
           >
             <FaTimes className="text-base" />
           </button>
@@ -255,12 +262,13 @@ function TherapistLayout({ children }) {
 
         {/* Start Day Action - Desktop Sidebar Placement */}
         <div className="mb-4 hidden md:block">
-          {workday?.is_active && workday.can_end_workday ? (
+          {workday?.is_active ? (
             <button
               onClick={() => setConfirmingEnd(true)}
               className="w-full bg-rose-700 hover:bg-rose-800 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 text-xs transition active:scale-[0.98]"
             >
-              <FaStopCircle /> End Work Day
+              <FaStopCircle />
+              {workday.can_end_workday ? "End Work Day" : "End Early"}
             </button>
           ) : !workday?.started ? (
             <button
@@ -269,14 +277,7 @@ function TherapistLayout({ children }) {
             >
               <FaPlay className="text-[10px]" /> Start Work Day
             </button>
-          ) : (
-            <div className="rounded-xl bg-emerald-50 px-3 py-2.5 text-center text-xs font-bold text-emerald-700">
-              Workday active
-              <span className="mt-1 block text-[10px] font-medium text-emerald-600">
-                End available at {workday?.workday_end_time || "18:00"}
-              </span>
-            </div>
-          )}
+          ) : null}
         </div>
 
         {/* Navigation Stream links */}
@@ -286,10 +287,8 @@ function TherapistLayout({ children }) {
             { path: "/travel/add", label: "Add Travel", icon: FaPlusCircle, permission: "travel.manage" },
             { path: "/travel/today", label: "Today's Travel", icon: FaCar, permission: "travel.manage" },
             { path: "/claims", label: "My Claims", icon: FaFileInvoice, permission: "therapist_claims.submit" },
-            { path: "/today-schedule", label: "Today's Schedule", icon: FaCalendarDay, permission: "schedules.own" },
-            { path: "/upcoming-schedule", label: "Upcoming Schedule", icon: FaCalendarAlt, permission: "schedules.own" },
-            { path: "/therapist/schedule/missed", label: "Missed Schedule", icon: FaCalendarTimes, permission: "schedules.own" },
-            { path: "/therapist/schedule/completed", label: "Completed Schedule", icon: FaCalendarCheck, permission: "schedules.own" },
+            { path: "/travel-expense-report", label: "Travel Expense Report", icon: FaFileInvoiceDollar, permission: "travel.manage" },
+            { path: "/therapist/schedules", label: "My Schedules", icon: FaCalendarAlt, permission: "schedules.own" },
             { path: "/therapist/profile", label: "Profile", icon: FaUserCircle },
           ].filter((item) => !item.permission || hasPermission(item.permission)).map((item) => {
             const isActive = location.pathname === item.path;
@@ -339,14 +338,48 @@ function TherapistLayout({ children }) {
 
       <ConfirmDialog
         open={confirmingEnd}
-        title="Your workday has ended"
-        message="End attendance now and log out for the day. Active treatment sessions must be punched out first."
-        confirmLabel="End Work Day"
+        title={workday?.can_end_workday ? "End workday?" : "End workday early?"}
+        message={
+          workday?.can_end_workday
+            ? "End attendance now and log out. Active treatment sessions must be punched out first."
+            : `The standard end time is ${workday?.workday_end_time || "18:00"}. Enter a reason for the audit record. Active treatment sessions still must be punched out first.`
+        }
+        confirmLabel={workday?.can_end_workday ? "End Work Day" : "End Early"}
         destructive
         busy={endingDay}
-        onClose={() => setConfirmingEnd(false)}
+        confirmDisabled={
+          !workday?.can_end_workday && earlyEndReason.trim().length < 5
+        }
+        onClose={() => {
+          setConfirmingEnd(false)
+          setEarlyEndReason("")
+        }}
         onConfirm={handleEndDay}
-      />
+      >
+        {!workday?.can_end_workday && (
+          <div className="mt-4">
+            <label
+              htmlFor="therapist-early-end-reason"
+              className="mb-1.5 block text-sm font-semibold text-slate-700"
+            >
+              Early closure reason
+            </label>
+            <textarea
+              id="therapist-early-end-reason"
+              value={earlyEndReason}
+              onChange={(event) => setEarlyEndReason(event.target.value)}
+              maxLength={500}
+              rows={3}
+              autoFocus
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="For example: assigned visits completed early"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Minimum 5 characters; saved with attendance.
+            </p>
+          </div>
+        )}
+      </ConfirmDialog>
 
     </div>
   );

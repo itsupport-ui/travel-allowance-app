@@ -22,13 +22,13 @@ import {
 import { TravelSkeleton } from "../../src/components/skeletons/ScreenSkeletons";
 import { queryKeys } from "../../src/query/queryKeys";
 import {
-  getMyClaims,
+  getTodayClaimReadiness,
   submitTodayClaim,
 } from "../../src/services/claimService";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
+import { isOfflineMutationQueuedError } from "../../src/services/offlineMutationQueue";
 import { getTodayTravels } from "../../src/services/travelService";
 import type { TravelResponse } from "../../src/types/travel";
-import { formatDateForApi } from "../../src/utils/date";
 
 const PRIMARY = colors.primary;
 
@@ -37,10 +37,6 @@ interface TravelSummary {
   fare: number;
   trips: number;
 }
-
-const getLocalDateKey = (value: Date): string => {
-  return formatDateForApi(value);
-};
 
 const formatAmount = (value: number): string =>
   `INR ${value.toFixed(2)}`;
@@ -123,7 +119,11 @@ const TravelCard = memo(function TravelCard({
         </View>
         <View style={styles.statusBadge}>
           <Text style={styles.statusText}>
-            {formatLabel(travel.status)}
+            {formatLabel(
+              travel.schedule_id === null && travel.manual_review_status
+                ? travel.manual_review_status
+                : travel.status
+            )}
           </Text>
         </View>
       </View>
@@ -177,9 +177,9 @@ export default function TravelScreen() {
     queryKey: queryKeys.travel.today,
     queryFn: getTodayTravels,
   });
-  const claimsQuery = useQuery({
-    queryKey: queryKeys.claims.mine,
-    queryFn: getMyClaims,
+  const readinessQuery = useQuery({
+    queryKey: queryKeys.claims.readiness,
+    queryFn: getTodayClaimReadiness,
   });
   const submitMutation = useMutation({
     mutationFn: submitTodayClaim,
@@ -187,6 +187,9 @@ export default function TravelScreen() {
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: queryKeys.claims.all,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.claims.readiness,
         }),
         queryClient.invalidateQueries({
           queryKey: queryKeys.dashboard.summary,
@@ -202,7 +205,9 @@ export default function TravelScreen() {
     },
     onError: (error) => {
       Alert.alert(
-        "Unable to Submit Claim",
+        isOfflineMutationQueuedError(error)
+          ? "Saved for Sync"
+          : "Unable to Submit Claim",
         getApiErrorMessage(
           error,
           "Unable to submit today's claim."
@@ -220,15 +225,11 @@ export default function TravelScreen() {
 
   const travels = travelQuery.data ?? [];
   const summary = calculateSummary(travels);
-  const today = getLocalDateKey(new Date());
-  const hasClaimToday = (claimsQuery.data ?? []).some(
-    (claim) => claim.claim_date.slice(0, 10) === today
-  );
+  const readiness = readinessQuery.data;
   const claimStateUnavailable =
-    claimsQuery.isPending || Boolean(claimsQuery.error);
+    readinessQuery.isPending || Boolean(readinessQuery.error);
   const submitDisabled =
-    travels.length === 0 ||
-    hasClaimToday ||
+    !readiness?.can_submit ||
     claimStateUnavailable ||
     submitMutation.isPending;
 
@@ -239,7 +240,7 @@ export default function TravelScreen() {
 
     Alert.alert(
       "Submit Today's Claim",
-      "You are about to submit today's travel claim.",
+      `${readiness?.submission_mode === "resubmit" ? "Resubmit" : "Submit"} ${readiness?.eligible_record_count ?? 0} travel ${(readiness?.eligible_record_count ?? 0) === 1 ? "entry" : "entries"} totalling ${formatAmount(readiness?.total_amount ?? 0)}?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -260,7 +261,7 @@ export default function TravelScreen() {
   const refresh = async () => {
     await Promise.all([
       travelQuery.refetch(),
-      claimsQuery.refetch(),
+      readinessQuery.refetch(),
     ]);
   };
 
@@ -317,6 +318,80 @@ export default function TravelScreen() {
               />
             </View>
 
+            <View style={styles.readinessCard}>
+              <View style={styles.readinessHeader}>
+                <View style={styles.readinessTitleBlock}>
+                  <Text style={styles.readinessTitle}>Today&apos;s claim preview</Text>
+                  <Text style={styles.readinessCaption}>
+                    {readiness
+                      ? `Business date ${readiness.business_date}`
+                      : "Calculating eligible travel and rates..."}
+                  </Text>
+                </View>
+                {readiness ? (
+                  <View
+                    style={[
+                      styles.readinessBadge,
+                      readiness.state === "ready"
+                        ? styles.readyBadge
+                        : readiness.state === "already_submitted"
+                          ? styles.submittedBadge
+                          : styles.blockedBadge,
+                    ]}
+                  >
+                    <Text style={styles.readinessBadgeText}>
+                      {formatLabel(readiness.state)}
+                    </Text>
+                  </View>
+                ) : (
+                  <ActivityIndicator color={PRIMARY} size="small" />
+                )}
+              </View>
+              {readiness ? (
+                <View style={styles.readinessMetrics}>
+                  <View style={styles.readinessMetric}>
+                    <Text style={styles.readinessMetricLabel}>Eligible</Text>
+                    <Text style={styles.readinessMetricValue}>
+                      {readiness.eligible_record_count}
+                    </Text>
+                  </View>
+                  <View style={styles.readinessMetric}>
+                    <Text style={styles.readinessMetricLabel}>Allowance</Text>
+                    <Text style={styles.readinessMetricValue}>
+                      {formatAmount(readiness.daily_allowance)}
+                    </Text>
+                  </View>
+                  <View style={styles.readinessMetric}>
+                    <Text style={styles.readinessMetricLabel}>Claim total</Text>
+                    <Text style={styles.readinessMetricValue}>
+                      {formatAmount(readiness.total_amount)}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+              {readiness?.policy_version ? (
+                <Text style={styles.policyText}>
+                  Policy v{readiness.policy_version} · {formatAmount(readiness.per_km_rate ?? 0)} per KM · {readiness.rounding_mode}
+                </Text>
+              ) : null}
+              {readiness?.rejection_reason && readiness.submission_mode === "resubmit" ? (
+                <View accessibilityRole="alert" style={styles.reviewWarning}>
+                  <Text style={styles.reviewWarningTitle}>Changes requested</Text>
+                  <Text style={styles.reviewWarningText}>{readiness.rejection_reason}</Text>
+                </View>
+              ) : null}
+              {readiness?.blocking_reasons.map((blocker) => (
+                <View accessibilityRole="alert" key={blocker.code} style={styles.reviewWarning}>
+                  <Text style={styles.reviewWarningTitle}>
+                    {blocker.affected_count > 0
+                      ? `${blocker.affected_count} affected item${blocker.affected_count === 1 ? "" : "s"}`
+                      : "Claim not ready"}
+                  </Text>
+                  <Text style={styles.reviewWarningText}>{blocker.message}</Text>
+                </View>
+              ))}
+            </View>
+
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityState={{ disabled: submitDisabled }}
@@ -325,7 +400,7 @@ export default function TravelScreen() {
               style={[
                 styles.submitButton,
                 submitDisabled && styles.disabledButton,
-                hasClaimToday && styles.submittedButton,
+                readiness?.state === "already_submitted" && styles.submittedButton,
               ]}
               onPress={submitClaim}
             >
@@ -338,7 +413,7 @@ export default function TravelScreen() {
                 <Ionicons
                   color={colors.surface}
                   name={
-                    hasClaimToday
+                    readiness?.state === "already_submitted"
                       ? "checkmark-circle"
                       : "send-outline"
                   }
@@ -348,17 +423,19 @@ export default function TravelScreen() {
               <Text style={styles.submitText}>
                 {submitMutation.isPending
                   ? "Submitting..."
-                  : hasClaimToday
+                  : readiness?.state === "already_submitted"
                     ? "Today's Claim Submitted"
+                    : readiness?.submission_mode === "resubmit"
+                      ? "Resubmit Today's Claim"
                     : travels.length === 0
                       ? "Complete a Treatment First"
                       : "Submit Today's Claim"}
               </Text>
             </TouchableOpacity>
 
-            {claimsQuery.error ? (
+            {readinessQuery.error ? (
               <Text style={styles.claimWarning}>
-                Claim status is unavailable. Pull to refresh before
+                Claim preview is unavailable. Pull to refresh before
                 submitting.
               </Text>
             ) : null}
@@ -400,7 +477,7 @@ export default function TravelScreen() {
             colors={[PRIMARY]}
             refreshing={
               (travelQuery.isRefetching ||
-                claimsQuery.isRefetching) &&
+                readinessQuery.isRefetching) &&
               !travelQuery.isPending
             }
             tintColor={PRIMARY}
@@ -475,6 +552,98 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
     marginVertical: spacing.md,
     width: StyleSheet.hairlineWidth,
+  },
+  readinessCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.borderMuted,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+    padding: spacing.lg,
+  },
+  readinessHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+  },
+  readinessTitleBlock: {
+    flex: 1,
+  },
+  readinessTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.bodyLarge,
+    fontWeight: typography.weight.extrabold,
+  },
+  readinessCaption: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    marginTop: spacing.xs,
+  },
+  readinessBadge: {
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  readyBadge: {
+    backgroundColor: colors.greenSurface,
+  },
+  blockedBadge: {
+    backgroundColor: colors.warningSurface,
+  },
+  submittedBadge: {
+    backgroundColor: colors.blueSurface,
+  },
+  readinessBadgeText: {
+    color: colors.textStrong,
+    fontSize: typography.size.caption,
+    fontWeight: typography.weight.extrabold,
+  },
+  readinessMetrics: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  readinessMetric: {
+    backgroundColor: colors.background,
+    borderRadius: radius.sm,
+    flex: 1,
+    minWidth: 0,
+    padding: spacing.md,
+  },
+  readinessMetricLabel: {
+    color: colors.textMuted,
+    fontSize: typography.size.caption,
+    fontWeight: typography.weight.bold,
+  },
+  readinessMetricValue: {
+    color: colors.textPrimary,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+    marginTop: spacing.xs,
+  },
+  policyText: {
+    color: colors.textMuted,
+    fontSize: typography.size.captionLarge,
+  },
+  reviewWarning: {
+    backgroundColor: colors.warningSurface,
+    borderColor: colors.warning,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    marginBottom: spacing.lg,
+    padding: spacing.lg,
+  },
+  reviewWarningTitle: {
+    color: colors.warningDark,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  reviewWarningText: {
+    color: colors.textMutedDark,
+    fontSize: typography.size.small,
+    lineHeight: typography.lineHeight.smallRelaxed,
+    marginTop: spacing.xs,
   },
   submitButton: {
     alignItems: "center",

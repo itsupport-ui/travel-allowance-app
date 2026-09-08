@@ -69,3 +69,55 @@ export const deleteDoctorExpense = async (expenseId, token) => {
     authConfig(token)
   )
 }
+
+
+export const getManualDoctorExpenseReviews = async (status, token) => {
+  const response = await api.get("/doctor-expenses/manual-review", {
+    ...authConfig(token),
+    params: { status },
+  })
+  return response.data
+}
+
+
+export const decideManualDoctorExpense = async (
+  expenseId,
+  payload,
+  token,
+) => {
+  const response = await api.put(
+    `/doctor-expenses/manual-review/${expenseId}/decision`,
+    payload,
+    authConfig(token),
+  )
+  return response.data
+}
+
+
+export const getManualDoctorExpenseHistory = async (
+  expenseId,
+  token,
+) => {
+  const response = await api.get(
+    `/doctor-expenses/${expenseId}/review-history`,
+    authConfig(token),
+  )
+  return response.data
+}
+
+
+export const openDoctorExpenseProof = async (expenseId, token) => {
+  const response = await api.get(
+    `/doctor-expenses/${expenseId}/proof`,
+    { ...authConfig(token), responseType: "blob" },
+  )
+  const url = URL.createObjectURL(response.data)
+  const link = document.createElement("a")
+  link.href = url
+  link.target = "_blank"
+  link.rel = "noopener noreferrer"
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}

@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.models.doctor import Doctor
 from app.models.settings import Settings
+from app.models.reimbursement_policy import ReimbursementPolicy
 from app.models.therapist_workday import TherapistWorkDay
 from app.models.treatment_schedule import TreatmentSchedule
 from app.models.travel import TravelEntry
@@ -70,10 +71,17 @@ class TreatmentSessionAndWorkdayEndTests(unittest.TestCase):
             phone="9999999999",
         )
         self.settings = Settings(per_km_rate=8, daily_allowance=150)
+        self.policy = ReimbursementPolicy(
+            version=1,
+            effective_from=date(1970, 1, 1),
+            per_km_rate=8,
+            daily_allowance=150,
+        )
         self.db.add_all(
             [
                 self.doctor,
                 self.settings,
+                self.policy,
             ]
         )
         self.db.commit()
@@ -104,6 +112,22 @@ class TreatmentSessionAndWorkdayEndTests(unittest.TestCase):
         self.db.commit()
         self.db.refresh(workday)
         return workday
+
+    def test_start_workday_retry_returns_existing_active_day(self):
+        workday = self.create_workday()
+
+        response = self.client.post(
+            "/therapist/workday/start",
+            json={
+                "start_address": "Retry location",
+                "start_latitude": 13.1,
+                "start_longitude": 77.1,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["workday_id"], workday.id)
+        self.assertEqual(self.db.query(TherapistWorkDay).count(), 1)
 
     def create_schedule(
         self,
@@ -182,11 +206,32 @@ class TreatmentSessionAndWorkdayEndTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["session_status"], "IN_PROGRESS")
         self.assertTrue(response.json()["can_punch_out"])
-        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(duplicate.json()["session_status"], "IN_PROGRESS")
         self.db.expire_all()
         stored = self.db.get(TreatmentSchedule, schedule.id)
         self.assertIsNotNone(stored.punch_in_time)
         self.assertEqual(stored.punch_in_latitude, 13.001)
+
+    def test_punch_in_rejects_a_second_active_treatment(self):
+        self.create_workday()
+        active_schedule = self.create_schedule(
+            session_status="IN_PROGRESS",
+            punch_in_time=datetime.now(),
+        )
+        next_schedule = self.create_schedule()
+
+        response = self.client.post(
+            f"/treatment-sessions/{next_schedule.id}/punch-in",
+            json={"latitude": 13.0, "longitude": 77.0},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("active treatment", response.json()["detail"])
+        self.db.refresh(active_schedule)
+        self.db.refresh(next_schedule)
+        self.assertEqual(active_schedule.session_status, "IN_PROGRESS")
+        self.assertEqual(next_schedule.session_status, "NOT_STARTED")
 
     def test_punch_out_requires_punch_in(self):
         self.create_workday()
@@ -242,7 +287,9 @@ class TreatmentSessionAndWorkdayEndTests(unittest.TestCase):
         self.assertIsNotNone(response.json()["punch_out_time"])
         self.assertGreaterEqual(response.json()["treatment_duration"], 0)
         self.assertEqual(self.db.query(TravelEntry).count(), 1)
-        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(duplicate.json()["status"], "completed")
+        self.assertEqual(self.db.query(TravelEntry).count(), 1)
 
     def test_missed_schedule_never_enables_session_actions(self):
         self.create_workday()
@@ -276,8 +323,17 @@ class TreatmentSessionAndWorkdayEndTests(unittest.TestCase):
                     "device_timestamp": end_time.isoformat(),
                 },
             )
+            duplicate = self.client.post(
+                "/therapist/workday/end",
+                json={"end_latitude": 13.2, "end_longitude": 77.2},
+            )
 
         self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(duplicate.status_code, 200, duplicate.text)
+        self.assertEqual(
+            duplicate.json()["workday_id"],
+            response.json()["workday_id"],
+        )
         self.assertEqual(response.json()["pending_schedules_count"], 1)
         self.assertEqual(response.json()["completed_schedules_count"], 1)
         self.assertEqual(response.json()["missed_schedules_count"], 1)
@@ -300,6 +356,39 @@ class TreatmentSessionAndWorkdayEndTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("06:00 PM", response.json()["detail"])
+        self.assertEqual(
+            response.headers["X-Error-Code"],
+            "EARLY_END_REASON_REQUIRED",
+        )
+
+    def test_end_workday_allows_audited_early_closure_reason(self):
+        workday = self.create_workday()
+
+        with patch(
+            "app.routers.therapist_workday.india_now",
+            return_value=datetime(2026, 7, 28, 16, 30, tzinfo=IST),
+        ):
+            response = self.client.post(
+                "/therapist/workday/end",
+                json={
+                    "end_latitude": 13.2,
+                    "end_longitude": 77.2,
+                    "early_end_reason": "Assigned visits completed early",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["ended_early"])
+        self.assertEqual(
+            response.json()["end_reason"],
+            "Assigned visits completed early",
+        )
+        self.db.refresh(workday)
+        self.assertTrue(workday.ended_early)
+        self.assertEqual(
+            workday.end_reason,
+            "Assigned visits completed early",
+        )
 
     def test_end_workday_rejects_active_treatment(self):
         self.create_workday()

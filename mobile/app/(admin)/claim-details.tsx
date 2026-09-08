@@ -2,14 +2,16 @@ import { colors, radius, shadows, spacing, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
-import { memo, useEffect, useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -209,9 +211,15 @@ export default function AdminClaimDetailsScreen() {
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     id?: string | string[];
+    review?: string | string[];
   }>();
   const claimId = useMemo(() => parseClaimId(params.id), [params.id]);
   const queryClient = useQueryClient();
+  const [rejectVisible, setRejectVisible] = useState(
+    params.review === "reject"
+  );
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [rejectionError, setRejectionError] = useState<string | null>(null);
   const detailsQuery = useQuery({
     enabled: claimId !== null,
     queryKey:
@@ -226,15 +234,21 @@ export default function AdminClaimDetailsScreen() {
     },
   });
   const actionMutation = useMutation({
-    mutationFn: async (action: "approve" | "reject") => {
+    mutationFn: async ({
+      action,
+      reason,
+    }: {
+      action: "approve" | "reject";
+      reason?: string;
+    }) => {
       if (claimId === null) {
         throw new Error("A valid claim ID is required.");
       }
       return action === "approve"
         ? approveAdminClaim(claimId)
-        : rejectAdminClaim(claimId);
+        : rejectAdminClaim(claimId, reason?.trim());
     },
-    onSuccess: async (_, action) => {
+    onSuccess: async (_, request) => {
       await Promise.all([
         detailsQuery.refetch(),
         queryClient.invalidateQueries({
@@ -242,11 +256,13 @@ export default function AdminClaimDetailsScreen() {
         }),
       ]);
       Alert.alert(
-        action === "approve" ? "Claim Approved" : "Claim Rejected",
+        request.action === "approve" ? "Claim Approved" : "Correction Requested",
         `Claim #${claimId} was ${
-          action === "approve" ? "approved" : "rejected"
+          request.action === "approve" ? "approved" : "returned for correction"
         }.`
       );
+      setRejectVisible(false);
+      setRejectionReason("");
     },
     onError: (error) => {
       if (
@@ -279,6 +295,11 @@ export default function AdminClaimDetailsScreen() {
   }, [detailsQuery.error]);
 
   const confirmAction = (action: "approve" | "reject") => {
+    if (action === "reject") {
+      setRejectionError(null);
+      setRejectVisible(true);
+      return;
+    }
     const approving = action === "approve";
     Alert.alert(
       approving ? "Approve Claim?" : "Reject Claim?",
@@ -286,12 +307,24 @@ export default function AdminClaimDetailsScreen() {
       [
         { style: "cancel", text: "Cancel" },
         {
-          onPress: () => actionMutation.mutate(action),
+          onPress: () => actionMutation.mutate({ action }),
           style: approving ? "default" : "destructive",
           text: approving ? "Approve" : "Reject",
         },
       ]
     );
+  };
+
+  const submitRejection = () => {
+    if (!rejectionReason.trim()) {
+      setRejectionError("Explain what the therapist needs to correct.");
+      return;
+    }
+    setRejectionError(null);
+    actionMutation.mutate({
+      action: "reject",
+      reason: rejectionReason,
+    });
   };
 
   const goBack = () => {
@@ -533,7 +566,7 @@ export default function AdminClaimDetailsScreen() {
                 accessibilityState={{
                   busy:
                     actionMutation.isPending &&
-                    actionMutation.variables === "reject",
+                    actionMutation.variables?.action === "reject",
                   disabled: actionMutation.isPending,
                 }}
                 disabled={actionMutation.isPending}
@@ -541,7 +574,7 @@ export default function AdminClaimDetailsScreen() {
                 style={styles.rejectButton}
               >
                 {actionMutation.isPending &&
-                actionMutation.variables === "reject" ? (
+                actionMutation.variables?.action === "reject" ? (
                   <ActivityIndicator
                     color={colors.danger}
                     size="small"
@@ -561,7 +594,7 @@ export default function AdminClaimDetailsScreen() {
                 accessibilityState={{
                   busy:
                     actionMutation.isPending &&
-                    actionMutation.variables === "approve",
+                    actionMutation.variables?.action === "approve",
                   disabled: actionMutation.isPending,
                 }}
                 disabled={actionMutation.isPending}
@@ -569,7 +602,7 @@ export default function AdminClaimDetailsScreen() {
                 style={styles.approveButton}
               >
                 {actionMutation.isPending &&
-                actionMutation.variables === "approve" ? (
+                actionMutation.variables?.action === "approve" ? (
                   <ActivityIndicator
                     color={colors.surface}
                     size="small"
@@ -587,6 +620,65 @@ export default function AdminClaimDetailsScreen() {
           ) : null}
         </>
       ) : null}
+      <Modal
+        animationType="slide"
+        transparent
+        visible={rejectVisible}
+        onRequestClose={() => setRejectVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Request claim correction</Text>
+              <TouchableOpacity
+                accessibilityLabel="Close correction form"
+                accessibilityRole="button"
+                disabled={actionMutation.isPending}
+                onPress={() => setRejectVisible(false)}
+              >
+                <Ionicons color={colors.textStrong} name="close" size={24} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalDescription}>
+              Give the therapist a specific reason they can act on before resubmitting.
+            </Text>
+            <TextInput
+              accessibilityLabel="Correction reason"
+              maxLength={500}
+              multiline
+              placeholder="What needs to be corrected?"
+              placeholderTextColor={colors.textSubtle}
+              style={styles.reasonInput}
+              textAlignVertical="top"
+              value={rejectionReason}
+              onChangeText={(value) => {
+                setRejectionReason(value);
+                setRejectionError(null);
+              }}
+            />
+            {rejectionError ? (
+              <Text style={styles.reasonError}>{rejectionError}</Text>
+            ) : null}
+            <TouchableOpacity
+              accessibilityRole="button"
+              disabled={actionMutation.isPending || !rejectionReason.trim()}
+              style={[
+                styles.requestCorrectionButton,
+                (actionMutation.isPending || !rejectionReason.trim()) &&
+                  styles.disabledButton,
+              ]}
+              onPress={submitRejection}
+            >
+              {actionMutation.isPending ? (
+                <ActivityIndicator color={colors.surface} size="small" />
+              ) : null}
+              <Text style={styles.requestCorrectionText}>
+                {actionMutation.isPending ? "Submitting..." : "Request Correction"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -595,6 +687,67 @@ const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: colors.background,
     flex: 1,
+  },
+  modalOverlay: {
+    backgroundColor: "rgba(15, 23, 42, 0.55)",
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl,
+    paddingBottom: spacing.section,
+  },
+  modalHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  modalTitle: {
+    color: colors.textStrong,
+    fontSize: typography.size.titleSmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  modalDescription: {
+    color: colors.textMuted,
+    fontSize: typography.size.bodySmall,
+    lineHeight: typography.lineHeight.bodyRelaxed,
+    marginTop: spacing.md,
+  },
+  reasonInput: {
+    borderColor: colors.inputBorder,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    color: colors.textStrong,
+    fontSize: typography.size.bodySmall,
+    marginTop: spacing.lg,
+    minHeight: 120,
+    padding: spacing.lg,
+  },
+  reasonError: {
+    color: colors.danger,
+    fontSize: typography.size.small,
+    marginTop: spacing.sm,
+  },
+  requestCorrectionButton: {
+    alignItems: "center",
+    backgroundColor: colors.danger,
+    borderRadius: radius.control,
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "center",
+    marginTop: spacing.xl,
+    minHeight: 50,
+  },
+  requestCorrectionText: {
+    color: colors.surface,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  disabledButton: {
+    opacity: 0.55,
   },
   header: {
     alignItems: "center",

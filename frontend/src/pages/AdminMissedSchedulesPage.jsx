@@ -23,11 +23,7 @@ function AdminMissedSchedulesPage() {
   const [searchDoctor, setSearchDoctor] = useState("")
   const [searchTherapist, setSearchTherapist] = useState("")
 
-  useEffect(() => {
-    loadSchedules()
-  }, [])
-
-  const loadSchedules = async () => {
+  async function loadSchedules() {
     try {
       const token = localStorage.getItem("token")
       const data = await getMissedSchedules(token)
@@ -39,6 +35,12 @@ function AdminMissedSchedulesPage() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    // Initial API hydration; state changes occur after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadSchedules()
+  }, [])
 
   const filteredSchedules = schedules.filter((schedule) => {
     const patientMatch = (schedule.patient_name || "").toLowerCase().includes(searchPatient.toLowerCase())

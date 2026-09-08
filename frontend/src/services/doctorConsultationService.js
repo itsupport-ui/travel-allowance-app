@@ -40,6 +40,60 @@ export const getDoctorConsultation = async (consultationId, token) => {
 }
 
 
+export const getDoctorConsultationHistory = async (
+  consultationId,
+  token
+) => {
+  const response = await api.get(
+    `/doctor-consultations/${consultationId}/history`,
+    authConfig(token)
+  )
+  return response.data
+}
+
+
+export const cancelDoctorConsultation = async (
+  consultationId,
+  payload,
+  token
+) => {
+  const response = await api.put(
+    `/doctor-consultations/${consultationId}/cancel`,
+    payload,
+    authConfig(token)
+  )
+  return response.data
+}
+
+
+export const rescheduleDoctorConsultation = async (
+  consultationId,
+  payload,
+  token
+) => {
+  const response = await api.post(
+    `/doctor-consultations/${consultationId}/reschedule`,
+    payload,
+    authConfig(token)
+  )
+  return response.data
+}
+
+
+export const scheduleDoctorConsultationFollowUp = async (
+  consultationId,
+  payload,
+  token
+) => {
+  const response = await api.post(
+    `/doctor-consultations/${consultationId}/schedule-follow-up`,
+    payload,
+    authConfig(token)
+  )
+  return response.data
+}
+
+
 export const completeDoctorConsultation = async (
   consultationId,
   payload,
@@ -66,11 +120,14 @@ export const createDoctorConsultation = async (payload, token) => {
 
 export const confirmDoctorConsultation = async (
   consultationId,
-  token
+  token,
+  lifecycleVersion = null
 ) => {
   const response = await api.put(
     `/doctor-consultations/${consultationId}/confirm`,
-    {},
+    lifecycleVersion == null
+      ? {}
+      : { lifecycle_version: lifecycleVersion },
     authConfig(token)
   )
   return response.data
@@ -80,11 +137,17 @@ export const confirmDoctorConsultation = async (
 export const rejectDoctorConsultation = async (
   consultationId,
   rejectionReason,
-  token
+  token,
+  lifecycleVersion = null
 ) => {
   const response = await api.put(
     `/doctor-consultations/${consultationId}/reject`,
-    { rejection_reason: rejectionReason },
+    {
+      rejection_reason: rejectionReason,
+      ...(lifecycleVersion == null
+        ? {}
+        : { lifecycle_version: lifecycleVersion }),
+    },
     authConfig(token)
   )
   return response.data

@@ -131,7 +131,7 @@ class TherapistMobileContractTests(unittest.TestCase):
             travel_total=100,
             daily_allowance=150,
             grand_total=250,
-            patient_visited_today="true",
+            patient_visited_today=True,
             status="pending",
         )
         self.db.add(claim)
@@ -164,6 +164,8 @@ class TherapistMobileContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["started"], False)
         self.assertEqual(response.json()["work_date"], date.today().isoformat())
+        self.assertEqual(response.json()["available_actions"], ["start_workday"])
+        self.assertEqual(response.json()["next_action"], "start_workday")
 
         workday = TherapistWorkDay(
             therapist_id=self.therapist.id,
@@ -186,6 +188,8 @@ class TherapistMobileContractTests(unittest.TestCase):
             active_response.json()["start_address"],
             "Starting address",
         )
+        self.assertIn("view_schedules", active_response.json()["available_actions"])
+        self.assertIsInstance(active_response.json()["blocking_reasons"], list)
 
     @patch("app.routers.therapist_workday.india_now")
     def test_start_workday_uses_indian_date_and_timestamp(
@@ -240,6 +244,20 @@ class TherapistMobileContractTests(unittest.TestCase):
         self.assertEqual(
             [item["id"] for item in pending.json()],
             [own_pending.id],
+        )
+        self.assertEqual(
+            pending.json()[0]["available_actions"],
+            ["view_details", "review_session_readiness"],
+        )
+        self.assertEqual(
+            pending.json()[0]["next_action"],
+            "review_session_readiness",
+        )
+        self.assertIn(
+            "view_completion", completed.json()[0]["available_actions"]
+        )
+        self.assertIn(
+            "view_missed_details", missed.json()[0]["available_actions"]
         )
 
         self.use_user(self.admin)

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.therapist_workday import TherapistWorkDay
 from app.models.treatment_schedule import TreatmentSchedule
+from app.models.location_exception_request import LocationExceptionRequest
 from app.models.user import User
 from app.routers.treatment_schedule import complete_treatment
 from app.schemas.treatment_schedule import TreatmentScheduleResponse
@@ -22,8 +23,16 @@ from app.schemas.treatment_session import (
     TreatmentSessionResponse,
 )
 from app.services.schedule_location_service import validate_patient_arrival
+from app.services.location_exception_service import (
+    consume_approved_exception,
+    get_active_request,
+    validate_action_location_evidence,
+)
+from app.services.location_policy_service import get_location_policy
+from app.services.domain_audit_service import record_domain_audit_event
 from app.utils.auth import require_role
 from app.utils.timezone import india_now
+from app.utils.domain_errors import DomainHTTPException
 
 router = APIRouter(
     prefix="/treatment-sessions",
@@ -94,6 +103,10 @@ def _session_response(
     location_verified: bool | None,
     can_punch_in: bool,
     eligibility_message: str | None,
+    location_exception: LocationExceptionRequest | None = None,
+    can_request_location_exception: bool = False,
+    can_punch_out: bool | None = None,
+    location_policy=None,
 ) -> TreatmentSessionResponse:
     elapsed = schedule.treatment_duration or 0
     if (
@@ -119,12 +132,38 @@ def _session_response(
         location_verified=location_verified,
         can_punch_in=can_punch_in,
         can_punch_out=(
-            schedule.status == "scheduled"
-            and schedule.session_status == "IN_PROGRESS"
-            and schedule.punch_in_time is not None
-            and schedule.punch_out_time is None
+            can_punch_out
+            if can_punch_out is not None
+            else (
+                schedule.status == "scheduled"
+                and schedule.session_status == "IN_PROGRESS"
+                and schedule.punch_in_time is not None
+                and schedule.punch_out_time is None
+            )
         ),
         eligibility_message=eligibility_message,
+        location_exception_id=(
+            location_exception.id if location_exception is not None else None
+        ),
+        location_exception_status=(
+            location_exception.status
+            if location_exception is not None
+            else None
+        ),
+        can_request_location_exception=can_request_location_exception,
+        location_policy_version=(
+            location_policy.version if location_policy is not None else None
+        ),
+        geofence_radius_m=(
+            location_policy.geofence_radius_m
+            if location_policy is not None
+            else None
+        ),
+        gps_accuracy_threshold_m=(
+            location_policy.gps_accuracy_threshold_m
+            if location_policy is not None
+            else None
+        ),
     )
 
 
@@ -136,6 +175,8 @@ def get_treatment_session(
     schedule_id: int,
     latitude: float | None = Query(default=None),
     longitude: float | None = Query(default=None),
+    gps_accuracy_m: float | None = Query(default=None),
+    device_timestamp: datetime | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["therapist"])),
 ):
@@ -146,17 +187,67 @@ def get_treatment_session(
         )
 
     schedule = _get_owned_schedule(db, schedule_id, current_user.id)
+    location_policy = get_location_policy(db, india_now().date())
     workday_started = _has_active_workday(db, current_user.id)
     location_verified = None
     eligibility_message = None
     can_punch_in = False
+    location_exception = None
+    can_request_location_exception = False
 
     if schedule.status != "scheduled":
         eligibility_message = (
             f"This schedule is already {schedule.status}."
         )
     elif schedule.session_status == "IN_PROGRESS":
-        eligibility_message = "Treatment is in progress."
+        if latitude is None or longitude is None:
+            eligibility_message = "Capture location before Punch Out."
+        else:
+            try:
+                validate_action_location_evidence(
+                    device_timestamp=device_timestamp,
+                    gps_accuracy_m=gps_accuracy_m,
+                    accuracy_threshold_m=(
+                        location_policy.gps_accuracy_threshold_m
+                    ),
+                    max_age_minutes=(
+                        location_policy.evidence_max_age_minutes
+                    ),
+                )
+                validate_patient_arrival(
+                    arrival_latitude=latitude,
+                    arrival_longitude=longitude,
+                    patient_latitude=schedule.patient_latitude,
+                    patient_longitude=schedule.patient_longitude,
+                    radius_km=location_policy.geofence_radius_m / 1000,
+                )
+                location_verified = True
+                eligibility_message = (
+                    "Treatment is ready for Punch Out within the configured "
+                    f"{location_policy.geofence_radius_m:.0f} metre radius."
+                )
+            except ValueError as error:
+                location_verified = False
+                location_exception = get_active_request(
+                    db,
+                    requested_by=current_user.id,
+                    target_type="therapist_schedule",
+                    target_id=schedule.id,
+                    action="punch_out",
+                )
+                if location_exception is not None:
+                    if location_exception.status == "approved":
+                        eligibility_message = (
+                            "Location exception approved. Punch Out will consume "
+                            "this one-time approval."
+                        )
+                    else:
+                        eligibility_message = (
+                            "Location exception is awaiting administrator review."
+                        )
+                else:
+                    can_request_location_exception = True
+                    eligibility_message = str(error)
     elif schedule.session_status == "COMPLETED":
         eligibility_message = "Treatment has already been completed."
     elif not workday_started:
@@ -169,18 +260,50 @@ def get_treatment_session(
         eligibility_message = "Verifying your current location."
     else:
         try:
+            validate_action_location_evidence(
+                device_timestamp=device_timestamp,
+                gps_accuracy_m=gps_accuracy_m,
+                accuracy_threshold_m=(
+                    location_policy.gps_accuracy_threshold_m
+                ),
+                max_age_minutes=location_policy.evidence_max_age_minutes,
+            )
             validate_patient_arrival(
                 arrival_latitude=latitude,
                 arrival_longitude=longitude,
                 patient_latitude=schedule.patient_latitude,
                 patient_longitude=schedule.patient_longitude,
+                radius_km=location_policy.geofence_radius_m / 1000,
             )
             location_verified = True
             can_punch_in = True
-            eligibility_message = "You are within the patient visit radius."
+            eligibility_message = (
+                "You are within the configured patient radius "
+                f"({location_policy.geofence_radius_m:.0f} metres)."
+            )
         except ValueError as error:
             location_verified = False
-            eligibility_message = str(error)
+            location_exception = get_active_request(
+                db,
+                requested_by=current_user.id,
+                target_type="therapist_schedule",
+                target_id=schedule.id,
+                action="punch_in",
+            )
+            if location_exception is not None:
+                if location_exception.status == "approved":
+                    can_punch_in = True
+                    eligibility_message = (
+                        "Location exception approved. Punch In will consume "
+                        "this one-time approval."
+                    )
+                else:
+                    eligibility_message = (
+                        "Location exception is awaiting administrator review."
+                    )
+            else:
+                can_request_location_exception = True
+                eligibility_message = str(error)
 
     return _session_response(
         schedule=schedule,
@@ -188,6 +311,20 @@ def get_treatment_session(
         location_verified=location_verified,
         can_punch_in=can_punch_in,
         eligibility_message=eligibility_message,
+        location_exception=location_exception,
+        can_request_location_exception=can_request_location_exception,
+        can_punch_out=(
+            schedule.status == "scheduled"
+            and schedule.session_status == "IN_PROGRESS"
+            and schedule.punch_in_time is not None
+            and schedule.punch_out_time is None
+            and (
+                location_verified is not False
+                or location_exception is not None
+                and location_exception.status == "approved"
+            )
+        ),
+        location_policy=location_policy,
     )
 
 
@@ -207,54 +344,150 @@ def punch_in(
         current_user.id,
         lock=True,
     )
+    location_policy = get_location_policy(db, india_now().date())
+
+    if (
+        schedule.status == "scheduled"
+        and schedule.session_status == "IN_PROGRESS"
+        and schedule.punch_in_time is not None
+        and schedule.punch_out_time is None
+    ):
+        return _session_response(
+            schedule=schedule,
+            workday_started=_has_active_workday(db, current_user.id),
+            location_verified=True,
+            can_punch_in=False,
+            eligibility_message="Treatment is already in progress.",
+        )
 
     if schedule.status != "scheduled":
-        raise HTTPException(
+        raise DomainHTTPException(
             status_code=400,
-            detail=f"Cannot punch in to a {schedule.status} schedule.",
+            code="SCHEDULE_NOT_PUNCHABLE",
+            message=f"Cannot punch in to a {schedule.status} schedule.",
+            recoverable=False,
+            suggested_action="view_schedule_status",
+            blocking_fields=["schedule_status"],
         )
     if schedule.punch_in_time is not None or (
         schedule.session_status != "NOT_STARTED"
     ):
-        raise HTTPException(
+        raise DomainHTTPException(
             status_code=400,
-            detail="Treatment has already been punched in.",
+            code="TREATMENT_ALREADY_STARTED",
+            message="Treatment has already been punched in.",
+            recoverable=True,
+            suggested_action="refresh_treatment_session",
         )
     if not _has_active_workday(db, current_user.id):
-        raise HTTPException(
+        raise DomainHTTPException(
             status_code=400,
-            detail="Start your workday before punching in.",
+            code="WORKDAY_NOT_ACTIVE",
+            message="Start your workday before punching in.",
+            recoverable=True,
+            suggested_action="start_workday",
         )
     if not _occurs_today(schedule):
-        raise HTTPException(
+        raise DomainHTTPException(
             status_code=400,
-            detail="Punch In is available only on the scheduled visit date.",
+            code="SCHEDULE_NOT_DUE_TODAY",
+            message="Punch In is available only on the scheduled visit date.",
+            recoverable=False,
+            suggested_action="view_schedule_date",
+            blocking_fields=["occurrence_date"],
+        )
+    another_active_session = (
+        db.query(TreatmentSchedule.id)
+        .filter(
+            TreatmentSchedule.therapist_id == current_user.id,
+            TreatmentSchedule.status == "scheduled",
+            TreatmentSchedule.session_status == "IN_PROGRESS",
+            TreatmentSchedule.id != schedule.id,
+        )
+        .first()
+    )
+    if another_active_session is not None:
+        raise DomainHTTPException(
+            status_code=400,
+            code="ANOTHER_TREATMENT_IS_ACTIVE",
+            message=(
+                "Punch out from the active treatment before starting another."
+            ),
+            recoverable=True,
+            suggested_action="punch_out_active_treatment",
+            blocking_fields=["active_schedule_id"],
         )
 
+    exception_used = None
     try:
+        validate_action_location_evidence(
+            device_timestamp=payload.device_timestamp,
+            gps_accuracy_m=payload.gps_accuracy_m,
+            accuracy_threshold_m=location_policy.gps_accuracy_threshold_m,
+            max_age_minutes=location_policy.evidence_max_age_minutes,
+        )
         validate_patient_arrival(
             arrival_latitude=payload.latitude,
             arrival_longitude=payload.longitude,
             patient_latitude=schedule.patient_latitude,
             patient_longitude=schedule.patient_longitude,
+            radius_km=location_policy.geofence_radius_m / 1000,
         )
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ValueError as exc:
+        exception_used = consume_approved_exception(
+            db,
+            exception_id=payload.location_exception_id,
+            requested_by=current_user.id,
+            target_type="therapist_schedule",
+            target_id=schedule.id,
+            action="punch_in",
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            verification_message=str(exc),
+        )
 
     punched_in_at = india_now()
     schedule.punch_in_time = punched_in_at
     schedule.punch_in_latitude = payload.latitude
     schedule.punch_in_longitude = payload.longitude
     schedule.session_status = "IN_PROGRESS"
+    record_domain_audit_event(
+        db,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        domain="clinical",
+        entity_type="treatment_schedule",
+        entity_id=schedule.id,
+        action="punch_in",
+        business_date=(
+            schedule.occurrence_date
+            or schedule.treatment_date
+            or india_now().date()
+        ),
+        from_state="not_started",
+        to_state="in_progress",
+        related_entity_type="therapist",
+        related_entity_id=current_user.id,
+        details={
+            "location_exception_id": (
+                exception_used.id if exception_used is not None else None
+            )
+        },
+    )
     db.commit()
     db.refresh(schedule)
 
     return _session_response(
         schedule=schedule,
         workday_started=True,
-        location_verified=True,
+        location_verified=exception_used is None,
         can_punch_in=False,
-        eligibility_message="Treatment started.",
+        eligibility_message=(
+            "Treatment started with an approved location exception."
+            if exception_used is not None
+            else "Treatment started."
+        ),
+        location_policy=location_policy,
     )
 
 
@@ -269,36 +502,80 @@ def punch_out(
     latitude: float = Form(...),
     longitude: float = Form(...),
     device_timestamp: datetime | None = Form(None),
+    gps_accuracy_m: float | None = Form(None),
+    location_exception_id: int | None = Form(None),
     bill_amount: float | None = Form(None),
     invoice_file: UploadFile | None = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["therapist"])),
 ):
-    del device_timestamp
     schedule = _get_owned_schedule(
         db,
         schedule_id,
         current_user.id,
         lock=True,
     )
+    location_policy = get_location_policy(db, india_now().date())
+    if (
+        schedule.status == "completed"
+        and schedule.session_status == "COMPLETED"
+        and schedule.punch_out_time is not None
+    ):
+        return schedule
     if schedule.status != "scheduled":
-        raise HTTPException(
+        raise DomainHTTPException(
             status_code=400,
-            detail=f"Cannot punch out from a {schedule.status} schedule.",
+            code="SCHEDULE_NOT_PUNCHABLE",
+            message=f"Cannot punch out from a {schedule.status} schedule.",
+            recoverable=False,
+            suggested_action="view_schedule_status",
+            blocking_fields=["schedule_status"],
         )
     if (
         schedule.session_status != "IN_PROGRESS"
         or schedule.punch_in_time is None
     ):
-        raise HTTPException(
+        raise DomainHTTPException(
             status_code=400,
-            detail="Punch In is required before Punch Out.",
+            code="TREATMENT_NOT_STARTED",
+            message="Punch In is required before Punch Out.",
+            recoverable=True,
+            suggested_action="punch_in_treatment",
         )
     if schedule.punch_out_time is not None:
         raise HTTPException(
             status_code=400,
             detail="Treatment has already been punched out.",
         )
+
+    exception_used = None
+    try:
+        validate_action_location_evidence(
+            device_timestamp=device_timestamp,
+            gps_accuracy_m=gps_accuracy_m,
+            accuracy_threshold_m=location_policy.gps_accuracy_threshold_m,
+            max_age_minutes=location_policy.evidence_max_age_minutes,
+        )
+        validate_patient_arrival(
+            arrival_latitude=latitude,
+            arrival_longitude=longitude,
+            patient_latitude=schedule.patient_latitude,
+            patient_longitude=schedule.patient_longitude,
+            radius_km=location_policy.geofence_radius_m / 1000,
+        )
+    except ValueError as exc:
+        exception_used = consume_approved_exception(
+            db,
+            exception_id=location_exception_id,
+            requested_by=current_user.id,
+            target_type="therapist_schedule",
+            target_id=schedule.id,
+            action="punch_out",
+            latitude=latitude,
+            longitude=longitude,
+            verification_message=str(exc),
+        )
+        schedule.location_exception_approved = True
 
     punched_out_at = india_now()
     schedule.punch_out_time = punched_out_at

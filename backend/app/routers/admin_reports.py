@@ -1,17 +1,27 @@
 from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.claim import Claim
+from app.models.doctor import Doctor
+from app.models.doctor_claim import DoctorClaim
 from app.models.travel import TravelEntry
 from app.models.treatment_schedule import TreatmentSchedule
 from app.models.user import User
 from app.schemas.admin_report import AdminReportOverview
+from app.services.report_export_service import (
+    TabularReportSpec,
+    build_tabular_report_response,
+    serialize_rows,
+)
 from app.utils.auth import require_permission
+from app.utils.timezone import india_now
 
 router = APIRouter(
     prefix="/admin-reports",
@@ -22,6 +32,33 @@ CLAIM_STATUSES = ("pending", "approved", "rejected")
 TREND_DAYS = 14
 RECENT_ACTIVITY_LIMIT = 8
 TOP_THERAPIST_LIMIT = 5
+EXPORT_ROW_LIMIT = 25_000
+PDF_EXPORT_ROW_LIMIT = 2_000
+CLAIM_EXPORT_HEADERS = [
+    "Staff role",
+    "Staff name",
+    "Claim ID",
+    "Business date (Asia/Kolkata)",
+    "Revision",
+    "Status",
+    "Expense count",
+    "Distance (km)",
+    "Travel amount (INR)",
+    "Daily allowance (INR)",
+    "Claim total (INR)",
+    "Submitted at (UTC)",
+    "Reviewed at (UTC)",
+    "Correction/rejection reason",
+]
+CLAIM_REPORT_SPEC = TabularReportSpec(
+    title="Consolidated claim register",
+    filename_prefix="claim-register",
+    sheet_name="Claims",
+    headers=tuple(CLAIM_EXPORT_HEADERS),
+    pdf_columns=(0, 1, 2, 3, 4, 5, 10),
+    pdf_widths_mm=(28, 48, 22, 44, 20, 28, 38),
+    currency_columns=(9, 10, 11),
+)
 
 
 def _round_metric(value: float | None) -> float:
@@ -42,7 +79,8 @@ def _trend_window(
     from_date: date | None,
     to_date: date | None,
 ) -> tuple[date, date]:
-    end = to_date or max(date.today(), from_date or date.today())
+    today = india_now().date()
+    end = to_date or max(today, from_date or today)
     start = max(
         from_date or end - timedelta(days=TREND_DAYS - 1),
         end - timedelta(days=TREND_DAYS - 1),
@@ -83,6 +121,190 @@ def _with_date_range(
     if to_date:
         conditions.append(date_expression <= to_date)
     return conditions
+
+
+def get_claim_export_rows(
+    db: Session,
+    *,
+    from_date: date | None,
+    to_date: date | None,
+    status: str,
+    role: str,
+    therapist_id: int | None = None,
+    doctor_id: int | None = None,
+) -> list[list]:
+    """Return one privacy-safe, consistently filtered claim snapshot."""
+    rows: list[list] = []
+    if role in ("all", "therapist"):
+        therapist_conditions = _with_date_range(
+            [], Claim.claim_date, from_date, to_date
+        )
+        if status != "all":
+            therapist_conditions.append(func.lower(Claim.status) == status)
+        if therapist_id is not None:
+            therapist_conditions.append(Claim.therapist_id == therapist_id)
+        therapist_claims = (
+            db.query(Claim, User.username)
+            .join(User, User.id == Claim.therapist_id)
+            .filter(*therapist_conditions)
+            .order_by(Claim.claim_date.desc(), Claim.id.desc())
+            .limit(EXPORT_ROW_LIMIT + 1)
+            .all()
+        )
+        rows.extend(
+            [
+                "Therapist",
+                staff_name,
+                claim.id,
+                claim.claim_date,
+                claim.revision,
+                claim.status,
+                "",
+                _round_metric(claim.total_km),
+                _round_metric(claim.travel_total),
+                _round_metric(claim.daily_allowance),
+                _round_metric(claim.grand_total),
+                claim.submitted_at,
+                claim.reviewed_at,
+                claim.rejection_reason,
+            ]
+            for claim, staff_name in therapist_claims
+        )
+
+    if role in ("all", "doctor"):
+        doctor_conditions = _with_date_range(
+            [], DoctorClaim.claim_date, from_date, to_date
+        )
+        if status != "all":
+            doctor_conditions.append(func.lower(DoctorClaim.status) == status)
+        if doctor_id is not None:
+            doctor_conditions.append(DoctorClaim.doctor_id == doctor_id)
+        doctor_claims = (
+            db.query(DoctorClaim, Doctor.name)
+            .join(Doctor, Doctor.id == DoctorClaim.doctor_id)
+            .filter(*doctor_conditions)
+            .order_by(DoctorClaim.claim_date.desc(), DoctorClaim.id.desc())
+            .limit(EXPORT_ROW_LIMIT + 1)
+            .all()
+        )
+        rows.extend(
+            [
+                "Doctor",
+                staff_name,
+                claim.id,
+                claim.claim_date,
+                claim.revision,
+                claim.status,
+                claim.expense_count,
+                "",
+                "",
+                "",
+                _round_metric(claim.total_amount),
+                claim.submitted_at,
+                claim.approved_at,
+                claim.rejection_reason,
+            ]
+            for claim, staff_name in doctor_claims
+        )
+
+    rows.sort(
+        key=lambda row: (str(row[3]), str(row[0]), int(row[2])),
+        reverse=True,
+    )
+    return rows
+
+
+def serialize_claim_export_rows(rows: list[list]) -> list[list]:
+    return serialize_rows(rows)
+
+
+def build_claim_export_response(
+    rows: list[list],
+    *,
+    from_date: date | None,
+    to_date: date | None,
+    status: str,
+    role: str,
+    export_format: Literal["csv", "xlsx", "pdf"],
+    snapshot: datetime | None = None,
+    filename_prefix: str = "claim-register",
+) -> Response:
+    snapshot = snapshot or india_now()
+    metadata = [
+        ("Snapshot (Asia/Kolkata)", snapshot.isoformat()),
+        ("Period", _period_label(from_date, to_date)),
+        ("Staff role", role.title()),
+        ("Claim status", status.title()),
+        ("Row count", str(len(rows))),
+        ("Privacy", "Patient-identifying columns excluded"),
+    ]
+    spec = TabularReportSpec(
+        title=CLAIM_REPORT_SPEC.title,
+        filename_prefix=filename_prefix,
+        sheet_name=CLAIM_REPORT_SPEC.sheet_name,
+        headers=CLAIM_REPORT_SPEC.headers,
+        pdf_columns=CLAIM_REPORT_SPEC.pdf_columns,
+        pdf_widths_mm=CLAIM_REPORT_SPEC.pdf_widths_mm,
+        currency_columns=CLAIM_REPORT_SPEC.currency_columns,
+    )
+    return build_tabular_report_response(
+        rows,
+        metadata=metadata,
+        export_format=export_format,
+        snapshot=snapshot,
+        spec=spec,
+        row_limit=EXPORT_ROW_LIMIT,
+        pdf_row_limit=PDF_EXPORT_ROW_LIMIT,
+    )
+
+
+@router.get("/claims/export")
+def export_claim_register(
+    from_date: date | None = Query(default=None),
+    to_date: date | None = Query(default=None),
+    status: str = Query(default="all"),
+    role: str = Query(default="all"),
+    therapist_id: int | None = Query(default=None, ge=1),
+    doctor_id: int | None = Query(default=None, ge=1),
+    export_format: Literal["csv", "xlsx", "pdf"] = Query(
+        default="csv",
+        alias="format",
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("dashboards.view")),
+):
+    """Export one privacy-safe claim register for both staff professions."""
+    del current_user
+    normalized_status = status.strip().lower()
+    normalized_role = role.strip().lower()
+    if normalized_status not in (*CLAIM_STATUSES, "all"):
+        raise HTTPException(status_code=422, detail="Invalid claim status.")
+    if normalized_role not in ("all", "therapist", "doctor"):
+        raise HTTPException(status_code=422, detail="Invalid staff role.")
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(
+            status_code=422,
+            detail="To date cannot be before from date.",
+        )
+
+    rows = get_claim_export_rows(
+        db,
+        from_date=from_date,
+        to_date=to_date,
+        status=normalized_status,
+        role=normalized_role,
+        therapist_id=therapist_id,
+        doctor_id=doctor_id,
+    )
+
+    return build_claim_export_response(
+        rows,
+        from_date=from_date,
+        to_date=to_date,
+        status=normalized_status,
+        role=normalized_role,
+        export_format=export_format,
+    )
 
 
 @router.get("/overview", response_model=AdminReportOverview)
@@ -133,6 +355,12 @@ def get_admin_report_overview(
         from_date,
         to_date,
     )
+    doctor_claim_conditions = _with_date_range(
+        [],
+        DoctorClaim.claim_date,
+        from_date,
+        to_date,
+    )
 
     if therapist_id is not None:
         schedule_conditions.append(
@@ -144,8 +372,11 @@ def get_admin_report_overview(
         claim_conditions.append(
             func.lower(Claim.status) == normalized_status
         )
+        doctor_claim_conditions.append(
+            func.lower(DoctorClaim.status) == normalized_status
+        )
 
-    today = date.today()
+    today = india_now().date()
     today_in_period = (
         (from_date is None or today >= from_date)
         and (to_date is None or today <= to_date)
@@ -194,6 +425,20 @@ def get_admin_report_overview(
         .group_by(func.lower(Claim.status))
         .all()
     )
+    if therapist_id is None:
+        doctor_claim_status_counts = dict(
+            db.query(
+                func.lower(DoctorClaim.status),
+                func.count(DoctorClaim.id),
+            )
+            .filter(*doctor_claim_conditions)
+            .group_by(func.lower(DoctorClaim.status))
+            .all()
+        )
+        for claim_status, count in doctor_claim_status_counts.items():
+            claim_status_counts[claim_status] = (
+                int(claim_status_counts.get(claim_status, 0)) + int(count)
+            )
 
     total_km, total_travel_amount, patients_visited = (
         db.query(
@@ -423,7 +668,7 @@ def get_admin_report_overview(
             or datetime.combine(
                 schedule.treatment_date
                 or schedule.start_date
-                or date.today(),
+                or india_now().date(),
                 time.min,
             ),
             "status": schedule.status,
@@ -476,11 +721,23 @@ def get_admin_report_overview(
         if total_claims
         else 0
     )
-    highest_claim = (
+    highest_therapist_claim = (
         db.query(func.max(Claim.grand_total))
         .filter(*claim_conditions)
         .scalar()
         or 0
+    )
+    highest_doctor_claim = (
+        db.query(func.max(DoctorClaim.total_amount))
+        .filter(*doctor_claim_conditions)
+        .scalar()
+        or 0
+        if therapist_id is None
+        else 0
+    )
+    highest_claim = max(
+        float(highest_therapist_claim),
+        float(highest_doctor_claim),
     )
     top_name = (
         top_therapists[0]["therapist_name"]

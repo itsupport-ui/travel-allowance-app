@@ -261,6 +261,8 @@ export default function TabLayout() {
           ),
         }}
       />
+
+      <Tabs.Screen name="travel-expense-report" options={{ href: null }} />
     </Tabs>
   );
 }

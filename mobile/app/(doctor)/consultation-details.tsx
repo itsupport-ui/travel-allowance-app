@@ -23,6 +23,7 @@ import {
 import { queryKeys } from "../../src/query/queryKeys";
 import {
   getDoctorConsultation,
+  getDoctorConsultationHistory,
 } from "../../src/services/doctorWorkflowService";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
 import {
@@ -50,6 +51,14 @@ export default function DoctorConsultationDetailsScreen() {
       consultationId === null
         ? ["doctor", "consultations", "detail", "invalid"]
         : queryKeys.doctor.consultations.detail(consultationId),
+  });
+  const historyQuery = useQuery({
+    enabled: consultationId !== null,
+    queryFn: () => {
+      if (consultationId === null) return [];
+      return getDoctorConsultationHistory(consultationId);
+    },
+    queryKey: ["doctor", "consultations", "history", consultationId],
   });
   const goBack = () => {
     if (router.canGoBack()) {
@@ -151,6 +160,26 @@ export default function DoctorConsultationDetailsScreen() {
               label="Notes"
               value={consultation.notes || "Not available"}
             />
+            {consultation.follow_up_date ? (
+              <DoctorDetailRow
+                label="Follow-up due"
+                value={`${formatDoctorDate(consultation.follow_up_date)} at ${
+                  consultation.follow_up_time?.slice(0, 5) ?? "Not set"
+                }`}
+              />
+            ) : null}
+            {consultation.follow_up_reason ? (
+              <DoctorDetailRow
+                label="Follow-up reason"
+                value={consultation.follow_up_reason}
+              />
+            ) : null}
+            {consultation.cancellation_reason ? (
+              <DoctorDetailRow
+                label="Cancellation"
+                value={`${consultation.cancellation_code?.replaceAll("_", " ")}: ${consultation.cancellation_reason}`}
+              />
+            ) : null}
           </View>
 
           <View style={styles.detailsCard}>
@@ -179,7 +208,31 @@ export default function DoctorConsultationDetailsScreen() {
             />
           </View>
 
-          {consultation.status === "scheduled" ? (
+          <View style={styles.detailsCard}>
+            <Text style={styles.sectionTitle}>Lifecycle history</Text>
+            {historyQuery.isPending ? (
+              <Text style={styles.historyEmpty}>Loading history...</Text>
+            ) : (historyQuery.data ?? []).length === 0 ? (
+              <Text style={styles.historyEmpty}>No lifecycle history recorded.</Text>
+            ) : (
+              (historyQuery.data ?? []).map((event) => (
+                <View key={event.id} style={styles.historyRow}>
+                  <View style={styles.historyDot} />
+                  <View style={styles.historyCopy}>
+                    <Text style={styles.historyLabel}>
+                      {event.event_type.replaceAll("_", " ")}
+                    </Text>
+                    <Text style={styles.historyTime}>
+                      {formatDoctorDateTime(event.created_at)}
+                      {event.reason ? ` · ${event.reason}` : ""}
+                    </Text>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+
+          {consultation.available_actions?.includes("complete") ? (
             <TouchableOpacity
               accessibilityRole="button"
               style={styles.completeButton}
@@ -198,6 +251,51 @@ export default function DoctorConsultationDetailsScreen() {
               <Text style={styles.completeButtonText}>
                 Complete Consultation
               </Text>
+            </TouchableOpacity>
+          ) : null}
+          {consultation.available_actions?.includes("reschedule") ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.secondaryAction}
+              onPress={() =>
+                router.push({
+                  pathname: "/(doctor)/consultation-lifecycle",
+                  params: { id: String(consultation.id), mode: "reschedule" },
+                })
+              }
+            >
+              <Ionicons color={colors.primary} name="calendar-outline" size={20} />
+              <Text style={styles.secondaryActionText}>Reschedule</Text>
+            </TouchableOpacity>
+          ) : null}
+          {consultation.available_actions?.includes("cancel") ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.destructiveAction}
+              onPress={() =>
+                router.push({
+                  pathname: "/(doctor)/consultation-lifecycle",
+                  params: { id: String(consultation.id), mode: "cancel" },
+                })
+              }
+            >
+              <Ionicons color={colors.danger} name="close-circle-outline" size={20} />
+              <Text style={styles.destructiveActionText}>Cancel consultation</Text>
+            </TouchableOpacity>
+          ) : null}
+          {consultation.available_actions?.includes("schedule_follow_up") ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.followUpAction}
+              onPress={() =>
+                router.push({
+                  pathname: "/(doctor)/consultation-lifecycle",
+                  params: { id: String(consultation.id), mode: "follow_up" },
+                })
+              }
+            >
+              <Ionicons color={colors.surface} name="refresh-outline" size={20} />
+              <Text style={styles.completeButtonText}>Schedule Follow-up</Text>
             </TouchableOpacity>
           ) : null}
         </ScrollView>
@@ -272,6 +370,36 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
     paddingTop: spacing.md,
   },
+  historyEmpty: {
+    color: colors.textMuted,
+    fontSize: typography.size.bodySmall,
+    paddingBottom: spacing.lg,
+  },
+  historyRow: {
+    flexDirection: "row",
+    gap: spacing.md,
+    paddingBottom: spacing.lg,
+  },
+  historyDot: {
+    backgroundColor: colors.primary,
+    borderRadius: 5,
+    height: 10,
+    marginTop: spacing.sm,
+    width: 10,
+  },
+  historyCopy: { flex: 1 },
+  historyLabel: {
+    color: colors.textPrimary,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+    textTransform: "capitalize",
+  },
+  historyTime: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    lineHeight: typography.lineHeight.bodyRelaxed,
+    marginTop: spacing.xs,
+  },
   completeButton: {
     alignItems: "center",
     backgroundColor: colors.primary,
@@ -286,5 +414,48 @@ const styles = StyleSheet.create({
     color: colors.surface,
     fontSize: typography.size.body,
     fontWeight: typography.weight.extrabold,
+  },
+  secondaryAction: {
+    alignItems: "center",
+    borderColor: colors.primary,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "center",
+    marginTop: spacing.md,
+    minHeight: 52,
+  },
+  secondaryActionText: {
+    color: colors.primary,
+    fontSize: typography.size.body,
+    fontWeight: typography.weight.extrabold,
+  },
+  destructiveAction: {
+    alignItems: "center",
+    backgroundColor: colors.dangerSurface,
+    borderColor: colors.danger,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "center",
+    marginTop: spacing.md,
+    minHeight: 52,
+  },
+  destructiveActionText: {
+    color: colors.danger,
+    fontSize: typography.size.body,
+    fontWeight: typography.weight.extrabold,
+  },
+  followUpAction: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: radius.control,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "center",
+    marginTop: spacing.xl,
+    minHeight: 52,
   },
 });

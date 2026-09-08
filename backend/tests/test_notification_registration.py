@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.models.claim import Claim
 from app.models.doctor import Doctor
+from app.models.domain_audit_event import DomainAuditEvent
 from app.models.push_token import PushToken
 from app.models.settings import Settings
 from app.models.therapist_workday import TherapistWorkDay
@@ -79,6 +80,11 @@ class PushTokenRegistrationTests(unittest.TestCase):
             records[0].expo_push_token,
             "ExpoPushToken[refreshed-device-token]",
         )
+        events = self.db.query(DomainAuditEvent).order_by(DomainAuditEvent.id).all()
+        self.assertEqual([event.action for event in events], ["enabled", "refreshed"])
+        self.assertTrue(all(event.domain == "notification" for event in events))
+        self.assertNotIn("push_token", str(events[0].details).lower())
+        self.assertNotIn("installation", str(events[0].details).lower())
 
     def test_deactivate_push_token_for_current_user(self):
         self.client.post(
@@ -100,6 +106,15 @@ class PushTokenRegistrationTests(unittest.TestCase):
         self.assertTrue(response.json()["deactivated"])
         record = self.db.query(PushToken).one()
         self.assertFalse(record.is_active)
+        self.assertEqual(
+            [
+                event.action
+                for event in self.db.query(DomainAuditEvent)
+                .order_by(DomainAuditEvent.id)
+                .all()
+            ],
+            ["enabled", "disabled"],
+        )
 
     def test_registration_reassigns_installation_to_signed_in_user(self):
         self.client.post(
@@ -134,6 +149,26 @@ class PushTokenRegistrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["user_id"], second_user.id)
         self.assertEqual(self.db.query(PushToken).count(), 1)
+        self.assertEqual(
+            self.db.query(DomainAuditEvent)
+            .order_by(DomainAuditEvent.id.desc())
+            .first()
+            .action,
+            "ownership_transferred",
+        )
+
+    def test_identical_registration_does_not_spam_the_audit_log(self):
+        payload = {
+            "push_token": "ExpoPushToken[first-device-token]",
+            "installation_id": "installation-id-0001",
+            "platform": "android",
+        }
+        first = self.client.post("/notifications/push-token", json=payload)
+        replay = self.client.post("/notifications/push-token", json=payload)
+
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(self.db.query(DomainAuditEvent).count(), 1)
 
 
 if __name__ == "__main__":

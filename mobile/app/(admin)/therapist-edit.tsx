@@ -15,12 +15,14 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { FormScrollView } from "../../src/components/layout/FormScrollView";
+import { StaffDeactivationPanel } from "../../src/components/staff/StaffDeactivationPanel";
 import {
   getTherapistById,
   TherapistServiceError,
   updateTherapist,
 } from "../../src/services/therapistService";
 import type { TherapistResponse } from "../../src/types/therapist";
+import type { StaffDeactivationControlState } from "../../src/types/staffOverride";
 import { clearAuthSession } from "../../src/utils/storage";
 
 const PRIMARY = colors.primary;
@@ -68,6 +70,12 @@ export default function TherapistEditScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [deactivationControl, setDeactivationControl] =
+    useState<StaffDeactivationControlState>({
+      canDeactivate: false,
+      overrideRequestId: null,
+      reason: "",
+    });
   const submitInFlight = useRef(false);
 
   const loadTherapist = useCallback(async (): Promise<void> => {
@@ -159,6 +167,16 @@ export default function TherapistEditScreen() {
 
   const handleSave = useCallback(async (): Promise<void> => {
     if (!therapistId || submitInFlight.current || !validate()) return;
+    const isDeactivating = Boolean(
+      initialForm?.isActive && !form.isActive
+    );
+    if (isDeactivating && !deactivationControl.canDeactivate) {
+      Alert.alert(
+        "Deactivation Not Ready",
+        "Complete the safety check and any required override approval before saving."
+      );
+      return;
+    }
 
     submitInFlight.current = true;
     setSubmitting(true);
@@ -168,6 +186,13 @@ export default function TherapistEditScreen() {
         is_active: form.isActive,
         username: form.name.trim(),
         ...(form.password ? { password: form.password } : {}),
+        ...(isDeactivating
+          ? {
+              deactivation_reason: deactivationControl.reason,
+              override_request_id:
+                deactivationControl.overrideRequestId,
+            }
+          : {}),
       });
       const nextForm = toForm(therapist);
       setForm(nextForm);
@@ -193,7 +218,7 @@ export default function TherapistEditScreen() {
       submitInFlight.current = false;
       setSubmitting(false);
     }
-  }, [form, therapistId, validate]);
+  }, [deactivationControl, form, initialForm, therapistId, validate]);
 
   if (loading) {
     return (
@@ -357,6 +382,13 @@ export default function TherapistEditScreen() {
                 value={form.isActive}
               />
             </View>
+            {initialForm.isActive && !form.isActive && therapistId ? (
+              <StaffDeactivationPanel
+                onChange={setDeactivationControl}
+                staffId={therapistId}
+                staffRole="therapist"
+              />
+            ) : null}
           </View>
 
           <View style={styles.actions}>
@@ -371,13 +403,29 @@ export default function TherapistEditScreen() {
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityState={{
-                disabled: submitting || !isDirty,
+                disabled:
+                  submitting ||
+                  !isDirty ||
+                  (initialForm.isActive &&
+                    !form.isActive &&
+                    !deactivationControl.canDeactivate),
               }}
-              disabled={submitting || !isDirty}
+              disabled={
+                submitting ||
+                !isDirty ||
+                (initialForm.isActive &&
+                  !form.isActive &&
+                  !deactivationControl.canDeactivate)
+              }
               onPress={() => void handleSave()}
               style={[
                 styles.saveButton,
-                (submitting || !isDirty) && styles.buttonDisabled,
+                (submitting ||
+                  !isDirty ||
+                  (initialForm.isActive &&
+                    !form.isActive &&
+                    !deactivationControl.canDeactivate)) &&
+                  styles.buttonDisabled,
               ]}
             >
               {submitting ? (

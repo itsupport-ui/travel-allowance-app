@@ -22,6 +22,7 @@ from app.utils.workflow_transitions import (
 from app.services.doctor_attendance_service import (
     apply_doctor_visit_status,
 )
+from app.utils.timezone import india_now
 
 from typing import List, Optional
 
@@ -55,7 +56,7 @@ async def create_doctor_visit(
     """
     Create a new doctor visit.
     """
-    if visit.visit_date < date.today():
+    if visit.visit_date < india_now().date():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot schedule a visit in the past")
 
     doctor = db.query(Doctor).filter(Doctor.id == visit.doctor_id).first()
@@ -98,7 +99,7 @@ async def get_doctor_visits_dashboard(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["doctor"])),
 ):
-    today = date.today()
+    today = india_now().date()
     doctor = _get_current_doctor(db, current_user)
 
     base_query = db.query(DoctorVisit).filter(

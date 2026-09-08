@@ -18,6 +18,10 @@ class DoctorClaimResponse(BaseModel):
     approved_at: datetime | None = None
     approved_by: int | None = None
     rejection_reason: str | None = None
+    revision: int = 1
+    calculation_version: str = "decimal-v1"
+    rounding_mode: str = "ROUND_HALF_UP"
+    included_expense_ids: list[int] | None = None
     created_at: datetime
     updated_at: datetime | None = None
 

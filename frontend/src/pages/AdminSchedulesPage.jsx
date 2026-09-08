@@ -55,7 +55,8 @@ const ScheduleCard = memo(function ScheduleCard({
   schedule,
   onCancel,
 }) {
-  const canChange = schedule.status === "scheduled"
+  const canEdit = schedule.available_actions?.includes("edit")
+  const canCancel = schedule.available_actions?.includes("cancel")
 
   return (
     <article className="border-b border-slate-200 bg-white p-4 last:border-b-0 sm:p-5">
@@ -125,27 +126,29 @@ const ScheduleCard = memo(function ScheduleCard({
             >
               View
             </Link>
-            {canChange && (
+            {(canEdit || canCancel) && (
               <>
-                <Link
-                  to={`/admin/schedule/edit/${schedule.id}`}
-                  className="rounded-md border border-blue-200 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-50"
-                >
-                  Edit
-                </Link>
-                <Link
-                  to={`/admin/schedule/edit/${schedule.id}?reschedule=1`}
-                  className="rounded-md border border-amber-200 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-50"
-                >
-                  Reschedule
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => onCancel(schedule)}
-                  className="rounded-md border border-rose-200 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-50"
-                >
-                  Cancel
-                </button>
+                {canEdit && <>
+                  <Link
+                    to={`/admin/schedule/edit/${schedule.id}`}
+                    className="rounded-md border border-blue-200 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-50"
+                  >
+                    Edit
+                  </Link>
+                  <Link
+                    to={`/admin/schedule/edit/${schedule.id}?reschedule=1`}
+                    className="rounded-md border border-amber-200 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-50"
+                  >
+                    Reschedule
+                  </Link>
+                </>}
+                {canCancel && <button
+                    type="button"
+                    onClick={() => onCancel(schedule)}
+                    className="rounded-md border border-rose-200 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-50"
+                  >
+                    Cancel
+                  </button>}
               </>
             )}
           </div>

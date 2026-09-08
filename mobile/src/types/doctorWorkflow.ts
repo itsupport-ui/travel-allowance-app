@@ -16,6 +16,9 @@ export interface DoctorConsultation {
   patient_address: string;
   doctor_id: number;
   doctor_visit_id?: number | null;
+  origin_consultation_id?: number | null;
+  successor_consultation_id?: number | null;
+  origin_kind?: "follow_up" | "rescheduled" | null;
   visit_id?: number | null;
   has_visit?: boolean;
   scheduled_date: string;
@@ -27,11 +30,39 @@ export interface DoctorConsultation {
   proposed_treatment: string | null;
   estimated_amount: number | null;
   rejection_reason: string | null;
+  follow_up_date: string | null;
+  follow_up_time: string | null;
+  follow_up_reason: string | null;
+  cancellation_code: string | null;
+  cancellation_reason: string | null;
+  cancelled_by: number | null;
+  cancelled_at: string | null;
   patient_decision: PatientDecision;
   status: DoctorConsultationStatus;
   created_by: number;
   created_at: string;
   completed_at: string | null;
+  lifecycle_version: number;
+  updated_at: string | null;
+  available_actions: string[];
+  blocking_reasons: string[];
+  next_action: string | null;
+}
+
+export interface DoctorConsultationEvent {
+  id: number;
+  consultation_id: number;
+  event_type: string;
+  actor_id: number;
+  from_status: string | null;
+  to_status: string | null;
+  from_decision: string | null;
+  to_decision: string | null;
+  reason: string | null;
+  related_consultation_id: number | null;
+  related_visit_id: number | null;
+  lifecycle_version: number;
+  created_at: string;
 }
 
 export interface DoctorConsultationDashboard {
@@ -50,6 +81,34 @@ export interface CompleteDoctorConsultationRequest {
   proposed_treatment: string | null;
   estimated_amount: number | null;
   patient_decision: PatientDecision;
+  follow_up_date: string | null;
+  follow_up_time: string | null;
+  follow_up_reason: string | null;
+  lifecycle_version: number;
+}
+
+export interface CancelDoctorConsultationRequest {
+  cancellation_code:
+    | "patient_cancelled"
+    | "doctor_unavailable"
+    | "duplicate"
+    | "other";
+  reason: string;
+  lifecycle_version: number;
+}
+
+export interface RescheduleDoctorConsultationRequest {
+  scheduled_date: string;
+  scheduled_time: string;
+  reason: string;
+  lifecycle_version: number;
+}
+
+export interface ScheduleDoctorConsultationFollowUpRequest {
+  scheduled_date: string;
+  scheduled_time: string;
+  reason: string;
+  lifecycle_version: number;
 }
 
 export interface DoctorVisit {
@@ -123,12 +182,17 @@ export interface TreatmentPlan {
   schedule_count?: number;
   created_at: string;
   updated_at: string | null;
+  rejection_reason: string | null;
+  reviewed_at: string | null;
+  reviewed_by: number | null;
+  revision: number;
+  available_actions: string[];
+  blocking_reasons: string[];
+  next_action: string | null;
 }
 
 export interface CreateTreatmentPlanRequest {
   doctor_visit_id: number;
-  doctor_id: number;
-  patient_name: string;
   diagnosis: string | null;
   chief_complaint: string | null;
   treatment_plan: string | null;
@@ -163,6 +227,7 @@ export interface CreateVisitFromConsultationRequest {
   visit_date: string;
   visit_time: string;
   remarks: string | null;
+  lifecycle_version?: number;
 }
 
 export interface TreatmentPlanScheduleRequest {
@@ -170,11 +235,17 @@ export interface TreatmentPlanScheduleRequest {
   treatment_date: string | null;
   start_date: string | null;
   number_of_sessions: number;
+  cadence_days: number | null;
   in_time: string;
   out_time: string;
   priority: string;
   instructions: string;
 }
+
+export type ResubmitTreatmentPlanRequest = Omit<
+  CreateTreatmentPlanRequest,
+  "doctor_visit_id"
+>;
 
 export interface DoctorExpense {
   id: number;
@@ -193,11 +264,28 @@ export interface DoctorExpense {
   distance_km: number | null;
   transport_mode: string;
   fare: number;
+  approved_amount: number | null;
   proof_file: string | null;
   remarks: string | null;
   status: string;
   claim_id: number | null;
   created_at: string;
+  doctor_name: string | null;
+  expense_category: string;
+  manual_reason: string | null;
+  manual_review_status: string | null;
+  manual_review_reason: string | null;
+  manual_reviewed_by: number | null;
+  manual_reviewed_at: string | null;
+  manual_revision: number;
+  manual_review_version: number;
+  policy_id: number | null;
+  rate_applied: number | null;
+  receipt_threshold_applied: number | null;
+  receipt_required: boolean;
+  calculation_version: string;
+  rounding_mode: string;
+  available_actions: string[];
 }
 
 export interface DoctorProofAsset {
@@ -213,9 +301,27 @@ export interface SaveDoctorExpenseRequest {
   from_location?: string;
   to_location?: string;
   transport_mode: string;
-  fare: number;
+  fare: number | null;
   remarks: string;
   proof_file: DoctorProofAsset | null;
+  expense_category: string;
+  manual_reason?: string;
+  correction_reason?: string;
+  version?: number;
+}
+
+export interface ManualDoctorExpenseReviewEvent {
+  actor_id: number;
+  actor_name: string | null;
+  created_at: string;
+  event_type: string;
+  from_status: string | null;
+  id: number;
+  reason: string;
+  revision: number;
+  submitted_amount: number;
+  approved_amount: number | null;
+  to_status: string;
 }
 
 export interface DoctorVisitSession {
@@ -233,6 +339,12 @@ export interface DoctorVisitSession {
   can_punch_in: boolean;
   can_punch_out: boolean;
   eligibility_message: string | null;
+  location_exception_id: number | null;
+  location_exception_status: string | null;
+  can_request_location_exception: boolean;
+  location_policy_version: number | null;
+  geofence_radius_m: number | null;
+  gps_accuracy_threshold_m: number | null;
 }
 
 export interface DoctorVisitExpenseOption {
@@ -273,6 +385,13 @@ export interface DoctorTodayWorkday {
   should_prompt_end: boolean;
   auto_logout_enabled: boolean;
   auto_logout_grace_minutes: number;
+  available_actions: string[];
+  blocking_reasons: string[];
+  next_action: string | null;
+  active_visit_id: number | null;
+  ended_early: boolean;
+  end_reason: string | null;
+  early_end_review_status: string | null;
 }
 
 export interface DoctorClaim {
@@ -286,6 +405,7 @@ export interface DoctorClaim {
   approved_at: string | null;
   approved_by: number | null;
   rejection_reason: string | null;
+  revision: number;
   created_at: string;
   updated_at: string | null;
 }

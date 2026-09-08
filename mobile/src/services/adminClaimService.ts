@@ -282,13 +282,14 @@ export const approveAdminClaim = async (
   );
 
 export const rejectAdminClaim = async (
-  claimId: number
+  claimId: number,
+  rejectionReason = "Please review and correct this claim."
 ): Promise<ClaimResponse> =>
   executeRequest(
     async () =>
       api.put<ClaimResponse>(
         `/claims/${claimId}/reject`,
-        undefined,
+        { rejection_reason: rejectionReason },
         {
           headers: await getAuthHeaders(),
         }

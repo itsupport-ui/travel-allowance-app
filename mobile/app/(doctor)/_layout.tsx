@@ -58,6 +58,7 @@ export default function DoctorLayout() {
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="consultation-details" />
       <Stack.Screen name="consultation-complete" />
+      <Stack.Screen name="consultation-lifecycle" />
       <Stack.Screen name="visit-details" />
       <Stack.Screen name="visit-create" />
       <Stack.Screen name="treatment-plan-details" />

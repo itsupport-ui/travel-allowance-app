@@ -365,3 +365,61 @@ export const exportScheduleDetailPdf = (schedule) => {
   const safeName = (schedule.patient_name || "Schedule").replace(/\s+/g, "-")
   doc.save(`Schedule-${safeName}-${schedule.treatment_date || schedule.start_date || "Date"}.pdf`)
 }
+
+export const exportDoctorClaimPdf = (claim) => {
+  const doc = new jsPDF({ orientation: "landscape" })
+  const pageW = doc.internal.pageSize.width
+  const expenses = claim.expenses || []
+  drawHeader(
+    doc,
+    `Doctor Claim #${claim.id}`,
+    `Business date: ${claim.claim_date}  |  Revision: ${claim.revision || 1}`,
+    pageW,
+  )
+
+  autoTable(doc, {
+    startY: 32,
+    head: [["Status", "Submitted", "Reviewed", "Expense count", "Total (INR)"]],
+    body: [[
+      claim.status || "pending",
+      claim.submitted_at ? new Date(claim.submitted_at).toLocaleString("en-IN") : "-",
+      claim.approved_at ? new Date(claim.approved_at).toLocaleString("en-IN") : "-",
+      String(claim.expense_count ?? expenses.length),
+      Number(claim.total_amount || 0).toFixed(2),
+    ]],
+    styles: { fontSize: 8, cellPadding: 3, textColor: DARK_TEXT },
+    headStyles: { fillColor: PRIMARY, textColor: WHITE },
+    margin: { left: 14, right: 14 },
+  })
+
+  autoTable(doc, {
+    startY: doc.lastAutoTable.finalY + 8,
+    head: [["Date", "From", "To", "Transport", "Distance (km)", "Fare (INR)", "Receipt"]],
+    body: expenses.map((expense) => [
+      expense.expense_date || "-",
+      expense.from_location || "-",
+      expense.to_location || "-",
+      expense.transport_mode || "-",
+      expense.distance_km == null ? "-" : Number(expense.distance_km).toFixed(2),
+      Number(expense.approved_amount ?? expense.fare ?? 0).toFixed(2),
+      expense.proof_file ? "Attached" : "Not attached",
+    ]),
+    styles: { fontSize: 8, cellPadding: 3, textColor: DARK_TEXT },
+    headStyles: { fillColor: PRIMARY, textColor: WHITE },
+    alternateRowStyles: { fillColor: LIGHT_BG },
+    margin: { left: 14, right: 14 },
+  })
+
+  if (claim.rejection_reason) {
+    const y = doc.lastAutoTable.finalY + 8
+    doc.setFontSize(8)
+    doc.setTextColor(...MUTED)
+    doc.text("CORRECTION / REJECTION REASON", 14, y)
+    doc.setTextColor(...DARK_TEXT)
+    doc.text(String(claim.rejection_reason), 14, y + 6, {
+      maxWidth: pageW - 28,
+    })
+  }
+  drawFooter(doc, pageW)
+  doc.save(`doctor-claim-${claim.id}-${claim.claim_date}.pdf`)
+}

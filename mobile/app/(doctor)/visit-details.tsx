@@ -31,6 +31,8 @@ import {
   updateDoctorVisitStatus,
 } from "../../src/services/doctorWorkflowService";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
+import { isOfflineMutationQueuedError } from "../../src/services/offlineMutationQueue";
+import { createLocationException } from "../../src/services/locationExceptionService";
 import type { DoctorVisit } from "../../src/types/doctorWorkflow";
 import {
   formatDoctorDate,
@@ -68,9 +70,12 @@ export default function DoctorVisitDetailsScreen() {
   const queryClient = useQueryClient();
   const actionRef = useRef<VisitAction | null>(null);
   const [remarks, setRemarks] = useState("");
+  const [exceptionReason, setExceptionReason] = useState("");
   const [coordinates, setCoordinates] = useState<{
     latitude: number;
     longitude: number;
+    accuracy: number | null;
+    deviceTimestamp: string;
   } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [elapsedTick, setElapsedTick] = useState(0);
@@ -92,7 +97,9 @@ export default function DoctorVisitDetailsScreen() {
       getDoctorVisitSession(
         visitId ?? 0,
         coordinates?.latitude,
-        coordinates?.longitude
+        coordinates?.longitude,
+        Math.max(coordinates?.accuracy ?? 1, 1),
+        coordinates?.deviceTimestamp
       ),
     queryKey:
       visitId === null
@@ -108,7 +115,7 @@ export default function DoctorVisitDetailsScreen() {
     if (
       !visit ||
       visit.status !== "scheduled" ||
-      visit.session_status !== "NOT_STARTED"
+      visit.session_status === "COMPLETED"
     ) {
       return;
     }
@@ -118,7 +125,10 @@ export default function DoctorVisitDetailsScreen() {
         await requestLocationPermission();
         const current = await getCurrentLocation();
         if (active) {
-          setCoordinates(current);
+          setCoordinates({
+            ...current,
+            deviceTimestamp: new Date().toISOString(),
+          });
           setLocationError(null);
         }
       } catch (error) {
@@ -209,12 +219,16 @@ export default function DoctorVisitDetailsScreen() {
       return punchInDoctorVisit(
         visitId,
         current.latitude,
-        current.longitude
+        current.longitude,
+        Math.max(current.accuracy ?? 1, 1),
+        sessionQuery.data?.location_exception_id
       );
     },
     onError: (error) => {
       Alert.alert(
-        "Unable to Punch In",
+        isOfflineMutationQueuedError(error)
+          ? "Saved for Sync"
+          : "Unable to Punch In",
         getApiErrorMessage(error, "Unable to start this visit.")
       );
     },
@@ -241,18 +255,63 @@ export default function DoctorVisitDetailsScreen() {
       return punchOutDoctorVisit(visitId, {
         latitude: current.latitude,
         longitude: current.longitude,
+        gps_accuracy_m: Math.max(current.accuracy ?? 1, 1),
+        location_exception_id:
+          sessionQuery.data?.location_exception_id,
         remarks: remarks.trim() || null,
       });
     },
     onError: (error) => {
       Alert.alert(
-        "Unable to Punch Out",
+        isOfflineMutationQueuedError(error)
+          ? "Saved for Sync"
+          : "Unable to Punch Out",
         getApiErrorMessage(error, "Unable to complete this visit.")
       );
     },
     onSuccess: async () => {
       await invalidateVisitData();
       Alert.alert("Visit Completed", "Punch Out was recorded.");
+    },
+  });
+  const exceptionMutation = useMutation({
+    mutationFn: async () => {
+      if (visitId === null || exceptionReason.trim().length < 10) {
+        throw new Error("Enter at least 10 characters explaining the GPS issue.");
+      }
+      await requestLocationPermission();
+      const current = await getCurrentLocation();
+      setCoordinates({
+        ...current,
+        deviceTimestamp: new Date().toISOString(),
+      });
+      return createLocationException({
+        action:
+          sessionQuery.data?.session_status === "IN_PROGRESS"
+            ? "punch_out"
+            : "punch_in",
+        device_timestamp: new Date().toISOString(),
+        gps_accuracy_m: Math.max(current.accuracy ?? 1, 1),
+        latitude: current.latitude,
+        longitude: current.longitude,
+        reason: exceptionReason.trim(),
+        target_id: visitId,
+        target_type: "doctor_visit",
+      });
+    },
+    onError: (error) => {
+      Alert.alert(
+        "Unable to Request Exception",
+        getApiErrorMessage(error, "Unable to send this location exception.")
+      );
+    },
+    onSuccess: async () => {
+      setExceptionReason("");
+      await sessionQuery.refetch();
+      Alert.alert(
+        "Request Sent",
+        "An administrator must approve this one-time location exception before you continue."
+      );
     },
   });
   const goBack = () => {
@@ -309,7 +368,10 @@ export default function DoctorVisitDetailsScreen() {
     try {
       await requestLocationPermission();
       const current = await getCurrentLocation();
-      setCoordinates(current);
+      setCoordinates({
+        ...current,
+        deviceTimestamp: new Date().toISOString(),
+      });
       setLocationError(null);
     } catch (error) {
       setLocationError(
@@ -366,7 +428,8 @@ export default function DoctorVisitDetailsScreen() {
   const actionBusy =
     cancelMutation.isPending ||
     punchInMutation.isPending ||
-    punchOutMutation.isPending;
+    punchOutMutation.isPending ||
+    exceptionMutation.isPending;
 
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
@@ -476,6 +539,34 @@ export default function DoctorVisitDetailsScreen() {
                   value={remarks}
                   onChangeText={setRemarks}
                 />
+                {session?.can_request_location_exception ? (
+                  <View style={styles.exceptionBox}>
+                    <Text style={styles.exceptionTitle}>GPS exception request</Text>
+                    <Text style={styles.exceptionHelp}>
+                      Explain the issue. A fresh GPS reading will be sent for one-time administrator approval.
+                    </Text>
+                    <DoctorField
+                      label="Exception reason"
+                      multiline
+                      placeholder="Explain why the normal GPS check cannot be completed"
+                      value={exceptionReason}
+                      onChangeText={setExceptionReason}
+                    />
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      disabled={actionBusy || exceptionReason.trim().length < 10}
+                      style={[styles.exceptionButton, (actionBusy || exceptionReason.trim().length < 10) && styles.disabledButton]}
+                      onPress={() => exceptionMutation.mutate()}
+                    >
+                      {exceptionMutation.isPending ? (
+                        <ActivityIndicator color={colors.warning} size="small" />
+                      ) : (
+                        <Ionicons color={colors.warning} name="warning-outline" size={18} />
+                      )}
+                      <Text style={styles.exceptionButtonText}>Capture GPS & Send</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
                 <View style={styles.actions}>
                   <TouchableOpacity
                     accessibilityRole="button"
@@ -651,6 +742,41 @@ const styles = StyleSheet.create({
     fontSize: typography.size.small,
     fontWeight: typography.weight.extrabold,
     marginTop: spacing.sm,
+  },
+  exceptionBox: {
+    backgroundColor: colors.warningSurface,
+    borderColor: colors.warningBright,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    marginBottom: spacing.lg,
+    padding: spacing.lg,
+  },
+  exceptionTitle: {
+    color: colors.warningDark,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  exceptionHelp: {
+    color: colors.warningDark,
+    fontSize: typography.size.small,
+    lineHeight: typography.lineHeight.smallRelaxed,
+    marginBottom: spacing.md,
+    marginTop: spacing.xs,
+  },
+  exceptionButton: {
+    alignItems: "center",
+    borderColor: colors.warning,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "center",
+    minHeight: 46,
+  },
+  exceptionButtonText: {
+    color: colors.warningDark,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
   },
   actions: {
     flexDirection: "row",

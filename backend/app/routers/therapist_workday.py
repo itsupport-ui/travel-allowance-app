@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.config import (
@@ -22,6 +22,8 @@ from app.schemas.therapist_workday import (
 )
 from app.utils.auth import require_role
 from app.utils.timezone import india_now
+from app.utils.domain_errors import DomainHTTPException
+from app.services.domain_audit_service import record_domain_audit_event
 
 router = APIRouter(
     prefix="/therapist/workday",
@@ -80,10 +82,39 @@ def get_today_workday(
             started=False,
             work_date=today,
             is_active=False,
+            available_actions=["start_workday"],
+            next_action="start_workday",
             **_policy_payload(india_now()),
         )
 
     policy = _policy_payload(india_now())
+    active_schedule = (
+        db.query(TreatmentSchedule.id)
+        .filter(
+            TreatmentSchedule.therapist_id == current_user.id,
+            TreatmentSchedule.status == "scheduled",
+            TreatmentSchedule.session_status == "IN_PROGRESS",
+        )
+        .first()
+        if workday.is_active
+        else None
+    )
+    available_actions: list[str] = []
+    blocking_reasons: list[str] = []
+    next_action = None
+    if workday.is_active and active_schedule is not None:
+        available_actions = ["resume_treatment"]
+        blocking_reasons = ["ACTIVE_TREATMENT_BLOCKS_WORKDAY_END"]
+        next_action = "punch_out_active_treatment"
+    elif workday.is_active:
+        available_actions = ["view_schedules"]
+        next_action = "view_schedules"
+        if policy["can_end_workday"]:
+            available_actions.append("end_workday")
+            next_action = "end_workday"
+        else:
+            available_actions.append("end_workday_early_with_reason")
+            blocking_reasons = ["EARLY_END_REASON_REQUIRED"]
     return TodayWorkdayResponse(
         started=True,
         workday_id=workday.id,
@@ -92,10 +123,19 @@ def get_today_workday(
         start_address=workday.start_address,
         is_active=workday.is_active,
         ended_at=workday.ended_at,
+        ended_early=workday.ended_early,
+        end_reason=workday.end_reason,
+        early_end_review_status=workday.early_end_review_status,
         total_work_minutes=workday.total_work_minutes,
         pending_schedules_count=workday.pending_schedules_count,
         completed_schedules_count=workday.completed_schedules_count,
         missed_schedules_count=workday.missed_schedules_count,
+        available_actions=available_actions,
+        blocking_reasons=blocking_reasons,
+        next_action=next_action,
+        active_schedule_id=(
+            active_schedule[0] if active_schedule is not None else None
+        ),
         **{
             **policy,
             "can_end_workday": (
@@ -129,13 +169,17 @@ def start_day(
     )
 
     if existing:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Workday already started for today"
-                if existing.is_active
-                else "Workday already completed for today"
-            ),
+        if existing.is_active:
+            return StartDayResponse(
+                message="Workday is already active",
+                workday_id=existing.id,
+            )
+        raise DomainHTTPException(
+            status_code=409,
+            code="WORKDAY_ALREADY_COMPLETED",
+            message="Workday already completed for today",
+            recoverable=False,
+            suggested_action="view_workday_summary",
         )
     workday = TherapistWorkDay(
         therapist_id=current_user.id,
@@ -149,6 +193,19 @@ def start_day(
 
 
     db.add(workday)
+    db.flush()
+    record_domain_audit_event(
+        db,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        domain="attendance",
+        entity_type="therapist_workday",
+        entity_id=workday.id,
+        action="started",
+        business_date=workday.work_date,
+        from_state="not_started",
+        to_state="active",
+    )
     db.commit()
     db.refresh(workday)
 
@@ -165,31 +222,69 @@ def end_day(
     current_user: User = Depends(require_role(["therapist"])),
 ):
     ended_at = india_now()
-    today = ended_at.date()
-
-    if ended_at.time().replace(tzinfo=None) < WORKDAY_END_TIME:
-        raise HTTPException(
+    ended_early = ended_at.time().replace(tzinfo=None) < WORKDAY_END_TIME
+    if ended_early and not payload.early_end_reason:
+        raise DomainHTTPException(
             status_code=400,
-            detail=(
-                "The workday can be ended at or after "
+            code="EARLY_END_REASON_REQUIRED",
+            message=(
+                "Enter a reason to end the workday before "
                 f"{WORKDAY_END_TIME.strftime('%I:%M %p')}."
             ),
+            recoverable=True,
+            suggested_action="provide_early_end_reason",
+            blocking_fields=["early_end_reason"],
         )
 
     workday = (
         db.query(TherapistWorkDay)
         .filter(
             TherapistWorkDay.therapist_id == current_user.id,
-            TherapistWorkDay.work_date == today,
             TherapistWorkDay.is_active.is_(True),
         )
+        .order_by(TherapistWorkDay.work_date.desc(), TherapistWorkDay.id.desc())
         .with_for_update()
         .first()
     )
     if workday is None:
-        raise HTTPException(
+        completed_workday = (
+            db.query(TherapistWorkDay)
+            .filter(
+                TherapistWorkDay.therapist_id == current_user.id,
+                func.date(TherapistWorkDay.ended_at) == ended_at.date(),
+                TherapistWorkDay.is_active.is_(False),
+                TherapistWorkDay.ended_at.is_not(None),
+            )
+            .order_by(TherapistWorkDay.id.desc())
+            .first()
+        )
+        if completed_workday is not None:
+            return EndDayResponse(
+                message="Workday was already ended successfully",
+                workday_id=completed_workday.id,
+                ended_at=completed_workday.ended_at,
+                total_work_minutes=completed_workday.total_work_minutes or 0,
+                pending_schedules_count=(
+                    completed_workday.pending_schedules_count or 0
+                ),
+                completed_schedules_count=(
+                    completed_workday.completed_schedules_count or 0
+                ),
+                missed_schedules_count=(
+                    completed_workday.missed_schedules_count or 0
+                ),
+                ended_early=completed_workday.ended_early,
+                end_reason=completed_workday.end_reason,
+                early_end_review_status=(
+                    completed_workday.early_end_review_status
+                ),
+            )
+        raise DomainHTTPException(
             status_code=400,
-            detail="No active workday was found for today.",
+            code="WORKDAY_NOT_ACTIVE",
+            message="No active workday was found for today.",
+            recoverable=True,
+            suggested_action="refresh_workday_status",
         )
 
     active_session = (
@@ -202,9 +297,15 @@ def end_day(
         .first()
     )
     if active_session is not None:
-        raise HTTPException(
+        raise DomainHTTPException(
             status_code=400,
-            detail="Punch out from the active treatment before ending the workday.",
+            code="ACTIVE_TREATMENT_BLOCKS_WORKDAY_END",
+            message=(
+                "Punch out from the active treatment before ending the workday."
+            ),
+            recoverable=True,
+            suggested_action="punch_out_active_treatment",
+            blocking_fields=["active_schedule_id"],
         )
 
     counts = {"scheduled": 0, "completed": 0, "missed": 0}
@@ -212,7 +313,7 @@ def end_day(
         db.query(TreatmentSchedule.status, TreatmentSchedule.id)
         .filter(
             TreatmentSchedule.therapist_id == current_user.id,
-            _today_schedule_condition(today),
+            _today_schedule_condition(workday.work_date),
         )
         .all()
     ):
@@ -220,6 +321,9 @@ def end_day(
             counts[status] += 1
 
     workday.ended_at = ended_at
+    workday.ended_early = ended_early
+    workday.end_reason = payload.early_end_reason
+    workday.early_end_review_status = "pending" if ended_early else None
     workday.end_latitude = payload.end_latitude
     workday.end_longitude = payload.end_longitude
     workday.total_work_minutes = _duration_minutes(
@@ -230,6 +334,25 @@ def end_day(
     workday.completed_schedules_count = counts["completed"]
     workday.missed_schedules_count = counts["missed"]
     workday.is_active = False
+    record_domain_audit_event(
+        db,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        domain="attendance",
+        entity_type="therapist_workday",
+        entity_id=workday.id,
+        action="ended",
+        business_date=workday.work_date,
+        from_state="active",
+        to_state="ended_early" if ended_early else "completed",
+        reason_code="early_closure" if ended_early else None,
+        reason=payload.early_end_reason if ended_early else None,
+        details={
+            "completed_count": counts["completed"],
+            "pending_count": counts["scheduled"],
+            "missed_count": counts["missed"],
+        },
+    )
     db.commit()
     db.refresh(workday)
 
@@ -241,4 +364,7 @@ def end_day(
         pending_schedules_count=workday.pending_schedules_count,
         completed_schedules_count=workday.completed_schedules_count,
         missed_schedules_count=workday.missed_schedules_count,
+        ended_early=workday.ended_early,
+        end_reason=workday.end_reason,
+        early_end_review_status=workday.early_end_review_status,
     )

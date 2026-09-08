@@ -44,43 +44,29 @@ export default function DoctorTabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="consultations"
+        name="work"
         options={{
-          title: "Consults",
+          title: "Work",
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               color={color}
-              name={focused ? "call" : "call-outline"}
+              name={focused ? "briefcase" : "briefcase-outline"}
               size={ICON_SIZE}
             />
           ),
         }}
+      />
+      <Tabs.Screen
+        name="consultations"
+        options={{ href: null }}
       />
       <Tabs.Screen
         name="visits"
-        options={{
-          title: "Visits",
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              color={color}
-              name={focused ? "calendar" : "calendar-outline"}
-              size={ICON_SIZE}
-            />
-          ),
-        }}
+        options={{ href: null }}
       />
       <Tabs.Screen
         name="treatment-plans"
-        options={{
-          title: "Plans",
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              color={color}
-              name={focused ? "medkit" : "medkit-outline"}
-              size={ICON_SIZE}
-            />
-          ),
-        }}
+        options={{ href: null }}
       />
       <Tabs.Screen
         name="expenses"
@@ -120,6 +106,10 @@ export default function DoctorTabsLayout() {
             />
           ),
         }}
+      />
+      <Tabs.Screen
+        name="travel-expense-report"
+        options={{ href: null }}
       />
     </Tabs>
   );

@@ -22,6 +22,7 @@ import { queryKeys } from "../../src/query/queryKeys";
 import { getTherapistDashboardSummary } from "../../src/services/dashboardService";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
 import { reverseGeocode } from "../../src/services/mapsService";
+import { isOfflineMutationQueuedError } from "../../src/services/offlineMutationQueue";
 import { getCurrentUser } from "../../src/services/userService";
 import type { TherapistDashboardSummary } from "../../src/types/dashboard";
 import {
@@ -285,7 +286,9 @@ export default function DashboardScreen() {
     },
     onError: (error) => {
       Alert.alert(
-        "Unable to Start Workday",
+        isOfflineMutationQueuedError(error)
+          ? "Saved for Sync"
+          : "Unable to Start Workday",
         getApiErrorMessage(
           error,
           "Unable to start your workday. Please try again."
@@ -314,13 +317,14 @@ export default function DashboardScreen() {
   };
 
   const endMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (earlyEndReason?: string) => {
       await requestLocationPermission();
       const coordinates = await getCurrentLocation();
       return endWorkday({
         end_latitude: coordinates.latitude,
         end_longitude: coordinates.longitude,
         device_timestamp: new Date().toISOString(),
+        early_end_reason: earlyEndReason,
       });
     },
     onSuccess: async (response) => {
@@ -335,6 +339,9 @@ export default function DashboardScreen() {
           `Completed: ${response.completed_schedules_count}`,
           `Pending: ${response.pending_schedules_count}`,
           `Missed: ${response.missed_schedules_count}`,
+          ...(response.early_end_review_status === "pending"
+            ? ["Your early closure is awaiting administrator review."]
+            : []),
         ].join("\n"),
         [
           {
@@ -346,7 +353,9 @@ export default function DashboardScreen() {
     },
     onError: (error) => {
       Alert.alert(
-        "Unable to End Workday",
+        isOfflineMutationQueuedError(error)
+          ? "Saved for Sync"
+          : "Unable to End Workday",
         getApiErrorMessage(error, "Unable to end your workday.")
       );
     },
@@ -357,48 +366,68 @@ export default function DashboardScreen() {
   const endWorkdayPending = endMutation.isPending;
   const mutateEndWorkday = endMutation.mutate;
 
-  const executeEndWorkday = useCallback(() => {
+  const executeEndWorkday = useCallback((earlyEndReason?: string) => {
     if (
       endingRef.current ||
       endWorkdayPending ||
-      !workdayQuery.data?.can_end_workday
+      !workdayQuery.data?.is_active
     ) {
       return;
     }
 
     endingRef.current = true;
-    mutateEndWorkday();
+    mutateEndWorkday(earlyEndReason);
   }, [
     endWorkdayPending,
     mutateEndWorkday,
-    workdayQuery.data?.can_end_workday,
+    workdayQuery.data?.is_active,
   ]);
 
   const confirmEndWorkday = useCallback(() => {
     if (
       endingRef.current ||
       endWorkdayPending ||
-      !workdayQuery.data?.can_end_workday
+      !workdayQuery.data?.is_active
     ) {
       return;
     }
 
+    if (workdayQuery.data.can_end_workday) {
+      Alert.alert(
+        "End Workday",
+        "Your attendance will be closed and you will be logged out.",
+        [
+          { style: "cancel", text: "Cancel" },
+          {
+            style: "destructive",
+            text: "End Workday",
+            onPress: () => executeEndWorkday(),
+          },
+        ]
+      );
+      return;
+    }
+
     Alert.alert(
-      "End Workday",
-      "Your attendance will be closed and you will be logged out.",
+      "End Workday Early",
+      `The standard end time is ${workdayQuery.data.workday_end_time}. Choose the reason saved with attendance.`,
       [
         { style: "cancel", text: "Cancel" },
         {
+          onPress: () => executeEndWorkday("Assigned work completed early"),
+          text: "Work Complete",
+        },
+        {
+          onPress: () => executeEndWorkday("Personal or medical reason"),
           style: "destructive",
-          text: "End Workday",
-          onPress: executeEndWorkday,
+          text: "Personal/Medical",
         },
       ]
     );
   }, [
     endWorkdayPending,
     executeEndWorkday,
-    workdayQuery.data?.can_end_workday,
+    workdayQuery.data,
   ]);
 
   useEffect(() => {
@@ -748,7 +777,7 @@ export default function DashboardScreen() {
           </Text>
         </TouchableOpacity>
 
-        {workdayStarted && workdayQuery.data?.can_end_workday ? (
+        {workdayStarted && workdayQuery.data?.is_active ? (
           <TouchableOpacity
             accessibilityRole="button"
             activeOpacity={0.85}
@@ -769,15 +798,19 @@ export default function DashboardScreen() {
               />
             )}
             <Text style={styles.startButtonText}>
-              {endWorkdayPending ? "Ending..." : "End Workday"}
+              {endWorkdayPending
+                ? "Ending..."
+                : workdayQuery.data.can_end_workday
+                  ? "End Workday"
+                  : "End Early"}
             </Text>
           </TouchableOpacity>
         ) : null}
 
         {workdayStarted && !workdayQuery.data?.can_end_workday ? (
           <Text style={styles.workdayPolicy}>
-            End Workday becomes available at{" "}
-            {workdayQuery.data?.workday_end_time ?? "18:00"}.
+            Standard end time: {workdayQuery.data?.workday_end_time ?? "18:00"}.
+            Ending earlier requires a saved reason.
           </Text>
         ) : null}
       </View>

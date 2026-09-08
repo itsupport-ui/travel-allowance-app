@@ -58,6 +58,12 @@ const navigationItems = [
     permission: "doctor_claims.submit",
   },
   {
+    path: "/doctor/travel-expense-report",
+    label: "Travel Expense Report",
+    icon: FaFileInvoiceDollar,
+    permission: "doctor_claims.submit",
+  },
+  {
     path: "/doctor/profile",
     label: "Profile",
     icon: FaUserCircle,
@@ -72,6 +78,7 @@ function DoctorLayout({ children }) {
   const [startingDay, setStartingDay] = useState(false)
   const [endingDay, setEndingDay] = useState(false)
   const [confirmingEnd, setConfirmingEnd] = useState(false)
+  const [earlyEndReason, setEarlyEndReason] = useState("")
 
   const captureLocation = useCallback(
     () =>
@@ -112,7 +119,7 @@ function DoctorLayout({ children }) {
   const closeSidebar = () => setSidebarOpen(false)
 
   const handleLogout = () => {
-    if (workday?.is_active && workday.can_end_workday) {
+    if (workday?.is_active) {
       setConfirmingEnd(true)
       return
     }
@@ -173,9 +180,14 @@ function DoctorLayout({ children }) {
         end_address: endAddress,
         end_latitude: position.coords.latitude,
         end_longitude: position.coords.longitude,
+        early_end_reason: workday?.can_end_workday
+          ? undefined
+          : earlyEndReason.trim(),
       })
       toast.success(
-        `Workday ended: ${result.completed_visits_count} completed, ${result.pending_visits_count} pending`
+        result.early_end_review_status === "pending"
+          ? `Workday ended and sent for review: ${result.completed_visits_count} completed, ${result.pending_visits_count} pending`
+          : `Workday ended: ${result.completed_visits_count} completed, ${result.pending_visits_count} pending`
       )
       localStorage.removeItem("token")
       localStorage.removeItem("role")
@@ -186,7 +198,7 @@ function DoctorLayout({ children }) {
     } finally {
       setEndingDay(false)
     }
-  }, [captureLocation, navigate])
+  }, [captureLocation, earlyEndReason, navigate, workday])
 
   useEffect(() => {
     if (
@@ -362,7 +374,7 @@ function DoctorLayout({ children }) {
               <FaPlay />
               {startingDay ? "Starting..." : "Start Work Day"}
             </button>
-          ) : workday.is_active && workday.can_end_workday ? (
+          ) : workday.is_active ? (
             <button
               type="button"
               disabled={endingDay}
@@ -370,7 +382,11 @@ function DoctorLayout({ children }) {
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-rose-700 px-4 py-2 text-xs font-bold text-white transition hover:bg-rose-800 disabled:opacity-50"
             >
               <FaStopCircle />
-              {endingDay ? "Ending..." : "End Work Day"}
+              {endingDay
+                ? "Ending..."
+                : workday.can_end_workday
+                  ? "End Work Day"
+                  : "End Early"}
             </button>
           ) : null}
         </div>
@@ -378,14 +394,48 @@ function DoctorLayout({ children }) {
       </main>
       <ConfirmDialog
         open={confirmingEnd}
-        title="Your workday has ended"
-        message="End attendance and log out. Active visits must be punched out first."
-        confirmLabel="End Work Day"
+        title={workday?.can_end_workday ? "End workday?" : "End workday early?"}
+        message={
+          workday?.can_end_workday
+            ? "End attendance and log out. Active visits must be punched out first."
+            : `The standard end time is ${workday?.workday_end_time || "18:00"}. Enter a reason for the audit record. Active visits still must be punched out first.`
+        }
+        confirmLabel={workday?.can_end_workday ? "End Work Day" : "End Early"}
         destructive
         busy={endingDay}
-        onClose={() => setConfirmingEnd(false)}
+        confirmDisabled={
+          !workday?.can_end_workday && earlyEndReason.trim().length < 5
+        }
+        onClose={() => {
+          setConfirmingEnd(false)
+          setEarlyEndReason("")
+        }}
         onConfirm={handleEndDay}
-      />
+      >
+        {!workday?.can_end_workday && (
+          <div className="mt-4">
+            <label
+              htmlFor="doctor-early-end-reason"
+              className="mb-1.5 block text-sm font-semibold text-slate-700"
+            >
+              Early closure reason
+            </label>
+            <textarea
+              id="doctor-early-end-reason"
+              value={earlyEndReason}
+              onChange={(event) => setEarlyEndReason(event.target.value)}
+              maxLength={500}
+              rows={3}
+              autoFocus
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="For example: no further assigned visits"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Minimum 5 characters; saved with attendance.
+            </p>
+          </div>
+        )}
+      </ConfirmDialog>
     </div>
   )
 }

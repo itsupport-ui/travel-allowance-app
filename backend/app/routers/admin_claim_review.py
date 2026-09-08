@@ -12,6 +12,7 @@ from app.models.travel import TravelEntry
 from app.models.user import User
 from app.schemas.admin_claim_review import AdminClaimReviewResponse
 from app.utils.auth import require_permission
+from app.utils.timezone import india_now
 
 router = APIRouter(
     prefix="/admin-claims",
@@ -264,7 +265,7 @@ def get_admin_claim_review(
             func.coalesce(
                 func.sum(
                     case(
-                        (Claim.claim_date == date.today(), 1),
+                        (Claim.claim_date == india_now().date(), 1),
                         else_=0,
                     )
                 ),
@@ -303,7 +304,7 @@ def get_admin_claim_review(
         .one()
     )
 
-    today = date.today()
+    today = india_now().date()
     items = []
     for row in rows:
         claim = row[0]

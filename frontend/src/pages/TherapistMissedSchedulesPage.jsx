@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react"
-import toast from "react-hot-toast"
+import { Fragment, useEffect, useState } from "react"
 import { 
   FaUserMd, 
   FaCalendarAlt, 
@@ -11,29 +10,36 @@ import {
 } from "react-icons/fa"
 
 import TherapistLayout from "../layouts/TherapistLayout"
+import PageState from "../components/ui/PageState"
 import { getMissedSchedules } from "../services/scheduleService"
 import { exportSchedulePdf } from "../utils/pdfExport"
 
-function TherapistMissedSchedulesPage() {
+function TherapistMissedSchedulesPage({ embedded = false }) {
   const [schedules, setSchedules] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const PageLayout = embedded ? Fragment : TherapistLayout
 
-  useEffect(() => {
-    fetchSchedules()
-  }, [])
-
-  const fetchSchedules = async () => {
+  async function fetchSchedules() {
+    setLoading(true)
+    setError("")
     try {
       const token = localStorage.getItem("token")
       const data = await getMissedSchedules(token)
       setSchedules(data)
     } catch (error) {
       console.error(error)
-      toast.error("Failed to load missed schedules")
+      setError(error.message || "Failed to load missed schedules")
     } finally {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    // Initial API hydration; state changes occur after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchSchedules()
+  }, [])
 
   const getPriorityBadge = (priority) => {
     const baseClass = "px-2.5 py-0.5 rounded-lg text-[10px] font-bold inline-block uppercase tracking-wider border"
@@ -51,22 +57,32 @@ function TherapistMissedSchedulesPage() {
 
   if (loading) {
     return (
-      <TherapistLayout>
+      <PageLayout>
         <div className="w-full max-w-3xl mx-auto px-1 sm:px-4 py-2 space-y-4 animate-pulse">
           <div className="h-12 bg-slate-200 rounded-xl w-1/3 mb-6"></div>
           <div className="h-44 bg-slate-200 rounded-2xl w-full"></div>
           <div className="h-44 bg-slate-200 rounded-2xl w-full"></div>
         </div>
-      </TherapistLayout>
+      </PageLayout>
+    )
+  }
+
+  if (error) {
+    return (
+      <PageLayout>
+        <div className="mx-auto w-full max-w-3xl px-1 py-2 sm:px-4">
+          <PageState error={error} onRetry={fetchSchedules} />
+        </div>
+      </PageLayout>
     )
   }
 
   return (
-    <TherapistLayout>
+    <PageLayout>
       <div className="w-full max-w-3xl mx-auto px-1 sm:px-4 py-2">
 
         {/* Page Header Area */}
-        <div className="mb-6">
+        {!embedded && <div className="mb-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight">
@@ -87,7 +103,7 @@ function TherapistMissedSchedulesPage() {
               Download PDF
             </button>
           </div>
-        </div>
+        </div>}
 
         {/* Workspace Display Layer */}
         {schedules.length === 0 ? (
@@ -197,7 +213,7 @@ function TherapistMissedSchedulesPage() {
           </div>
         )}
       </div>
-    </TherapistLayout>
+    </PageLayout>
   )
 }
 

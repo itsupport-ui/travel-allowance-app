@@ -4,7 +4,6 @@ import toast from "react-hot-toast"
 import AdminLayout from "../layouts/AdminLayout"
 import PageState from "../components/ui/PageState"
 import { getAdminSummary } from "../services/adminDashboardService"
-import { getDashboardSummary } from "../services/scheduleService"
 
 const toneClasses = {
   blue: "border-blue-200 bg-blue-50 text-blue-800",
@@ -17,7 +16,6 @@ const toneClasses = {
 
 function AdminDashboard() {
   const [summary, setSummary] = useState(null)
-  const [dashboard, setDashboard] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
@@ -26,12 +24,8 @@ function AdminDashboard() {
     setError("")
     try {
       const token = localStorage.getItem("token")
-      const [adminSummary, scheduleSummary] = await Promise.all([
-        getAdminSummary(token),
-        getDashboardSummary(token),
-      ])
+      const adminSummary = await getAdminSummary(token)
       setSummary(adminSummary)
-      setDashboard(scheduleSummary)
     } catch {
       setError("Failed to load dashboard metrics")
       toast.error("Failed to load dashboard metrics")
@@ -49,55 +43,55 @@ function AdminDashboard() {
   const metrics = useMemo(
     () => [
       {
-        label: "Today's schedules",
-        value: dashboard?.today_scheduled || 0,
+        label: "Scheduled today",
+        value: summary?.todays_schedules || 0,
         route: "/admin/schedules?view=today",
         tone: "blue",
       },
       {
-        label: "Completed treatments",
-        value: dashboard?.completed || 0,
+        label: "Completed today",
+        value: summary?.completed_treatments || 0,
         route: "/admin/schedules?view=completed",
         tone: "green",
       },
       {
         label: "Missed schedules",
-        value: dashboard?.missed || 0,
+        value: summary?.missed_clinical_activities || 0,
         route: "/admin/schedule/missed",
         tone: "rose",
       },
       {
-        label: "Cancelled",
-        value: dashboard?.cancelled || 0,
-        route: "/admin/schedules?view=cancelled",
+        label: "Open follow-ups",
+        value: summary?.open_follow_ups || 0,
+        route: "/admin/follow-ups",
         tone: "slate",
       },
       {
         label: "Pending claims",
         value: summary?.pending_claims || 0,
-        route: "/admin/claims?status=pending",
+        route: "/admin/reports",
         tone: "amber",
       },
       {
         label: "Approved claims",
         value: summary?.approved_claims || 0,
-        route: "/admin/claims?status=approved",
+        route: "/admin/reports",
         tone: "green",
       },
       {
-        label: "Active therapists",
-        value: summary?.total_therapists || 0,
+        label: "Active clinical staff",
+        value: summary?.total_clinical_staff || 0,
         route: "/admin/staff",
         tone: "blue",
       },
       {
         label: "Today's claims",
         value: summary?.todays_claims || 0,
-        route: "/admin/claims",
+        route: "/admin/reports",
         tone: "violet",
       },
     ],
-    [dashboard, summary],
+    [summary],
   )
 
   return (

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 from math import ceil
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, func, or_
@@ -18,7 +19,12 @@ from app.schemas.admin_schedule import (
 )
 from app.schemas.treatment_schedule import TreatmentScheduleResponse
 from app.services.schedule_conflict_service import find_schedule_conflicts
+from app.services.schedule_action_service import (
+    apply_schedule_action_metadata,
+    schedule_action_metadata,
+)
 from app.utils.auth import require_role
+from app.utils.timezone import india_now
 from app.utils.workflow_transitions import (
     TREATMENT_SCHEDULE_STATUS_TRANSITIONS,
     validate_status_transition,
@@ -130,8 +136,9 @@ def review_schedules(
             detail="From date cannot be after to date.",
         )
 
-    today = date.today()
-    now_time = datetime.now().time()
+    now = india_now()
+    today = now.date()
+    now_time = now.time().replace(tzinfo=None)
     tomorrow = today + timedelta(days=1)
     today_condition = _occurs_on(TreatmentSchedule, today)
     upcoming_condition = (
@@ -341,6 +348,7 @@ def review_schedules(
                 "clinical_notes": schedule.clinical_notes,
                 "precautions": schedule.precautions,
                 "has_conflict": schedule.id in conflict_ids,
+                **schedule_action_metadata(schedule, role="admin"),
             }
         )
 
@@ -369,7 +377,7 @@ def get_form_options(
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_role(["admin"])),
 ):
-    today = date.today()
+    today = india_now().date()
     today_counts = (
         db.query(
             TreatmentSchedule.therapist_id.label("therapist_id"),
@@ -469,6 +477,7 @@ def get_therapist_availability(
     treatment_date: date | None = Query(default=None),
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
+    cadence_days: int = Query(default=1, ge=1, le=31),
     start_time: time = Query(),
     expected_end_time: time = Query(),
     exclude_schedule_id: int | None = Query(default=None, ge=1),
@@ -481,17 +490,32 @@ def get_therapist_availability(
             detail="Expected end time must be after the start time.",
         )
     try:
-        conflicts = find_schedule_conflicts(
-            db,
-            therapist_id=therapist_id,
-            schedule_type=schedule_type,
-            treatment_date=treatment_date,
-            start_date=start_date,
-            end_date=end_date,
-            in_time=start_time,
-            out_time=expected_end_time,
-            exclude_schedule_id=exclude_schedule_id,
-        )
+        requested_dates: list[date] = []
+        if schedule_type == "one_time" and treatment_date is not None:
+            requested_dates = [treatment_date]
+        elif schedule_type == "recurring" and start_date and end_date:
+            current = start_date
+            while current <= end_date:
+                requested_dates.append(current)
+                current += timedelta(days=cadence_days)
+        else:
+            raise ValueError("Valid schedule dates are required.")
+
+        conflicts_by_id = {}
+        for requested_date in requested_dates:
+            for conflict in find_schedule_conflicts(
+                db,
+                therapist_id=therapist_id,
+                schedule_type="one_time",
+                treatment_date=requested_date,
+                start_date=None,
+                end_date=None,
+                in_time=start_time,
+                out_time=expected_end_time,
+                exclude_schedule_id=exclude_schedule_id,
+            ):
+                conflicts_by_id[conflict.id] = conflict
+        conflicts = list(conflicts_by_id.values())
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -500,7 +524,7 @@ def get_therapist_availability(
         .filter(
             TreatmentSchedule.therapist_id == therapist_id,
             TreatmentSchedule.status == "scheduled",
-            _occurs_on(TreatmentSchedule, date.today()),
+            _occurs_on(TreatmentSchedule, india_now().date()),
         )
         .scalar()
         or 0
@@ -530,6 +554,7 @@ def get_therapist_availability(
 )
 def cancel_schedule(
     schedule_id: int,
+    scope: Literal["this", "future", "series"] = Query(default="this"),
     db: Session = Depends(get_db),
     _current_user: User = Depends(require_role(["admin"])),
 ):
@@ -547,7 +572,22 @@ def cancel_schedule(
         next_status="cancelled",
         transitions=TREATMENT_SCHEDULE_STATUS_TRANSITIONS,
     )
-    schedule.status = "cancelled"
+    affected = [schedule]
+    if schedule.series_id is not None and scope != "this":
+        affected_query = db.query(TreatmentSchedule).filter(
+            TreatmentSchedule.series_id == schedule.series_id,
+            TreatmentSchedule.status == "scheduled",
+            TreatmentSchedule.session_status == "NOT_STARTED",
+        )
+        if scope == "future":
+            affected_query = affected_query.filter(
+                TreatmentSchedule.occurrence_date
+                >= schedule.occurrence_date
+            )
+        affected = affected_query.with_for_update().all()
+    for occurrence in affected:
+        occurrence.status = "cancelled"
+    schedule.generated_occurrences = len(affected)
     db.commit()
     db.refresh(schedule)
     schedule.doctor_name = (
@@ -556,4 +596,4 @@ def cancel_schedule(
     schedule.therapist_name = (
         schedule.therapist.username if schedule.therapist else None
     )
-    return schedule
+    return apply_schedule_action_metadata(schedule, role="admin")

@@ -7,6 +7,8 @@ import {
   type AuthUser,
   type UserRole,
 } from "../types/auth";
+import { clearAllFormDrafts } from "./formDraftStorage";
+import { clearAllOfflineMutations } from "./offlineMutationStorage";
 
 const ACCESS_TOKEN_KEY = "access_token";
 const USER_INFO_KEY = "auth_user";
@@ -131,11 +133,15 @@ export const getStoredUser = async (): Promise<AuthUser | null> => {
 };
 
 export const clearAuthSession = async (): Promise<void> => {
-  await AsyncStorage.multiRemove([
-    ACCESS_TOKEN_KEY,
-    USER_INFO_KEY,
-    USER_ROLE_KEY,
-    WORKDAY_STATE_KEY,
+  await Promise.all([
+    AsyncStorage.multiRemove([
+      ACCESS_TOKEN_KEY,
+      USER_INFO_KEY,
+      USER_ROLE_KEY,
+      WORKDAY_STATE_KEY,
+    ]),
+    clearAllFormDrafts(),
+    clearAllOfflineMutations(),
   ]);
 
   try {

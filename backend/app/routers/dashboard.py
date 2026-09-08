@@ -28,6 +28,7 @@ from app.models.travel import (
 from app.models.treatment_schedule import (
     TreatmentSchedule
 )
+from app.utils.timezone import india_now
 
 from app.models.claim import (
     Claim
@@ -66,7 +67,7 @@ def get_dashboard_summary(
         get_current_user
     )
 ):
-    today = date.today()
+    today = india_now().date()
 
     today_trips = (
 

@@ -5,6 +5,7 @@ import type {
 } from "./schedule";
 
 export interface ScheduleFormState {
+  cadenceDays: number;
   doctorId: number | null;
   endDate: Date | null;
   estimatedDurationMinutes: number;
@@ -28,6 +29,7 @@ export interface ScheduleFormState {
 }
 
 export type ScheduleFormField =
+  | "cadenceDays"
   | "doctorId"
   | "endDate"
   | "inTime"

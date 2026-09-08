@@ -35,6 +35,7 @@ export interface CreateScheduleRequest {
   treatment_date?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  cadence_days?: number;
   in_time: string;
   out_time: string;
   instructions?: string;
@@ -67,6 +68,9 @@ export interface UpdateScheduleRequest {
 
 export interface ScheduleResponse {
   id: number;
+  series_id: number | null;
+  occurrence_date: string | null;
+  generated_occurrences: number | null;
   patient_name: string;
   patient_reference_id: string | null;
   patient_phone: string | null;
@@ -104,6 +108,9 @@ export interface ScheduleResponse {
   treatment_duration: number | null;
   session_status: TreatmentSessionStatus;
   arrival_warning: string | null;
+  available_actions: string[];
+  blocking_reasons: string[];
+  next_action: string | null;
 }
 
 export type Schedule = ScheduleResponse;
@@ -131,12 +138,20 @@ export interface TreatmentSession {
   can_punch_in: boolean;
   can_punch_out: boolean;
   eligibility_message: string | null;
+  location_exception_id: number | null;
+  location_exception_status: string | null;
+  can_request_location_exception: boolean;
+  location_policy_version: number | null;
+  geofence_radius_m: number | null;
+  gps_accuracy_threshold_m: number | null;
 }
 
 export interface CompleteTreatmentRequest {
   completion_notes: string;
   arrival_latitude: number;
   arrival_longitude: number;
+  gps_accuracy_m?: number | null;
+  location_exception_id?: number | null;
   transport_mode: ScheduleTransportMode;
   bill_amount?: number | null;
   invoice_file?: {

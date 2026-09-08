@@ -78,6 +78,16 @@ export const rejectTreatmentPlan = async (
 }
 
 
+export const resubmitTreatmentPlan = async (planId, payload, token) => {
+  const response = await api.put(
+    `/treatment-plans/${planId}/resubmit`,
+    payload,
+    authConfig(token)
+  )
+  return response.data
+}
+
+
 export const createScheduleFromTreatmentPlan = async (
   planId,
   payload,

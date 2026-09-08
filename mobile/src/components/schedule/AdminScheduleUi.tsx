@@ -382,7 +382,8 @@ export const AdminScheduleCard = memo(function AdminScheduleCard({
   onReschedule,
   onView,
 }: ScheduleCardProps) {
-  const editable = item.status === "scheduled";
+  const canEdit = item.availableActions.includes("edit");
+  const canCancel = item.availableActions.includes("cancel");
   return (
     <View
       accessible
@@ -490,7 +491,7 @@ export const AdminScheduleCard = memo(function AdminScheduleCard({
           label="View"
           onPress={() => onView(item)}
         />
-        {editable ? (
+        {canEdit ? (
           <>
             <ActionButton
               icon="create-outline"
@@ -502,19 +503,21 @@ export const AdminScheduleCard = memo(function AdminScheduleCard({
               label="Reschedule"
               onPress={() => onReschedule(item)}
             />
-            {actionId === item.id ? (
-              <View style={styles.actionLoading}>
-                <ActivityIndicator color={colors.danger} size="small" />
-              </View>
-            ) : (
-              <ActionButton
-                destructive
-                icon="close-circle-outline"
-                label="Cancel"
-                onPress={() => onCancel(item)}
-              />
-            )}
           </>
+        ) : null}
+        {canCancel ? (
+          actionId === item.id ? (
+            <View style={styles.actionLoading}>
+              <ActivityIndicator color={colors.danger} size="small" />
+            </View>
+          ) : (
+            <ActionButton
+              destructive
+              icon="close-circle-outline"
+              label="Cancel"
+              onPress={() => onCancel(item)}
+            />
+          )
         ) : null}
       </View>
     </View>

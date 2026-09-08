@@ -28,7 +28,7 @@ TREATMENT_PLAN_STATUS_TRANSITIONS: dict[str, set[str]] = {
     "pending": {"submitted"},
     "submitted": {"approved", "rejected"},
     "approved": set(),
-    "rejected": set(),
+    "rejected": {"submitted"},
 }
 
 TREATMENT_SCHEDULE_STATUS_TRANSITIONS: dict[str, set[str]] = {

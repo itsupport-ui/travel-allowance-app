@@ -15,9 +15,10 @@ from app.database import get_db
 from app.models.user import User
 from app.models.doctor import Doctor
 from app.models.treatment_schedule import TreatmentSchedule
+from app.models.treatment_schedule_series import TreatmentScheduleSeries
 from app.schemas.treatment_schedule import TreatmentScheduleCreate, TreatmentScheduleResponse, MissedTreatmentRequest, TreatmentScheduleUpdate
 from app.utils.auth import require_permission, require_role
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from sqlalchemy import and_, or_, func
 # import get_current_user
 from app.utils.auth import get_current_user
@@ -36,6 +37,11 @@ from app.services.push_notification_service import (
     notify_schedule_updated,
 )
 from app.services.schedule_conflict_service import find_schedule_conflicts
+from app.services.schedule_action_service import (
+    apply_schedule_action_metadata,
+    apply_schedule_list_action_metadata,
+)
+from app.services.domain_audit_service import record_domain_audit_event
 from app.utils.workflow_transitions import (
     TREATMENT_SCHEDULE_STATUS_TRANSITIONS,
     validate_status_transition,
@@ -49,6 +55,64 @@ router = APIRouter(
 )
 
 logger = logging.getLogger(__name__)
+
+MAX_SERIES_OCCURRENCES = 366
+
+
+def _requested_occurrence_dates(
+    schedule: TreatmentScheduleCreate,
+) -> list[date]:
+    if schedule.schedule_type == "one_time":
+        return [schedule.treatment_date] if schedule.treatment_date else []
+    if schedule.start_date is None or schedule.end_date is None:
+        return []
+    dates: list[date] = []
+    current = schedule.start_date
+    while current <= schedule.end_date:
+        dates.append(current)
+        if len(dates) > MAX_SERIES_OCCURRENCES:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"A recurring series can contain at most "
+                    f"{MAX_SERIES_OCCURRENCES} occurrences."
+                ),
+            )
+        current += timedelta(days=schedule.cadence_days)
+    return dates
+
+
+def _new_occurrence(
+    payload: TreatmentScheduleCreate,
+    *,
+    patient_latitude: float,
+    patient_longitude: float,
+    occurrence_date: date,
+    series_id: int | None,
+) -> TreatmentSchedule:
+    return TreatmentSchedule(
+        patient_name=payload.patient_name,
+        patient_reference_id=payload.patient_reference_id,
+        patient_phone=payload.patient_phone,
+        doctor_id=payload.doctor_id,
+        therapist_id=payload.therapist_id,
+        treatment_name=payload.treatment_name,
+        visit_type=payload.visit_type,
+        medicines=payload.medicines,
+        patient_address=payload.patient_address,
+        patient_latitude=patient_latitude,
+        patient_longitude=patient_longitude,
+        schedule_type="one_time",
+        treatment_date=occurrence_date,
+        occurrence_date=occurrence_date,
+        series_id=series_id,
+        in_time=payload.in_time,
+        out_time=payload.out_time,
+        instructions=payload.instructions,
+        clinical_notes=payload.clinical_notes,
+        precautions=payload.precautions,
+        priority=payload.priority,
+    )
 
 
 def _is_travel_schedule_unique_violation(error: IntegrityError) -> bool:
@@ -88,7 +152,8 @@ def create_schedule(
         .filter(
             Doctor.id
             ==
-            treatment_schedule.doctor_id
+            treatment_schedule.doctor_id,
+            Doctor.active.is_(True),
         )
         .first()
     )
@@ -110,7 +175,9 @@ def create_schedule(
 
             User.role
             ==
-            "therapist"
+            "therapist",
+
+            User.is_active.is_(True),
         )
         .first()
     )
@@ -156,6 +223,11 @@ def create_schedule(
                 detail=
                 "Start and end date required"
             )
+        if treatment_schedule.end_date < treatment_schedule.start_date:
+            raise HTTPException(
+                status_code=400,
+                detail="End date cannot be before start date",
+            )
 
     else:
         raise HTTPException(
@@ -170,24 +242,26 @@ def create_schedule(
             detail="Expected end time must be after the start time.",
         )
 
-    conflicts = find_schedule_conflicts(
-        db,
-        therapist_id=treatment_schedule.therapist_id,
-        schedule_type=treatment_schedule.schedule_type,
-        treatment_date=treatment_schedule.treatment_date,
-        start_date=treatment_schedule.start_date,
-        end_date=treatment_schedule.end_date,
-        in_time=treatment_schedule.in_time,
-        out_time=treatment_schedule.out_time,
-    )
-    if conflicts:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "The selected therapist already has an overlapping "
-                "appointment during this time."
-            ),
+    occurrence_dates = _requested_occurrence_dates(treatment_schedule)
+    for occurrence_date in occurrence_dates:
+        conflicts = find_schedule_conflicts(
+            db,
+            therapist_id=treatment_schedule.therapist_id,
+            schedule_type="one_time",
+            treatment_date=occurrence_date,
+            start_date=None,
+            end_date=None,
+            in_time=treatment_schedule.in_time,
+            out_time=treatment_schedule.out_time,
         )
+        if conflicts:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The selected therapist has an overlapping appointment "
+                    f"on {occurrence_date.isoformat()}."
+                ),
+            )
 
     try:
         patient_latitude, patient_longitude = resolve_patient_coordinates(
@@ -254,7 +328,32 @@ def create_schedule(
             treatment_schedule.priority
         )
 
-        db.add(schedule)
+        if treatment_schedule.schedule_type == "recurring":
+            series = TreatmentScheduleSeries(
+                start_date=treatment_schedule.start_date,
+                end_date=treatment_schedule.end_date,
+                cadence_days=treatment_schedule.cadence_days,
+                created_by=current_user.id,
+            )
+            db.add(series)
+            db.flush()
+            occurrences = [
+                _new_occurrence(
+                    treatment_schedule,
+                    patient_latitude=patient_latitude,
+                    patient_longitude=patient_longitude,
+                    occurrence_date=occurrence_date,
+                    series_id=series.id,
+                )
+                for occurrence_date in occurrence_dates
+            ]
+            db.add_all(occurrences)
+            db.flush()
+            schedule = occurrences[0]
+            schedule.generated_occurrences = len(occurrences)
+        else:
+            schedule.occurrence_date = schedule.treatment_date
+            db.add(schedule)
         db.commit()
     except ValueError as error:
         db.rollback()
@@ -279,7 +378,7 @@ def create_schedule(
     schedule.doctor_name = doctor.name
     schedule.therapist_name = therapist.username
 
-    return schedule
+    return apply_schedule_action_metadata(schedule, role="admin")
 
 @router.get(
     "/all",
@@ -306,7 +405,7 @@ def get_all_schedules(
         .all()
     )
 
-    return schedules
+    return apply_schedule_list_action_metadata(schedules, role="admin")
 
 
 @router.get(
@@ -327,7 +426,7 @@ def get_my_today_schedule(
         )
     )
 ):
-    today = date.today()
+    today = india_now().date()
 
     schedules = (
         db.query(
@@ -386,7 +485,7 @@ def get_my_today_schedule(
         schedule.doctor_name = schedule.doctor.name if schedule.doctor else None
         schedule.therapist_name = schedule.therapist.username if schedule.therapist else None
 
-    return schedules
+    return apply_schedule_list_action_metadata(schedules, role="therapist")
 
 
 @router.get("/my-upcoming",response_model=list[ TreatmentScheduleResponse ])   
@@ -399,7 +498,7 @@ def get_my_upcoming_schedule (db: Session = Depends(get_db),
             )
         )
     ):
-        today = date.today()
+        today = india_now().date()
 
         schedules = (
             db.query(
@@ -449,7 +548,9 @@ def get_my_upcoming_schedule (db: Session = Depends(get_db),
             .all()
         )
 
-        return schedules
+        return apply_schedule_list_action_metadata(
+            schedules, role="therapist"
+        )
 
 @router.put("/{schedule_id}/complete", response_model=TreatmentScheduleResponse)
 def complete_treatment(
@@ -519,10 +620,14 @@ def complete_treatment(
             transport_mode=selected_transport_mode,
             bill_amount=bill_amount,
             invoice_file=invoice_file,
+            skip_location_validation=bool(
+                getattr(schedule, "location_exception_approved", False)
+            ),
         )
+        prior_status = schedule.status
         schedule.status = "completed"
         schedule.completion_notes = completion_notes
-        schedule.completed_at = datetime.now()
+        schedule.completed_at = india_now().replace(tzinfo=None)
         if (
             schedule.punch_in_time is not None
             and schedule.punch_out_time is None
@@ -547,6 +652,31 @@ def complete_treatment(
             schedule.therapist.username if schedule.therapist else None
         )
         schedule.arrival_warning = None
+
+        record_domain_audit_event(
+            db,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            domain="clinical",
+            entity_type="treatment_schedule",
+            entity_id=schedule.id,
+            action="completed",
+            business_date=(
+                schedule.occurrence_date
+                or schedule.treatment_date
+                or india_now().date()
+            ),
+            from_state=prior_status,
+            to_state="completed",
+            related_entity_type="therapist",
+            related_entity_id=current_user.id,
+            details={
+                "duration_seconds": int(schedule.treatment_duration or 0),
+                "travel_entry_id": (
+                    travel_entry.id if travel_entry is not None else None
+                ),
+            },
+        )
 
         db.commit()
     except HTTPException:
@@ -598,7 +728,7 @@ def complete_treatment(
             detail="Unable to complete the treatment.",
         ) from error
 
-    return schedule
+    return apply_schedule_action_metadata(schedule, role="therapist")
 
 
 @router.put(
@@ -658,6 +788,7 @@ def mark_treatment_missed(
         transitions=TREATMENT_SCHEDULE_STATUS_TRANSITIONS,
     )
 
+    prior_status = schedule.status
     schedule.status = (
         "missed"
     )
@@ -667,13 +798,34 @@ def mark_treatment_missed(
         .missed_reason
     )
 
+    record_domain_audit_event(
+        db,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        domain="clinical",
+        entity_type="treatment_schedule",
+        entity_id=schedule.id,
+        action="missed",
+        business_date=(
+            schedule.occurrence_date
+            or schedule.treatment_date
+            or india_now().date()
+        ),
+        from_state=prior_status,
+        to_state="missed",
+        reason_code="therapist_marked_missed",
+        reason=payload.missed_reason,
+        related_entity_type="therapist",
+        related_entity_id=current_user.id,
+    )
+
     db.commit()
 
     db.refresh(
         schedule
     )
 
-    return schedule
+    return apply_schedule_action_metadata(schedule, role="therapist")
 
 @router.get("/completed", response_model=list[TreatmentScheduleResponse])
 def get_completed_schedules(
@@ -710,7 +862,9 @@ def get_completed_schedules(
         schedule.doctor_name = schedule.doctor.name if schedule.doctor else None
         schedule.therapist_name = schedule.therapist.username if schedule.therapist else None
 
-    return schedules
+    return apply_schedule_list_action_metadata(
+        schedules, role=current_user.role
+    )
 
 
 @router.get(
@@ -752,7 +906,9 @@ def get_pending_schedules(
         schedule.doctor_name = schedule.doctor.name if schedule.doctor else None
         schedule.therapist_name = schedule.therapist.username if schedule.therapist else None
 
-    return schedules
+    return apply_schedule_list_action_metadata(
+        schedules, role=current_user.role
+    )
 
 @router.get("/missed",response_model=list[TreatmentScheduleResponse])
 def get_missed_schedules(
@@ -784,7 +940,9 @@ def get_missed_schedules(
         schedule.doctor_name = schedule.doctor.name if schedule.doctor else None
         schedule.therapist_name = schedule.therapist.username if schedule.therapist else None
 
-    return schedules    
+    return apply_schedule_list_action_metadata(
+        schedules, role=current_user.role
+    )
 
 
     @router.put(
@@ -831,8 +989,28 @@ def get_missed_schedules(
             transitions=TREATMENT_SCHEDULE_STATUS_TRANSITIONS,
         )
 
+        prior_status = schedule.status
         schedule.status = (
             "cancelled"
+        )
+
+        record_domain_audit_event(
+            db,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            domain="scheduling",
+            entity_type="treatment_schedule",
+            entity_id=schedule.id,
+            action="cancelled",
+            business_date=(
+                schedule.occurrence_date
+                or schedule.treatment_date
+                or india_now().date()
+            ),
+            from_state=prior_status,
+            to_state="cancelled",
+            related_entity_type="therapist",
+            related_entity_id=schedule.therapist_id,
         )
 
         db.commit()
@@ -841,7 +1019,7 @@ def get_missed_schedules(
             schedule
         )
 
-        return schedule
+        return apply_schedule_action_metadata(schedule, role="admin")
 
 
 @router.get(
@@ -858,7 +1036,7 @@ def dashboard_summary(
         )
     )
 ):
-    today = date.today()
+    today = india_now().date()
 
     total_scheduled = (
         db.query(
@@ -969,7 +1147,7 @@ def get_today_schedules(
         )
     )
 ):
-    today = date.today()
+    today = india_now().date()
 
     schedules = (
         db.query(
@@ -1025,7 +1203,7 @@ def get_today_schedules(
         schedule.doctor_name = schedule.doctor.name if schedule.doctor else None
         schedule.therapist_name = schedule.therapist.username if schedule.therapist else None
 
-    return schedules
+    return apply_schedule_list_action_metadata(schedules, role="admin")
 
 
 @router.get(
@@ -1042,7 +1220,7 @@ def therapist_dashboard(
         )
     )
 ):
-    today = date.today()
+    today = india_now().date()
 
     # Today's scheduled
     today_scheduled = (
@@ -1257,7 +1435,9 @@ def get_schedule_details(
     schedule.doctor_name = schedule.doctor.name if schedule.doctor else None
     schedule.therapist_name = schedule.therapist.username if schedule.therapist else None
         
-    return schedule
+    return apply_schedule_action_metadata(
+        schedule, role=current_user.role
+    )
 
 
 @router.put(
@@ -1302,6 +1482,16 @@ def update_schedule(
             "Schedule not found"
         )
 
+    if schedule.status != "scheduled" or schedule.session_status != "NOT_STARTED":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Only a not-started scheduled appointment can be edited. "
+                "Completed, missed, cancelled, or active appointments require "
+                "an audited amendment."
+            ),
+        )
+
     previous_therapist_id = schedule.therapist_id
 
     # Validate doctor
@@ -1310,7 +1500,8 @@ def update_schedule(
         .filter(
             Doctor.id
             ==
-            payload.doctor_id
+            payload.doctor_id,
+            Doctor.active.is_(True),
         )
         .first()
     )
@@ -1332,7 +1523,9 @@ def update_schedule(
 
             User.role
             ==
-            "therapist"
+            "therapist",
+
+            User.is_active.is_(True),
         )
         .first()
     )
@@ -1539,7 +1732,7 @@ def update_schedule(
     schedule.doctor_name = doctor.name
     schedule.therapist_name = therapist.username
 
-    return schedule
+    return apply_schedule_action_metadata(schedule, role="admin")
 
 
 

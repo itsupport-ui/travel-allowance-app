@@ -9,6 +9,7 @@ import type {
   UpdateScheduleRequest,
 } from "../types/schedule";
 import { getToken } from "../utils/storage";
+import { executeOrQueueMutation } from "./offlineMutationQueue";
 
 interface ApiErrorBody {
   detail?: unknown;
@@ -267,7 +268,12 @@ export const completeTreatment = async (
 
 export const getTreatmentSession = async (
   scheduleId: number,
-  coordinates?: { latitude: number; longitude: number }
+  coordinates?: {
+    latitude: number;
+    longitude: number;
+    gps_accuracy_m?: number;
+    device_timestamp?: string;
+  }
 ): Promise<TreatmentSession> =>
   executeRequest(
     async () =>
@@ -287,30 +293,61 @@ export const punchInTreatment = async (
     latitude: number;
     longitude: number;
     device_timestamp: string;
+    gps_accuracy_m?: number | null;
+    location_exception_id?: number | null;
   }
-): Promise<TreatmentSession> =>
-  executeRequest(
-    async () =>
-      api.post<TreatmentSession>(
+): Promise<TreatmentSession> => {
+  const body = { ...request };
+  return executeOrQueueMutation({
+    body,
+    execute: async (operationId) => {
+      const response = await api.post<TreatmentSession>(
         `/treatment-sessions/${scheduleId}/punch-in`,
-        request,
+        body,
         {
-          headers: await getAuthHeaders(),
+          headers: {
+            ...(await getAuthHeaders()),
+            "X-Idempotency-Key": operationId,
+          },
         }
-      ),
-    "Unable to punch in to this treatment."
-  );
+      );
+      return response.data;
+    },
+    operationType: "therapist_treatment_punch_in",
+    targetId: scheduleId,
+  });
+};
 
 export const punchOutTreatment = async (
   scheduleId: number,
   request: CompleteTreatmentRequest
 ): Promise<ScheduleResponse> => {
+  const deviceTimestamp = new Date().toISOString();
+  const replayBody: Record<string, unknown> = {
+    completion_notes: request.completion_notes,
+    latitude: request.arrival_latitude,
+    longitude: request.arrival_longitude,
+    device_timestamp: deviceTimestamp,
+    transport_mode: request.transport_mode,
+    gps_accuracy_m: request.gps_accuracy_m,
+    location_exception_id: request.location_exception_id,
+    bill_amount: request.bill_amount,
+  };
   const formData = new FormData();
   formData.append("completion_notes", request.completion_notes);
   formData.append("latitude", String(request.arrival_latitude));
   formData.append("longitude", String(request.arrival_longitude));
-  formData.append("device_timestamp", new Date().toISOString());
+  formData.append("device_timestamp", deviceTimestamp);
   formData.append("transport_mode", request.transport_mode);
+  if (request.gps_accuracy_m) {
+    formData.append("gps_accuracy_m", String(request.gps_accuracy_m));
+  }
+  if (request.location_exception_id) {
+    formData.append(
+      "location_exception_id",
+      String(request.location_exception_id)
+    );
+  }
 
   if (
     request.bill_amount !== null &&
@@ -328,17 +365,28 @@ export const punchOutTreatment = async (
     formData.append("invoice_file", nativeFile as unknown as Blob);
   }
 
-  return executeRequest(
-    async () =>
-      api.post<ScheduleResponse>(
-        `/treatment-sessions/${scheduleId}/punch-out`,
-        formData,
-        {
-          headers: await getAuthHeaders(),
-        }
-      ),
-    "Unable to punch out from this treatment."
-  );
+  const execute = async (operationId?: string): Promise<ScheduleResponse> => {
+    const response = await api.post<ScheduleResponse>(
+      `/treatment-sessions/${scheduleId}/punch-out`,
+      formData,
+      {
+        headers: {
+          ...(await getAuthHeaders()),
+          ...(operationId ? { "X-Idempotency-Key": operationId } : {}),
+        },
+      }
+    );
+    return response.data;
+  };
+  if (request.invoice_file) {
+    return execute();
+  }
+  return executeOrQueueMutation({
+    body: replayBody,
+    execute,
+    operationType: "therapist_treatment_punch_out",
+    targetId: scheduleId,
+  });
 };
 
 export const markTreatmentMissed = async (

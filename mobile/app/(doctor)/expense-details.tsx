@@ -21,7 +21,10 @@ import {
   DoctorStatusBadge,
 } from "../../src/components/doctor/DoctorWorkflowUi";
 import { queryKeys } from "../../src/query/queryKeys";
-import { getMyDoctorExpenses } from "../../src/services/doctorWorkflowService";
+import {
+  getManualDoctorExpenseReviewHistory,
+  getMyDoctorExpenses,
+} from "../../src/services/doctorWorkflowService";
 import {
   formatDoctorCurrency,
   formatDoctorDate,
@@ -41,6 +44,11 @@ export default function DoctorExpenseDetailsScreen() {
     () => expensesQuery.data?.find((item) => item.id === expenseId) ?? null,
     [expenseId, expensesQuery.data]
   );
+  const historyQuery = useQuery({
+    enabled: expense?.visit_id === null,
+    queryFn: () => getManualDoctorExpenseReviewHistory(expenseId as number),
+    queryKey: ["doctor", "expenses", expenseId, "review-history"],
+  });
 
   const goBack = () => {
     if (router.canGoBack()) router.back();
@@ -77,7 +85,11 @@ export default function DoctorExpenseDetailsScreen() {
     );
   }
 
-  const canEdit = expense.status === "draft" && expense.claim_id === null;
+  const canEdit =
+    expense.available_actions.includes("edit") ||
+    (expense.visit_id !== null &&
+      expense.status === "draft" &&
+      expense.claim_id === null);
 
   return (
     <SafeAreaView edges={["top"]} style={styles.container}>
@@ -122,7 +134,13 @@ export default function DoctorExpenseDetailsScreen() {
             <Text style={styles.amount}>{formatDoctorCurrency(expense.fare)}</Text>
             <Text style={styles.date}>{formatDoctorDate(expense.expense_date)}</Text>
           </View>
-          <DoctorStatusBadge status={expense.status} />
+          <DoctorStatusBadge
+            status={
+              expense.visit_id === null && expense.manual_review_status
+                ? expense.manual_review_status
+                : expense.status
+            }
+          />
         </View>
 
         <DetailSection icon="navigate-outline" title="Travel">
@@ -164,11 +182,46 @@ export default function DoctorExpenseDetailsScreen() {
             value={expense.proof_file ? "Attached" : "Not attached"}
           />
           <DoctorDetailRow label="Remarks" value={expense.remarks || "No remarks"} />
+          <DoctorDetailRow
+            label="Category"
+            value={formatDoctorLabel(expense.expense_category)}
+          />
+          {expense.visit_id === null ? (
+            <>
+              <DoctorDetailRow label="Manual reason" value={expense.manual_reason || "Not recorded"} />
+              <DoctorDetailRow label="Revision" value={String(expense.manual_revision)} />
+              <DoctorDetailRow
+                label="Review feedback"
+                value={expense.manual_review_reason || "Awaiting review"}
+              />
+            </>
+          ) : null}
         </DetailSection>
 
         <DetailSection icon="time-outline" title="Timeline">
           <DoctorDetailRow label="Travel date" value={formatDoctorDate(expense.expense_date)} />
           <DoctorDetailRow label="Created" value={formatDoctorDate(expense.created_at)} />
+          {expense.visit_id === null ? (
+            historyQuery.isPending ? (
+              <Text style={styles.historyState}>Loading review history...</Text>
+            ) : historyQuery.error ? (
+              <TouchableOpacity accessibilityRole="button" onPress={() => void historyQuery.refetch()}>
+                <Text style={styles.historyError}>Unable to load review history. Tap to retry.</Text>
+              </TouchableOpacity>
+            ) : (
+              (historyQuery.data ?? []).map((event) => (
+                <View key={event.id} style={styles.historyEvent}>
+                  <Text style={styles.historyTitle}>
+                    {formatDoctorLabel(event.event_type)} · Revision {event.revision}
+                  </Text>
+                  <Text style={styles.historyReason}>{event.reason}</Text>
+                  <Text style={styles.historyMeta}>
+                    {event.actor_name ?? `User #${event.actor_id}`} · {formatDoctorDate(event.created_at)}
+                  </Text>
+                </View>
+              ))
+            )
+          ) : null}
         </DetailSection>
       </ScrollView>
     </SafeAreaView>
@@ -239,4 +292,10 @@ const styles = StyleSheet.create({
   sectionHeader: { alignItems: "center", flexDirection: "row", gap: spacing.md, paddingVertical: spacing.sm },
   sectionIcon: { alignItems: "center", backgroundColor: colors.primarySurface, borderRadius: radius.control, height: 36, justifyContent: "center", width: 36 },
   sectionTitle: { color: colors.textPrimary, fontSize: typography.size.body, fontWeight: typography.weight.extrabold },
+  historyState: { color: colors.textMuted, fontSize: typography.size.small, paddingVertical: spacing.lg },
+  historyError: { color: colors.danger, fontSize: typography.size.small, paddingVertical: spacing.lg },
+  historyEvent: { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: spacing.lg },
+  historyTitle: { color: colors.textStrong, fontSize: typography.size.bodySmall, fontWeight: typography.weight.extrabold },
+  historyReason: { color: colors.textMutedDark, fontSize: typography.size.small, lineHeight: typography.lineHeight.smallRelaxed, marginTop: spacing.xs },
+  historyMeta: { color: colors.textSubtle, fontSize: typography.size.tiny, marginTop: spacing.xs },
 });

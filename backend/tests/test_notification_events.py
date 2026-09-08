@@ -16,6 +16,7 @@ from app.models.therapist_workday import TherapistWorkDay
 from app.models.treatment_schedule import TreatmentSchedule
 from app.models.travel import TravelEntry
 from app.models.user import User
+from app.schemas.claim import ClaimRejectRequest
 from app.routers.claims import approve_claim, reject_claim
 from app.routers.treatment_schedule import (
     create_schedule,
@@ -176,6 +177,7 @@ class NotificationEventTests(unittest.TestCase):
         reject_tasks = BackgroundTasks()
         reject_claim(
             rejected_claim.id,
+            ClaimRejectRequest(rejection_reason="Missing receipt"),
             reject_tasks,
             self.db,
             self.admin,

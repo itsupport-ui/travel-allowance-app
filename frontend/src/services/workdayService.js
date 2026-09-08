@@ -48,6 +48,7 @@ export const endWorkDay = async (token, coordinates) => {
         end_latitude: coordinates.latitude,
         end_longitude: coordinates.longitude,
         device_timestamp: new Date().toISOString(),
+        early_end_reason: coordinates.earlyEndReason || null,
       }),
     },
   )

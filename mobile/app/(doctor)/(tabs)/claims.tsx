@@ -28,18 +28,20 @@ import {
   DoctorScreenHeader,
   DoctorStatusBadge,
 } from "../../../src/components/doctor/DoctorWorkflowUi";
+import { MyClaimsReportActions } from "../../../src/components/reports/MyClaimsReportActions";
 import { queryKeys } from "../../../src/query/queryKeys";
 import {
+  getDoctorClaimReadiness,
   getMyDoctorClaims,
   getTodayDoctorExpenses,
   submitDoctorClaim,
 } from "../../../src/services/doctorWorkflowService";
 import { getApiErrorMessage } from "../../../src/services/errorHandler";
+import { isOfflineMutationQueuedError } from "../../../src/services/offlineMutationQueue";
 import {
   formatDoctorCurrency,
   formatDoctorDate,
   formatDoctorLabel,
-  getLocalIsoDate,
 } from "../../../src/utils/doctorWorkflow";
 
 type ClaimsTab = "history" | "today";
@@ -60,6 +62,10 @@ export default function DoctorClaimsScreen() {
   const claimsQuery = useQuery({
     queryFn: getMyDoctorClaims,
     queryKey: queryKeys.doctor.claims.mine,
+  });
+  const readinessQuery = useQuery({
+    queryFn: getDoctorClaimReadiness,
+    queryKey: queryKeys.doctor.claims.readiness,
   });
   const todayExpenses = useMemo(
     () => expensesQuery.data ?? [],
@@ -94,32 +100,18 @@ export default function DoctorClaimsScreen() {
       ].some((value) => value.toLowerCase().includes(normalizedSearch))
     );
   }, [claims, search]);
-  const eligibleExpenses = useMemo(
-    () =>
-      todayExpenses.filter(
-        (expense) =>
-          expense.status === "draft" && expense.claim_id === null
-      ),
-    [todayExpenses]
-  );
-  const eligibleTotal = useMemo(
-    () =>
-      eligibleExpenses.reduce(
-        (total, expense) => total + Number(expense.fare || 0),
-        0
-      ),
-    [eligibleExpenses]
-  );
-  const today = getLocalIsoDate();
-  const todayClaim = claims.find((claim) => claim.claim_date === today);
-  const canSubmit =
-    eligibleExpenses.length > 0 &&
-    (!todayClaim || todayClaim.status === "rejected");
+  const readiness = readinessQuery.data;
+  const todayClaim = readiness?.existing_claim_id
+    ? claims.find((claim) => claim.id === readiness.existing_claim_id)
+    : undefined;
+  const canSubmit = Boolean(readiness?.can_submit);
   const submitMutation = useMutation({
     mutationFn: submitDoctorClaim,
     onError: (error) => {
       Alert.alert(
-        "Unable to Submit Claim",
+        isOfflineMutationQueuedError(error)
+          ? "Saved for Sync"
+          : "Unable to Submit Claim",
         getApiErrorMessage(error, "Unable to submit today’s claim.")
       );
     },
@@ -133,6 +125,9 @@ export default function DoctorClaimsScreen() {
           queryKey: queryKeys.doctor.claims.all,
         }),
         queryClient.invalidateQueries({
+          queryKey: queryKeys.doctor.claims.readiness,
+        }),
+        queryClient.invalidateQueries({
           queryKey: queryKeys.doctor.expenses.all,
         }),
       ]);
@@ -144,22 +139,26 @@ export default function DoctorClaimsScreen() {
     },
   });
   const refresh = async () => {
-    await Promise.all([expensesQuery.refetch(), claimsQuery.refetch()]);
+    await Promise.all([
+      expensesQuery.refetch(),
+      claimsQuery.refetch(),
+      readinessQuery.refetch(),
+    ]);
   };
   const confirmSubmit = () => {
     Alert.alert(
-      todayClaim?.status === "rejected"
+      readiness?.submission_mode === "resubmit"
         ? "Resubmit Claim"
         : "Submit Claim",
-      `Submit ${eligibleExpenses.length} expense${
-        eligibleExpenses.length === 1 ? "" : "s"
-      } totalling ${formatDoctorCurrency(eligibleTotal)} for approval?`,
+      `${readiness?.submission_mode === "resubmit" ? "Resubmit" : "Submit"} ${readiness?.eligible_record_count ?? 0} expense${
+        (readiness?.eligible_record_count ?? 0) === 1 ? "" : "s"
+      } totalling ${formatDoctorCurrency(readiness?.total_amount ?? 0)} for approval?`,
       [
         { style: "cancel", text: "Cancel" },
         {
           onPress: () => submitMutation.mutate(),
           text:
-            todayClaim?.status === "rejected" ? "Resubmit" : "Submit",
+            readiness?.submission_mode === "resubmit" ? "Resubmit" : "Submit",
         },
       ]
     );
@@ -167,19 +166,21 @@ export default function DoctorClaimsScreen() {
 
   if (
     (expensesQuery.isPending && !expensesQuery.data) ||
-    (claimsQuery.isPending && !claimsQuery.data)
+    (claimsQuery.isPending && !claimsQuery.data) ||
+    (readinessQuery.isPending && !readinessQuery.data)
   ) {
     return <DoctorLoadingState label="Loading claims..." />;
   }
 
   if (
     (expensesQuery.error && !expensesQuery.data) ||
-    (claimsQuery.error && !claimsQuery.data)
+    (claimsQuery.error && !claimsQuery.data) ||
+    (readinessQuery.error && !readinessQuery.data)
   ) {
     return (
       <DoctorErrorState
         message={getApiErrorMessage(
-          expensesQuery.error ?? claimsQuery.error,
+          expensesQuery.error ?? claimsQuery.error ?? readinessQuery.error,
           "Unable to load doctor claims."
         )}
         onRetry={() => void refresh()}
@@ -195,7 +196,9 @@ export default function DoctorClaimsScreen() {
         <RefreshControl
           colors={[colors.primary]}
           refreshing={
-            expensesQuery.isRefetching || claimsQuery.isRefetching
+            expensesQuery.isRefetching ||
+            claimsQuery.isRefetching ||
+            readinessQuery.isRefetching
           }
           tintColor={colors.primary}
           onRefresh={() => void refresh()}
@@ -208,18 +211,68 @@ export default function DoctorClaimsScreen() {
         title="Claims"
       />
 
+      <MyClaimsReportActions />
+
+      <TouchableOpacity
+        accessibilityHint="Opens the travel expense report for a month or custom date range"
+        accessibilityLabel="Open travel expense report"
+        accessibilityRole="button"
+        activeOpacity={0.82}
+        onPress={() => router.push("/(doctor)/(tabs)/travel-expense-report")}
+        style={styles.travelReportButton}
+      >
+        <View style={styles.travelReportIcon}>
+          <Ionicons color={colors.primary} name="car-outline" size={20} />
+        </View>
+        <View style={styles.travelReportText}>
+          <Text style={styles.travelReportTitle}>Travel Expense Report</Text>
+          <Text style={styles.travelReportSubtitle}>
+            Preview and export your travel expenses by month or range
+          </Text>
+        </View>
+        <Ionicons color={colors.textSubtle} name="chevron-forward" size={20} />
+      </TouchableOpacity>
+
+      <View style={styles.previewCard}>
+        <View style={styles.previewHeader}>
+          <View style={styles.previewTitleBlock}>
+            <Text style={styles.previewTitle}>Today&apos;s claim preview</Text>
+            <Text style={styles.previewCaption}>
+              Business date {readiness?.business_date}. Eligibility and totals are server-calculated.
+            </Text>
+          </View>
+          {readiness ? <DoctorStatusBadge status={readiness.state} /> : null}
+        </View>
+        {readiness?.rejection_reason && readiness.submission_mode === "resubmit" ? (
+          <View accessibilityRole="alert" style={styles.warningCardNested}>
+            <Text style={styles.warningTitle}>Changes requested</Text>
+            <Text style={styles.warningText}>{readiness.rejection_reason}</Text>
+          </View>
+        ) : null}
+        {readiness?.blocking_reasons.map((blocker) => (
+          <View accessibilityRole="alert" key={blocker.code} style={styles.warningCardNested}>
+            <Text style={styles.warningTitle}>
+              {blocker.affected_count > 0
+                ? `${blocker.affected_count} affected item${blocker.affected_count === 1 ? "" : "s"}`
+                : "Claim not ready"}
+            </Text>
+            <Text style={styles.warningText}>{blocker.message}</Text>
+          </View>
+        ))}
+      </View>
+
       <View style={styles.summaryCard}>
         <View style={styles.summaryItem}>
           <Text style={styles.summaryLabel}>Eligible expenses</Text>
           <Text style={styles.summaryValue}>
-            {eligibleExpenses.length}
+            {readiness?.eligible_record_count ?? 0}
           </Text>
         </View>
         <View style={styles.summaryDivider} />
         <View style={styles.summaryItem}>
           <Text style={styles.summaryLabel}>Eligible total</Text>
           <Text style={styles.summaryAmount}>
-            {formatDoctorCurrency(eligibleTotal)}
+            {formatDoctorCurrency(readiness?.total_amount ?? 0)}
           </Text>
         </View>
       </View>
@@ -237,7 +290,7 @@ export default function DoctorClaimsScreen() {
       ) : null}
 
       {todayClaim?.status === "rejected" &&
-      eligibleExpenses.length > 0 ? (
+      (readiness?.eligible_record_count ?? 0) > 0 ? (
         <View style={styles.warningCard}>
           <Text style={styles.warningText}>
             Today&apos;s rejected claim can be resubmitted with the
@@ -271,7 +324,7 @@ export default function DoctorClaimsScreen() {
         <Text style={styles.submitText}>
           {submitMutation.isPending
             ? "Submitting..."
-            : todayClaim?.status === "rejected"
+            : readiness?.submission_mode === "resubmit"
               ? "Resubmit Claim"
               : "Submit Today’s Claim"}
         </Text>
@@ -331,14 +384,20 @@ export default function DoctorClaimsScreen() {
                   </Text>
                 </View>
                 <Text style={styles.expenseFare}>
-                  {formatDoctorCurrency(expense.fare)}
+                  {formatDoctorCurrency(expense.approved_amount ?? expense.fare)}
                 </Text>
               </View>
               <View style={styles.expenseFooter}>
                 <Text style={styles.expenseMeta}>
-                  {formatDoctorLabel(expense.transport_mode)}
+                  {formatDoctorLabel(expense.transport_mode)} · {formatDoctorLabel(expense.expense_category)}
                 </Text>
-                <DoctorStatusBadge status={expense.status} />
+                <DoctorStatusBadge
+                  status={
+                    expense.visit_id === null && expense.manual_review_status
+                      ? expense.manual_review_status
+                      : expense.status
+                  }
+                />
               </View>
             </DoctorPressableCard>
           ))
@@ -407,6 +466,84 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.xl,
     paddingBottom: spacing.sectionLg,
+  },
+  travelReportButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.borderMuted,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    flexDirection: "row",
+    marginBottom: spacing.lg,
+    minHeight: 64,
+    padding: spacing.lg,
+    elevation: shadows.elevation.card,
+    shadowColor: shadows.color,
+    shadowOffset: shadows.offset.y2,
+    shadowOpacity: shadows.opacity.card,
+    shadowRadius: shadows.radius.card,
+  },
+  travelReportIcon: {
+    alignItems: "center",
+    backgroundColor: colors.primarySurface,
+    borderRadius: radius.control,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
+  travelReportText: {
+    flex: 1,
+    marginHorizontal: spacing.lg,
+  },
+  travelReportTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.bodySmall,
+    fontWeight: typography.weight.extrabold,
+  },
+  travelReportSubtitle: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    marginTop: spacing.xs,
+  },
+  previewCard: {
+    backgroundColor: colors.blueSurface,
+    borderColor: colors.borderMuted,
+    borderRadius: radius.control,
+    borderWidth: 1,
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+    padding: spacing.lg,
+  },
+  previewHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+  },
+  previewTitleBlock: {
+    flex: 1,
+  },
+  previewTitle: {
+    color: colors.textPrimary,
+    fontSize: typography.size.bodyLarge,
+    fontWeight: typography.weight.extrabold,
+  },
+  previewCaption: {
+    color: colors.textMutedDark,
+    fontSize: typography.size.small,
+    lineHeight: typography.lineHeight.smallRelaxed,
+    marginTop: spacing.xs,
+  },
+  warningCardNested: {
+    backgroundColor: colors.warningSurface,
+    borderRadius: radius.sm,
+    padding: spacing.md,
+  },
+  warningTitle: {
+    color: colors.warningDark,
+    fontSize: typography.size.small,
+    fontWeight: typography.weight.extrabold,
+    marginBottom: spacing.xs,
   },
   summaryCard: {
     backgroundColor: colors.surface,

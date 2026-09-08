@@ -9,11 +9,7 @@ function ClaimHistoryPage() {
   const navigate = useNavigate()
   const [claims, setClaims] = useState([])
 
-  useEffect(() => {
-    fetchClaims()
-  }, [])
-
-  const fetchClaims = async () => {
+  async function fetchClaims() {
     try {
       const token = localStorage.getItem("token")
       const data = await getClaimHistory(token)
@@ -22,6 +18,12 @@ function ClaimHistoryPage() {
       toast.error("Failed to load history")
     }
   }
+
+  useEffect(() => {
+    // Initial API hydration; state changes occur after the request settles.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchClaims()
+  }, [])
 
   // FIXED: This now returns actual JSX <span> tags with the classes applied, rather than raw string text
   const getStatusBadge = (status) => {

@@ -18,6 +18,15 @@ export const submitDoctorClaim = async (token) => {
 }
 
 
+export const getDoctorClaimPreview = async (token) => {
+  const response = await api.get(
+    "/doctor-claims/preview",
+    authConfig(token)
+  )
+  return response.data
+}
+
+
 export const getMyDoctorClaims = async (token) => {
   const response = await api.get(
     "/doctor-claims/my",

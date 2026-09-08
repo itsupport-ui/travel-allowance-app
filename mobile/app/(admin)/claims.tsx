@@ -40,7 +40,6 @@ import {
   approveAdminClaim,
   createEmptyAdminClaimFilters,
   getAdminClaimReview,
-  rejectAdminClaim,
 } from "../../src/services/adminClaimService";
 import {
   getTherapists,
@@ -423,8 +422,6 @@ export default function AdminClaimsScreen() {
       try {
         if (action === "approve") {
           await approveAdminClaim(claim.id);
-        } else {
-          await rejectAdminClaim(claim.id);
         }
 
         await loadClaims(filtersRef.current, 1, "action");
@@ -455,6 +452,13 @@ export default function AdminClaimsScreen() {
   const confirmAction = useCallback(
     (claim: AdminClaimReviewItem, action: ClaimAction) => {
       const approving = action === "approve";
+      if (!approving) {
+        router.push({
+          pathname: "/(admin)/claim-details",
+          params: { id: String(claim.id), review: "reject" },
+        });
+        return;
+      }
       Alert.alert(
         approving ? "Approve Claim?" : "Reject Claim?",
         `${approving ? "Approve" : "Reject"} claim #${claim.id} for ${claim.therapistName}?`,

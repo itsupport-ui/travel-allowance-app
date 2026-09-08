@@ -45,6 +45,9 @@ class AdminScheduleReviewItem(BaseModel):
     clinical_notes: str | None = None
     precautions: str | None = None
     has_conflict: bool
+    available_actions: list[str]
+    blocking_reasons: list[str]
+    next_action: str | None = None
 
 
 class AdminScheduleReviewResponse(BaseModel):

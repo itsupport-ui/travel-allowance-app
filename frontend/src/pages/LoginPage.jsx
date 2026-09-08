@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { loginUser } from "../services/authService"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { getCurrentUser } from "../services/authService"
 import toast from "react-hot-toast"
 
@@ -9,6 +9,8 @@ function LoginPage() {
   const [password, setPassword] = useState("")
   const [error] = useState("")
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const sessionExpired = searchParams.get("reason") === "session_expired"
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -57,6 +59,11 @@ function LoginPage() {
         {error && (
           <p className="text-sm text-red-500 text-center mb-4 bg-red-50 py-2 rounded-lg font-medium">
             {error}
+          </p>
+        )}
+        {sessionExpired && (
+          <p role="status" className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-center text-sm font-medium text-amber-900">
+            Your session expired. Sign in again to continue securely.
           </p>
         )}
 

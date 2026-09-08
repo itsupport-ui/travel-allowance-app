@@ -16,6 +16,7 @@ import {
   createTreatmentPlan,
   getMyTreatmentPlans,
   getTreatmentPlan,
+  resubmitTreatmentPlan,
 } from "../services/treatmentPlanService"
 
 
@@ -224,6 +225,26 @@ function DoctorTreatmentPlansPage() {
     setModal("create")
   }
 
+  const openCorrectionModal = () => {
+    if (!selectedPlan || !selectedPlan.available_actions?.includes("correct_and_resubmit")) return
+    setPlanForm({
+      doctor_visit_id: String(selectedPlan.doctor_visit_id),
+      diagnosis: selectedPlan.diagnosis || "",
+      chief_complaint: selectedPlan.chief_complaint || "",
+      treatment_plan: selectedPlan.treatment_plan || "",
+      medicines: selectedPlan.medicines || "",
+      sessions_required:
+        selectedPlan.sessions_required == null
+          ? ""
+          : String(selectedPlan.sessions_required),
+      frequency: selectedPlan.frequency || "",
+      duration: selectedPlan.duration || "",
+      special_instructions: selectedPlan.special_instructions || "",
+      remarks: selectedPlan.remarks || "",
+    })
+    setModal("correct")
+  }
+
   const openDetails = async (plan) => {
     try {
       setActionId(`view-${plan.id}`)
@@ -258,39 +279,49 @@ function DoctorTreatmentPlansPage() {
 
   const submitPlan = async (event) => {
     event.preventDefault()
-    if (!selectedVisit) return
+    const isCorrection = modal === "correct"
+    if (!isCorrection && !selectedVisit) return
+
+    const payload = {
+      diagnosis: nullableText(planForm.diagnosis),
+      chief_complaint: nullableText(planForm.chief_complaint),
+      treatment_plan: nullableText(planForm.treatment_plan),
+      medicines: nullableText(planForm.medicines),
+      sessions_required:
+        planForm.sessions_required === ""
+          ? null
+          : Number(planForm.sessions_required),
+      frequency: nullableText(planForm.frequency),
+      duration: nullableText(planForm.duration),
+      special_instructions: nullableText(planForm.special_instructions),
+      remarks: nullableText(planForm.remarks),
+    }
 
     try {
-      setActionId("create")
+      setActionId(isCorrection ? "correct" : "create")
       const token = localStorage.getItem("token")
-      const createdPlan = await createTreatmentPlan(
-        {
-          id: 0,
-          doctor_visit_id: selectedVisit.id,
-          doctor_id: selectedVisit.doctor_id,
-          patient_name: selectedVisit.patient_name,
-          diagnosis: nullableText(planForm.diagnosis),
-          chief_complaint: nullableText(planForm.chief_complaint),
-          treatment_plan: nullableText(planForm.treatment_plan),
-          medicines: nullableText(planForm.medicines),
-          sessions_required:
-            planForm.sessions_required === ""
-              ? null
-              : Number(planForm.sessions_required),
-          frequency: nullableText(planForm.frequency),
-          duration: nullableText(planForm.duration),
-          special_instructions: nullableText(
-            planForm.special_instructions
-          ),
-          remarks: nullableText(planForm.remarks),
-        },
-        token
-      )
+      const savedPlan = isCorrection
+        ? await resubmitTreatmentPlan(selectedPlan.id, payload, token)
+        : await createTreatmentPlan(
+            { doctor_visit_id: selectedVisit.id, ...payload },
+            token
+          )
 
-      setPlans((current) => [createdPlan, ...current])
+      setPlans((current) =>
+        isCorrection
+          ? current.map((plan) =>
+              plan.id === savedPlan.id ? savedPlan : plan
+            )
+          : [savedPlan, ...current]
+      )
       setModal(null)
+      setSelectedPlan(null)
       setPlanForm(initialPlanForm)
-      toast.success("Treatment plan submitted")
+      toast.success(
+        isCorrection
+          ? "Corrected plan resubmitted"
+          : "Treatment plan submitted"
+      )
     } catch (error) {
       toast.error(
         getErrorMessage(error, "Unable to submit treatment plan")
@@ -528,15 +559,19 @@ function DoctorTreatmentPlansPage() {
         </div>
       </div>
 
-      {modal === "create" && (
+      {(modal === "create" || modal === "correct") && (
         <Modal
-          title="Create treatment plan"
-          description="Review and edit every field before submitting. Submitted plans are read-only."
+          title={modal === "correct" ? "Correct treatment plan" : "Create treatment plan"}
+          description={
+            modal === "correct"
+              ? "Address the review reason, then resubmit this plan as a new revision."
+              : "Review every field before submitting it for approval."
+          }
           onClose={closeModal}
           wide
         >
           <form onSubmit={submitPlan} className="space-y-5">
-            <div>
+            {modal === "create" ? <div>
               <label className={labelClass}>Completed doctor visit</label>
               <select
                 required
@@ -552,7 +587,16 @@ function DoctorTreatmentPlansPage() {
                   </option>
                 ))}
               </select>
-            </div>
+            </div> : (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                <p className="text-xs font-bold uppercase tracking-wide text-rose-700">
+                  Review reason
+                </p>
+                <p className="mt-1 text-sm text-rose-900">
+                  {selectedPlan?.rejection_reason || "Please review and correct the submitted plan."}
+                </p>
+              </div>
+            )}
 
             {selectedVisit && (
               <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
@@ -669,8 +713,9 @@ function DoctorTreatmentPlansPage() {
             </div>
 
             <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-              Submitting sends this plan for admin approval. The backend
-              does not provide a doctor edit endpoint after submission.
+              {modal === "correct"
+                ? "Resubmitting keeps the same plan record, increments its revision, and sends it back for admin review."
+                : "Submitting sends this plan for admin approval."}
             </div>
 
             <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
@@ -685,13 +730,16 @@ function DoctorTreatmentPlansPage() {
                 type="submit"
                 disabled={
                   actionId === "create" ||
-                  !planForm.doctor_visit_id
+                  actionId === "correct" ||
+                  (modal === "create" && !planForm.doctor_visit_id)
                 }
                 className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {actionId === "create"
+                {actionId === "create" || actionId === "correct"
                   ? "Submitting..."
-                  : "Submit for approval"}
+                  : modal === "correct"
+                    ? "Resubmit corrected plan"
+                    : "Submit for approval"}
               </button>
             </div>
           </form>
@@ -724,6 +772,13 @@ function DoctorTreatmentPlansPage() {
             </div>
 
             <dl className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              {selectedPlan.available_actions?.includes("correct_and_resubmit") && (
+                <DetailItem
+                  label="Correction requested"
+                  value={selectedPlan.rejection_reason || "No reason supplied"}
+                  className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-900 sm:col-span-2"
+                />
+              )}
               <DetailItem
                 label="Diagnosis"
                 value={selectedPlan.diagnosis}
@@ -772,7 +827,16 @@ function DoctorTreatmentPlansPage() {
               />
             </dl>
 
-            <div className="flex justify-end border-t border-slate-100 pt-4">
+            <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4">
+              {selectedPlan.available_actions?.includes("correct_and_resubmit") && (
+                <button
+                  type="button"
+                  onClick={openCorrectionModal}
+                  className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
+                >
+                  Correct and resubmit
+                </button>
+              )}
               <button
                 type="button"
                 onClick={closeModal}

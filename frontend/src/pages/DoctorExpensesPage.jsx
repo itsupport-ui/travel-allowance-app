@@ -18,6 +18,7 @@ import {
   deleteDoctorExpense,
   getMyDoctorExpenses,
   getTodayDoctorExpenses,
+  openDoctorExpenseProof,
   updateDoctorExpense,
 } from "../services/doctorExpenseService"
 import { getTodayCompletedDoctorVisits } from "../services/doctorVisitService"
@@ -47,6 +48,10 @@ const createInitialForm = () => ({
   fare: "",
   remarks: "",
   visit_id: "",
+  entry_mode: "visit",
+  expense_category: "public_transport",
+  manual_reason: "",
+  correction_reason: "",
 })
 
 
@@ -117,12 +122,18 @@ function Modal({ title, description, onClose, children }) {
 
 
 function StatusBadge({ expense }) {
-  const normalized = expense.status || "draft"
+  const normalized =
+    expense.visit_id == null && expense.manual_review_status
+      ? expense.manual_review_status
+      : expense.status || "draft"
   const colorMap = {
     draft: "border-amber-200 bg-amber-50 text-amber-700",
     submitted: "border-blue-200 bg-blue-50 text-blue-700",
     approved: "border-emerald-200 bg-emerald-50 text-emerald-700",
     rejected: "border-rose-200 bg-rose-50 text-rose-700",
+    pending: "border-amber-200 bg-amber-50 text-amber-700",
+    changes_requested: "border-rose-200 bg-rose-50 text-rose-700",
+    cancelled: "border-slate-200 bg-slate-50 text-slate-600",
   }
 
   return (
@@ -141,10 +152,14 @@ function ReceiptUpload({
   selectedFile,
   existingProof,
   onChange,
+  onOpenExisting,
+  required = false,
 }) {
   return (
     <div>
-      <label className={labelClass}>Receipt (optional)</label>
+      <label className={labelClass}>
+        Receipt {required ? "*" : "(optional)"}
+      </label>
       <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-4 transition hover:border-blue-400 hover:bg-blue-50/50">
         <div className="rounded-lg bg-white p-2.5 text-blue-600 shadow-sm">
           <FaUpload />
@@ -161,15 +176,21 @@ function ReceiptUpload({
         </div>
         <input
           type="file"
+          required={required && !existingProof}
           accept=".pdf,.jpg,.jpeg,.png"
           onChange={onChange}
           className="sr-only"
         />
       </label>
       {existingProof && !selectedFile && (
-        <p className="mt-1.5 text-xs text-slate-500">
-          Choose a new file only if you want to replace the current receipt.
-        </p>
+        <div className="mt-1.5 flex items-center justify-between gap-3 text-xs text-slate-500">
+          <span>Choose a new file only to replace the current receipt.</span>
+          {onOpenExisting && (
+            <button type="button" className="font-bold text-blue-700 underline" onClick={onOpenExisting}>
+              View receipt
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
@@ -285,6 +306,10 @@ function DoctorExpensesPage() {
       fare: String(expense.fare),
       remarks: expense.remarks || "",
       visit_id: expense.visit_id ? String(expense.visit_id) : "",
+      entry_mode: expense.visit_id ? "visit" : "manual",
+      expense_category: expense.expense_category || "public_transport",
+      manual_reason: expense.manual_reason || "",
+      correction_reason: "",
     })
     setProofFile(null)
     setModal("expense")
@@ -303,6 +328,28 @@ function DoctorExpensesPage() {
       }))
       return
     }
+    if (event.target.name === "entry_mode") {
+      setExpenseForm((current) => ({
+        ...current,
+        entry_mode: event.target.value,
+        visit_id: "",
+        from_location: "",
+        to_location: "",
+        expense_category: "public_transport",
+      }))
+      return
+    }
+    if (event.target.name === "expense_category") {
+      setExpenseForm((current) => ({
+        ...current,
+        expense_category: event.target.value,
+        transport_mode:
+          event.target.value === "mileage"
+            ? "car"
+            : current.transport_mode,
+      }))
+      return
+    }
     setExpenseForm((current) => ({
       ...current,
       [event.target.name]: event.target.value,
@@ -318,16 +365,26 @@ function DoctorExpensesPage() {
       const token = localStorage.getItem("token")
       const payload = {
         ...expenseForm,
-        fare: Number(expenseForm.fare),
+        fare:
+          expenseForm.expense_category === "mileage"
+            ? null
+            : Number(expenseForm.fare),
         remarks: expenseForm.remarks.trim(),
         proof_file: proofFile,
         visit_id: expenseForm.visit_id
           ? Number(expenseForm.visit_id)
           : null,
+        expense_category: expenseForm.expense_category,
+        manual_reason: expenseForm.manual_reason.trim(),
       }
-      if (!isEditing || selectedExpense?.visit_id != null) {
+      if (payload.visit_id != null) {
         delete payload.from_location
         delete payload.to_location
+        delete payload.manual_reason
+      }
+      if (isEditing && selectedExpense?.visit_id == null) {
+        payload.correction_reason = expenseForm.correction_reason.trim()
+        payload.version = selectedExpense.manual_review_version
       }
 
       if (isEditing) {
@@ -359,8 +416,9 @@ function DoctorExpensesPage() {
   }
 
   const removeExpense = async (expense) => {
+    const isManual = expense.visit_id == null
     const shouldDelete = window.confirm(
-      `Delete the ${formatCurrency(expense.fare)} expense from ${expense.from_location} to ${expense.to_location}?`
+      `${isManual ? "Cancel" : "Delete"} the ${formatCurrency(expense.fare)} expense from ${expense.from_location} to ${expense.to_location}?`
     )
     if (!shouldDelete) return
 
@@ -374,7 +432,7 @@ function DoctorExpensesPage() {
       setAllExpenses((current) =>
         current.filter((item) => item.id !== expense.id)
       )
-      toast.success("Expense deleted")
+      toast.success(isManual ? "Manual expense cancelled" : "Expense deleted")
     } catch (error) {
       toast.error(getErrorMessage(error, "Unable to delete expense"))
     } finally {
@@ -382,15 +440,34 @@ function DoctorExpensesPage() {
     }
   }
 
+  const viewProof = async (expense) => {
+    try {
+      await openDoctorExpenseProof(expense.id, localStorage.getItem("token"))
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to open receipt"))
+    }
+  }
+
   const renderActions = (expense, mobile = false) => {
-    const canModify =
-      expense.status === "draft" && expense.claim_id == null
+    const canModify = expense.available_actions?.includes("edit") || (
+      expense.visit_id != null &&
+      expense.status === "draft" &&
+      expense.claim_id == null
+    )
     const isDeleting = actionId === `delete-${expense.id}`
 
     if (!canModify) {
       return (
         <span className="text-xs font-medium text-slate-400">
-          Linked to claim
+          {expense.claim_id
+            ? "Linked to claim"
+            : expense.manual_review_status === "approved"
+              ? "Approved · ready to claim"
+              : expense.manual_review_status === "pending"
+                ? "Awaiting review"
+                : expense.manual_review_status === "changes_requested"
+                  ? "Changes requested"
+                  : "Read-only"}
         </span>
       )
     }
@@ -416,7 +493,13 @@ function DoctorExpensesPage() {
           className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
         >
           <FaTrash />
-          {isDeleting ? "Deleting..." : "Delete"}
+          {isDeleting
+            ? expense.visit_id == null
+              ? "Cancelling..."
+              : "Deleting..."
+            : expense.visit_id == null
+              ? "Cancel"
+              : "Delete"}
         </button>
       </div>
     )
@@ -545,7 +628,7 @@ function DoctorExpensesPage() {
                   <div>
                     <dt className="text-xs text-slate-400">Transport</dt>
                     <dd className="mt-0.5 capitalize text-slate-700">
-                      {expense.transport_mode}
+                      {expense.transport_mode} · {expense.expense_category?.replaceAll("_", " ")}
                     </dd>
                   </div>
                   <div>
@@ -555,6 +638,15 @@ function DoctorExpensesPage() {
                     </dd>
                   </div>
                 </dl>
+                {expense.visit_id == null && (
+                  <div className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+                    <p><span className="font-bold">Manual reason:</span> {expense.manual_reason}</p>
+                    {expense.manual_review_reason && (
+                      <p className="mt-1"><span className="font-bold">Review:</span> {expense.manual_review_reason}</p>
+                    )}
+                    <p className="mt-1 font-semibold">Revision {expense.manual_revision}</p>
+                  </div>
+                )}
                 {renderActions(expense, true)}
               </article>
             ))
@@ -613,16 +705,19 @@ function DoctorExpensesPage() {
                       </td>
                       <td className="px-4 py-4 text-sm capitalize text-slate-700">
                         {expense.transport_mode}
+                        <span className="mt-1 block text-xs text-slate-400">
+                          {expense.expense_category?.replaceAll("_", " ")}
+                        </span>
                       </td>
                       <td className="px-4 py-4 font-bold text-slate-900">
                         {formatCurrency(expense.fare)}
                       </td>
                       <td className="px-4 py-4 text-sm text-slate-600">
                         {expense.proof_file ? (
-                          <span className="inline-flex items-center gap-1.5">
+                          <button type="button" onClick={() => viewProof(expense)} className="inline-flex items-center gap-1.5 font-semibold text-blue-700 underline">
                             <FaReceipt className="text-blue-500" />
-                            Attached
-                          </span>
+                            View
+                          </button>
                         ) : (
                           "—"
                         )}
@@ -653,6 +748,25 @@ function DoctorExpensesPage() {
           onClose={closeModal}
         >
           <form onSubmit={submitExpense} className="space-y-4">
+            {!selectedExpense && (
+              <div>
+                <label className={labelClass}>Expense source</label>
+                <select
+                  name="entry_mode"
+                  value={expenseForm.entry_mode}
+                  onChange={handleFormChange}
+                  className={inputClass}
+                >
+                  <option value="visit">Completed patient visit</option>
+                  <option value="manual">Manual exception</option>
+                </select>
+                {expenseForm.entry_mode === "manual" && (
+                  <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+                    Use this only when no completed visit can provide the route. A reason and receipt are required, and an administrator must approve it before claiming.
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <label className={labelClass}>Expense date</label>
               <input
@@ -661,12 +775,15 @@ function DoctorExpensesPage() {
                 name="expense_date"
                 value={expenseForm.expense_date}
                 onChange={handleFormChange}
-                readOnly={!selectedExpense || selectedExpense.visit_id != null}
+                readOnly={
+                  expenseForm.entry_mode === "visit" ||
+                  selectedExpense?.visit_id != null
+                }
                 className={inputClass}
               />
             </div>
 
-            {!selectedExpense && (
+            {!selectedExpense && expenseForm.entry_mode === "visit" && (
               <div className="space-y-2">
                 <label className={labelClass}>
                   Completed patient visit
@@ -720,7 +837,8 @@ function DoctorExpensesPage() {
                   value={expenseForm.from_location}
                   onChange={handleFormChange}
                   readOnly={
-                    !selectedExpense || selectedExpense.visit_id != null
+                    expenseForm.entry_mode === "visit" ||
+                    selectedExpense?.visit_id != null
                   }
                   className={inputClass}
                 />
@@ -733,7 +851,8 @@ function DoctorExpensesPage() {
                   value={expenseForm.to_location}
                   onChange={handleFormChange}
                   readOnly={
-                    !selectedExpense || selectedExpense.visit_id != null
+                    expenseForm.entry_mode === "visit" ||
+                    selectedExpense?.visit_id != null
                   }
                   className={inputClass}
                 />
@@ -761,6 +880,23 @@ function DoctorExpensesPage() {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
+                <label className={labelClass}>Expense category</label>
+                <select
+                  required
+                  name="expense_category"
+                  value={expenseForm.expense_category}
+                  onChange={handleFormChange}
+                  className={inputClass}
+                >
+                  {expenseForm.entry_mode === "visit" && (
+                    <option value="mileage">Mileage reimbursement</option>
+                  )}
+                  <option value="public_transport">Public transport</option>
+                  <option value="toll_parking">Toll / parking</option>
+                  <option value="authorized_other">Authorized other</option>
+                </select>
+              </div>
+              <div>
                 <label className={labelClass}>Transport mode</label>
                 <select
                   required
@@ -779,16 +915,30 @@ function DoctorExpensesPage() {
                 </select>
               </div>
               <div>
-                <label className={labelClass}>Actual fare</label>
+                <label className={labelClass}>
+                  {expenseForm.expense_category === "mileage"
+                    ? "Calculated reimbursement"
+                    : "Actual fare"}
+                </label>
                 <div className="relative">
                   <FaRupeeSign className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-xs text-slate-400" />
                   <input
-                    required
+                    required={expenseForm.expense_category !== "mileage"}
+                    readOnly={expenseForm.expense_category === "mileage"}
                     type="number"
                     min="0.01"
                     step="0.01"
                     name="fare"
-                    value={expenseForm.fare}
+                    value={
+                      expenseForm.expense_category === "mileage"
+                        ? selectedExpense?.fare || ""
+                        : expenseForm.fare
+                    }
+                    placeholder={
+                      expenseForm.expense_category === "mileage"
+                        ? "Calculated from verified distance"
+                        : "0.00"
+                    }
                     onChange={handleFormChange}
                     className={`${inputClass} pl-9`}
                   />
@@ -799,10 +949,54 @@ function DoctorExpensesPage() {
             <ReceiptUpload
               selectedFile={proofFile}
               existingProof={selectedExpense?.proof_file}
+              required={
+                expenseForm.entry_mode === "manual" ||
+                ["toll_parking", "authorized_other"].includes(
+                  expenseForm.expense_category,
+                )
+              }
+              onOpenExisting={
+                selectedExpense?.proof_file
+                  ? () => viewProof(selectedExpense)
+                  : undefined
+              }
               onChange={(event) =>
                 setProofFile(event.target.files?.[0] || null)
               }
             />
+
+            {expenseForm.entry_mode === "manual" && (
+              <div>
+                <label className={labelClass}>Why is this manual? *</label>
+                <textarea
+                  required
+                  minLength="10"
+                  maxLength="500"
+                  rows="3"
+                  name="manual_reason"
+                  value={expenseForm.manual_reason}
+                  onChange={handleFormChange}
+                  className={`${inputClass} resize-none`}
+                />
+              </div>
+            )}
+
+            {selectedExpense && selectedExpense.visit_id == null && (
+              <div>
+                <label className={labelClass}>Correction summary *</label>
+                <textarea
+                  required
+                  minLength="5"
+                  maxLength="500"
+                  rows="2"
+                  name="correction_reason"
+                  value={expenseForm.correction_reason}
+                  onChange={handleFormChange}
+                  placeholder="Explain what changed in this revision"
+                  className={`${inputClass} resize-none`}
+                />
+              </div>
+            )}
 
             <div>
               <label className={labelClass}>Remarks (optional)</label>
@@ -818,11 +1012,14 @@ function DoctorExpensesPage() {
             <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
               <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
                 <FaBus />
-                Route verified
+                {expenseForm.entry_mode === "visit"
+                  ? "Route verified"
+                  : "Manual exception review"}
               </span>
               <p className="mt-1">
-                Locations and distance are derived from attendance and
-                patient visit GPS. Enter only the actual fare paid.
+                {expenseForm.entry_mode === "visit"
+                  ? "Locations and distance are derived from attendance and patient visit GPS. Mileage is calculated by the server; actual-fare categories use the amount entered."
+                  : "Typed routes are weaker evidence, so the entry cannot enter a claim until an administrator approves the reason and receipt."}
               </p>
             </div>
 
@@ -838,7 +1035,7 @@ function DoctorExpensesPage() {
                 type="submit"
                 disabled={
                   actionId !== null ||
-                  (!selectedExpense &&
+                  (!selectedExpense && expenseForm.entry_mode === "visit" &&
                     availableVisitOptions.length === 0)
                 }
                 className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"

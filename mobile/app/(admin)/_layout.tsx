@@ -131,11 +131,14 @@ export default function AdminLayout() {
       {/* --- HIDDEN ROUTES (Hiding utilities out of the tab bar) --- */}
       <Tabs.Screen name="doctors" options={{ href: null }} />
       <Tabs.Screen name="settings" options={{ href: null }} />
+      <Tabs.Screen name="audit-log" options={{ href: null }} />
+      <Tabs.Screen name="follow-ups" options={{ href: null }} />
       <Tabs.Screen name="doctor-create" options={{ href: null }} />
       <Tabs.Screen name="doctor-edit" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-claims" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-consultations" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-consultation-details" options={{ href: null }} />
+      <Tabs.Screen name="doctor-workflow-consultation-lifecycle" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-treatment-plans" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-treatment-plan-details" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-claim-details" options={{ href: null }} />
