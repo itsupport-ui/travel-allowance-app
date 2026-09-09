@@ -394,7 +394,7 @@ def get_all_schedules(
     current_user:
     User = Depends(
         require_role(
-            ["admin"]
+            ["admin", "clinical_head"]
         )
     )
 ):
@@ -834,7 +834,7 @@ def get_completed_schedules(
     current_user:
     User = Depends(
         require_role(
-            ["admin", "therapist"]
+            ["admin", "therapist", "clinical_head"]
         )
     )
 ):
@@ -878,7 +878,7 @@ def get_pending_schedules(
     current_user:
     User = Depends(
         require_role(
-            ["admin", "therapist"]
+            ["admin", "therapist", "clinical_head"]
         )
     )
 ):
@@ -914,7 +914,7 @@ def get_pending_schedules(
 def get_missed_schedules(
     db: Session = Depends(get_db),
 
-    current_user: User = Depends(require_role(["admin", "therapist"]))
+    current_user: User = Depends(require_role(["admin", "therapist", "clinical_head"]))
 ):
     query = (
         db.query(TreatmentSchedule)
@@ -959,7 +959,7 @@ def get_missed_schedules(
         current_user:
         User = Depends(
             require_role(
-                ["admin"]
+                ["admin", "clinical_head"]
             )
         )
     ):
@@ -1032,7 +1032,7 @@ def dashboard_summary(
     current_user:
     User = Depends(
         require_role(
-            ["admin"]
+            ["admin", "clinical_head"]
         )
     )
 ):
@@ -1143,7 +1143,7 @@ def get_today_schedules(
     current_user:
     User = Depends(
         require_role(
-            ["admin"]
+            ["admin", "clinical_head"]
         )
     )
 ):
@@ -1392,7 +1392,8 @@ def get_schedule_details(
         require_role(
             [
                 "admin",
-                "therapist"
+                "therapist",
+                "clinical_head"
             ]
         )
     )
@@ -1459,7 +1460,7 @@ def update_schedule(
     current_user:
     User = Depends(
         require_role(
-            ["admin"]
+            ["admin", "clinical_head"]
         )
     )
 ):

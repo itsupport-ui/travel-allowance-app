@@ -45,6 +45,8 @@ function TherapistClaimDetailsPage() {
         return <span className={`${baseStyle} bg-green-100 text-green-800`}>Approved</span>
       case "rejected":
         return <span className={`${baseStyle} bg-red-100 text-red-800`}>Rejected</span>
+      case "changes_requested":
+        return <span className={`${baseStyle} bg-amber-100 text-amber-800`}>Changes Requested</span>
       default:
         return <span className={`${baseStyle} bg-yellow-100 text-yellow-800`}>Pending</span>
     }

@@ -27,6 +27,7 @@ ClaimReviewStatus = Literal[
     "pending",
     "approved",
     "rejected",
+    "changes_requested",
 ]
 ClaimReviewSort = Literal[
     "newest",

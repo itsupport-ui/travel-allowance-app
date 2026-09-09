@@ -1,20 +1,15 @@
 ALL_PERMISSIONS = "*"
 
 
+# Predefined role -> permission templates. Roles do not carry ad-hoc,
+# per-user permission overrides in this system; every account is assigned
+# one of these templates.
 ROLE_PERMISSIONS = {
+    # Full system ownership: privileged account management, financial and
+    # security configuration, and complete audit access, in addition to
+    # every operational permission below.
     "admin": {
-        "audit.view",
-        "follow_ups.manage",
-        "staff_overrides.request",
-        "staff_overrides.decide",
-        "consultations.manage",
-        "doctor_visits.manage",
-        "treatment_plans.approve",
-        "schedules.create",
-        "dashboards.view",
-        "claims.view",
-        "claims.approve",
-        "claims.reject",
+        ALL_PERMISSIONS,
     },
     "doctor": {
         "consultations.own",
@@ -27,6 +22,35 @@ ROLE_PERMISSIONS = {
         "schedules.own",
         "travel.manage",
         "therapist_claims.submit",
+        "doctors.directory.view",
+    },
+    # Consultation intake and follow-up only. No access to clinical notes,
+    # visits, treatment plans, schedules, attendance, travel, expenses,
+    # claims, staff management, settings, or audit data.
+    "telecaller": {
+        "doctors.directory.view",
+        "consultations.manage",
+        "follow_ups.manage",
+    },
+    # Manages clinical staff, treatment-plan reviews, schedules,
+    # attendance/location exceptions, and operational reports and
+    # settings. Therapist and doctor claims are reviewed by the
+    # administrator account only, not by this role. No access to
+    # privileged accounts, authentication policy, reimbursement rates,
+    # storage/retention configuration, security settings, or the full
+    # audit log.
+    "clinical_head": {
+        "dashboards.view",
+        "staff.manage",
+        "doctors.directory.view",
+        "treatment_plans.approve",
+        "schedules.create",
+        "follow_ups.manage",
+        "staff_overrides.request",
+        "staff_overrides.decide",
+        "consultations.manage",
+        "doctor_visits.manage",
+        "settings.operational.manage",
     },
 }
 

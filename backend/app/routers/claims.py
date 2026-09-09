@@ -198,9 +198,14 @@ def approve_claim(
     )
 ):
     claim = db.query(Claim).filter(Claim.id == claim_id).first()
-    
+
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
+    if claim.therapist_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You cannot approve a claim you submitted.",
+        )
     validate_status_transition(
         entity="Therapist claim status",
         current_status=claim.status,
@@ -258,6 +263,11 @@ def reject_claim(
     
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
+    if claim.therapist_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You cannot reject a claim you submitted.",
+        )
     validate_status_transition(
         entity="Therapist claim status",
         current_status=claim.status,
@@ -287,11 +297,11 @@ def reject_claim(
         domain="financial",
         entity_type="therapist_claim",
         entity_id=claim.id,
-        action="changes_requested",
+        action="rejected",
         business_date=claim.claim_date,
         from_state=prior_status,
         to_state="rejected",
-        reason_code="review_changes_requested",
+        reason_code="terminal_rejection",
         reason=reject_data.rejection_reason,
         related_entity_type="therapist",
         related_entity_id=claim.therapist_id,
@@ -307,6 +317,86 @@ def reject_claim(
         claim.therapist_id,
         claim.id,
         "rejected",
+    )
+    return claim
+
+
+@router.put(
+    "/{claim_id}/request-changes",
+    response_model=ClaimResponse,
+)
+def request_claim_changes(
+    claim_id: int,
+    reject_data: ClaimRejectRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_permission("claims.reject")
+    )
+):
+    claim = (
+        db.query(Claim)
+        .filter(Claim.id == claim_id)
+        .with_for_update()
+        .first()
+    )
+
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if claim.therapist_id == current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You cannot request changes on a claim you submitted.",
+        )
+    validate_status_transition(
+        entity="Therapist claim status",
+        current_status=claim.status,
+        next_status="changes_requested",
+        transitions=THERAPIST_CLAIM_STATUS_TRANSITIONS,
+    )
+
+    prior_status = claim.status
+    travels = (
+        db.query(TravelEntry)
+        .filter(TravelEntry.claim_id == claim.id)
+        .with_for_update()
+        .all()
+    )
+    for travel in travels:
+        travel.claim_id = None
+        travel.status = "draft"
+
+    claim.status = "changes_requested"
+    claim.rejection_reason = reject_data.rejection_reason
+    claim.reviewed_at = datetime.now(timezone.utc)
+    claim.reviewed_by = current_user.id
+    record_domain_audit_event(
+        db,
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        domain="financial",
+        entity_type="therapist_claim",
+        entity_id=claim.id,
+        action="changes_requested",
+        business_date=claim.claim_date,
+        from_state=prior_status,
+        to_state="changes_requested",
+        reason_code="review_changes_requested",
+        reason=reject_data.rejection_reason,
+        related_entity_type="therapist",
+        related_entity_id=claim.therapist_id,
+        details={
+            "revision": int(claim.revision or 1),
+            "released_record_count": len(travels),
+        },
+    )
+    db.commit()
+    db.refresh(claim)
+    background_tasks.add_task(
+        notify_claim_status,
+        claim.therapist_id,
+        claim.id,
+        "changes_requested",
     )
     return claim
 

@@ -13,6 +13,7 @@ const TAB_ICON_SIZE = 20;
 
 export default function AdminLayout() {
   const [authorized, setAuthorized] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -26,7 +27,8 @@ export default function AdminLayout() {
         if (!token) {
           await clearAuthSession();
           router.replace("/(auth)/login");
-        } else if (role === "admin") {
+        } else if (role === "admin" || role === "clinical_head") {
+          setIsAdmin(role === "admin");
           setAuthorized(true);
         } else if (role === "therapist") {
           router.replace(getHomeRoute(role));
@@ -112,6 +114,7 @@ export default function AdminLayout() {
         name="claims"
         options={{
           title: "Claims",
+          href: isAdmin ? undefined : null,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons color={color} name={focused ? "receipt" : "receipt-outline"} size={TAB_ICON_SIZE} />
           ),
@@ -128,8 +131,19 @@ export default function AdminLayout() {
         }}
       />
 
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Profile",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons color={color} name={focused ? "person-circle" : "person-circle-outline"} size={TAB_ICON_SIZE} />
+          ),
+        }}
+      />
+
       {/* --- HIDDEN ROUTES (Hiding utilities out of the tab bar) --- */}
       <Tabs.Screen name="doctors" options={{ href: null }} />
+      <Tabs.Screen name="travel-expense-report" options={{ href: null }} />
       <Tabs.Screen name="settings" options={{ href: null }} />
       <Tabs.Screen name="audit-log" options={{ href: null }} />
       <Tabs.Screen name="follow-ups" options={{ href: null }} />

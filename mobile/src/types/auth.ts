@@ -1,4 +1,4 @@
-export type UserRole = "admin" | "doctor" | "therapist";
+export type UserRole = "admin" | "doctor" | "therapist" | "clinical_head";
 
 export interface LoginResponse {
   access_token: string;
@@ -14,4 +14,7 @@ export interface AuthUser {
 }
 
 export const isUserRole = (value: unknown): value is UserRole =>
-  value === "admin" || value === "doctor" || value === "therapist";
+  value === "admin" ||
+  value === "doctor" ||
+  value === "therapist" ||
+  value === "clinical_head";

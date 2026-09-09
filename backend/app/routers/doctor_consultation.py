@@ -503,7 +503,7 @@ def get_doctor_consultation(
     consultation_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(
-        require_role(["doctor", "admin"])
+        require_role(["doctor", "admin", "clinical_head", "telecaller"])
     ),
 ):
     doctor = (
@@ -540,7 +540,7 @@ def get_doctor_consultation(
 def get_doctor_consultation_history(
     consultation_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["doctor", "admin"])),
+    current_user: User = Depends(require_role(["doctor", "admin", "clinical_head", "telecaller"])),
 ):
     consultation = (
         db.query(DoctorConsultation)
@@ -572,7 +572,7 @@ def cancel_doctor_consultation(
     consultation_id: int,
     cancellation_data: DoctorConsultationCancel,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["doctor", "admin"])),
+    current_user: User = Depends(require_role(["doctor", "admin", "clinical_head", "telecaller"])),
 ):
     try:
         consultation = (
@@ -641,7 +641,7 @@ def reschedule_doctor_consultation(
     consultation_id: int,
     reschedule_data: DoctorConsultationReschedule,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["doctor", "admin"])),
+    current_user: User = Depends(require_role(["doctor", "admin", "clinical_head", "telecaller"])),
 ):
     try:
         consultation = (
@@ -750,7 +750,7 @@ def schedule_doctor_consultation_follow_up(
     consultation_id: int,
     follow_up_data: DoctorConsultationFollowUpSchedule,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["doctor", "admin"])),
+    current_user: User = Depends(require_role(["doctor", "admin", "clinical_head", "telecaller"])),
 ):
     try:
         consultation = (

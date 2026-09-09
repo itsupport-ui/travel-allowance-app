@@ -167,6 +167,29 @@ export const rejectClaim =
 }
 
 
+export const requestClaimChanges =
+  async (
+    claimId,
+    token,
+    rejectionReason = "Please review and correct this claim."
+  ) => {
+
+    const response =
+      await api.put(
+        `/claims/${claimId}/request-changes`,
+        { rejection_reason: rejectionReason },
+        {
+          headers: {
+            Authorization:
+              `Bearer ${token}`
+          }
+        }
+      )
+
+    return response.data
+}
+
+
 export const
 getClaimHistory =
 async (token) => {

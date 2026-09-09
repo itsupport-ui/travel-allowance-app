@@ -2,7 +2,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 // ─── Shared design tokens ────────────────────────────────────────────────────
-const PRIMARY   = [37, 99, 235]   // blue-600
+const PRIMARY   = [218, 92, 16]   // brand-600
 const LIGHT_BG  = [241, 245, 249] // slate-100
 const DARK_TEXT = [30, 41, 59]    // slate-800
 const MUTED     = [100, 116, 139] // slate-500
@@ -261,8 +261,8 @@ export const exportClaimsListPdf = (title, claims) => {
     didParseCell: (data) => {
       if (data.section === "body" && data.row.index === body.length - 1) {
         data.cell.styles.fontStyle = "bold"
-        data.cell.styles.fillColor = [219, 234, 254] // blue-100
-        data.cell.styles.textColor = [30, 64, 175]   // blue-800
+        data.cell.styles.fillColor = [248, 234, 226] // brand-100
+        data.cell.styles.textColor = [136, 61, 17]   // brand-800
       }
     },
     margin: { left: 14, right: 14 },

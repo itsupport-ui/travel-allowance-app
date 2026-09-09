@@ -240,7 +240,7 @@ def build_therapist_claim_readiness(
         pending_review_count=len(pending_records),
     )
 
-    if existing_claim is not None and existing_claim.status != "rejected":
+    if existing_claim is not None and existing_claim.status != "changes_requested":
         readiness.total_km = distance(existing_claim.total_km)
         readiness.travel_total = money(existing_claim.travel_total)
         readiness.daily_allowance = money(existing_claim.daily_allowance)
@@ -397,7 +397,7 @@ def build_doctor_claim_readiness(
         pending_review_count=len(pending_records),
     )
 
-    if existing_claim is not None and existing_claim.status != "rejected":
+    if existing_claim is not None and existing_claim.status != "changes_requested":
         readiness.expense_total = money(existing_claim.total_amount)
         readiness.total_source = "existing_claim"
         if draft_records:

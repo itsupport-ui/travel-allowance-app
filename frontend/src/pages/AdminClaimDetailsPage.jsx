@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import AdminLayout from "../layouts/AdminLayout";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
-import { getClaimDetails, approveClaim, rejectClaim } from "../services/claimService";
+import { getClaimDetails, approveClaim, rejectClaim, requestClaimChanges } from "../services/claimService";
 import { openTravelInvoice } from "../services/travelService";
 import { exportClaimDetailPdf } from "../utils/pdfExport";
 
@@ -54,6 +54,20 @@ function AdminClaimDetailsPage() {
     }
   };
 
+  const handleRequestChanges = async () => {
+    setSaving(true);
+    try {
+      const token = localStorage.getItem("token");
+      await requestClaimChanges(claimId, token, rejectionReason.trim());
+      toast.success("Changes requested");
+      navigate("/admin/pending-claims");
+    } catch {
+      toast.error("Request failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleReject = async () => {
     setSaving(true);
     try {
@@ -78,6 +92,8 @@ function AdminClaimDetailsPage() {
         return <span className={`${baseStyle} bg-green-100 text-green-800`}>Approved</span>;
       case "rejected":
         return <span className={`${baseStyle} bg-red-100 text-red-800`}>Rejected</span>;
+      case "changes_requested":
+        return <span className={`${baseStyle} bg-amber-100 text-amber-800`}>Changes Requested</span>;
       default:
         return <span className={`${baseStyle} bg-yellow-100 text-yellow-800`}>Pending</span>;
     }
@@ -252,9 +268,15 @@ function AdminClaimDetailsPage() {
           <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 mt-8 pt-4 border-t border-gray-100">
             <button
               onClick={() => setDecision("reject")}
-              className="w-full sm:w-32 bg-white border border-red-200 hover:bg-red-50 text-red-600 px-5 py-2.5 rounded-xl font-semibold transition text-sm shadow-sm"
+              className="w-full sm:w-auto bg-white border border-red-200 hover:bg-red-50 text-red-600 px-5 py-2.5 rounded-xl font-semibold transition text-sm shadow-sm"
             >
-              Reject Claim
+              Reject (Final)
+            </button>
+            <button
+              onClick={() => setDecision("changes")}
+              className="w-full sm:w-auto bg-white border border-amber-200 hover:bg-amber-50 text-amber-700 px-5 py-2.5 rounded-xl font-semibold transition text-sm shadow-sm"
+            >
+              Request Changes
             </button>
             <button
               onClick={() => setDecision("approve")}
@@ -268,25 +290,47 @@ function AdminClaimDetailsPage() {
       </div>
       <ConfirmDialog
         open={Boolean(decision)}
-        title={decision === "approve" ? "Approve claim?" : "Request correction?"}
+        title={
+          decision === "approve"
+            ? "Approve claim?"
+            : decision === "changes"
+              ? "Request correction?"
+              : "Reject claim permanently?"
+        }
         message={
           decision === "approve"
             ? "This confirms the submitted evidence and reimbursement total."
-            : "The therapist will see this reason and can correct and resubmit the same claim."
+            : decision === "changes"
+              ? "The therapist will see this reason and can correct and resubmit the same claim."
+              : "This is final for this claim date. The therapist cannot resubmit — use this only for invalid or non-payable claims."
         }
-        confirmLabel={decision === "approve" ? "Approve claim" : "Request correction"}
-        destructive={decision === "reject"}
+        confirmLabel={
+          decision === "approve"
+            ? "Approve claim"
+            : decision === "changes"
+              ? "Request correction"
+              : "Reject permanently"
+        }
+        destructive={decision === "reject" || decision === "changes"}
         busy={saving}
-        confirmDisabled={decision === "reject" && !rejectionReason.trim()}
+        confirmDisabled={decision !== "approve" && !rejectionReason.trim()}
         onClose={() => {
           setDecision(null);
           setRejectionReason("");
         }}
-        onConfirm={decision === "approve" ? handleApprove : handleReject}
+        onConfirm={
+          decision === "approve"
+            ? handleApprove
+            : decision === "changes"
+              ? handleRequestChanges
+              : handleReject
+        }
       >
-        {decision === "reject" && (
+        {decision !== "approve" && (
           <label className="mt-4 block text-sm font-semibold text-slate-700">
-            What must the therapist correct?
+            {decision === "changes"
+              ? "What must the therapist correct?"
+              : "Why is this claim being rejected?"}
             <textarea
               autoFocus
               required

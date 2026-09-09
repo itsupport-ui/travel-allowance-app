@@ -39,6 +39,38 @@ export const updateDoctor = async (doctorId, payload) => {
   return response.data
 }
 
+export const getOperationsStaff = async () => {
+  const response = await api.get("/users/operations-staff", authConfig())
+  return response.data
+}
+
+export const createOperationsStaff = async (payload) => {
+  const response = await api.post(
+    "/users/operations-staff",
+    payload,
+    authConfig(),
+  )
+  return response.data
+}
+
+export const updateOperationsStaff = async (userId, payload) => {
+  const response = await api.put(
+    `/users/operations-staff/${userId}`,
+    payload,
+    authConfig(),
+  )
+  return response.data
+}
+
+export const resetOperationsStaffPassword = async (userId, password) => {
+  const response = await api.post(
+    `/users/operations-staff/${userId}/reset-password`,
+    { password },
+    authConfig(),
+  )
+  return response.data
+}
+
 export const getStaffDeactivationReadiness = async (staffRole, staffId) => {
   const response = await api.get(
     `/staff/deactivation-readiness/${staffRole}/${staffId}`,

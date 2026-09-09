@@ -74,7 +74,7 @@ const buildClaimHtml = ({
             margin: 0;
           }
           header {
-            background: #1B5E20;
+            background: #F26F21;
             color: #ffffff;
             padding: 20px;
           }
@@ -100,15 +100,15 @@ const buildClaimHtml = ({
             text-transform: uppercase;
           }
           .value { font-size: 13px; font-weight: bold; }
-          h2 { color: #1B5E20; font-size: 15px; margin: 24px 0 10px; }
+          h2 { color: #F26F21; font-size: 15px; margin: 24px 0 10px; }
           table {
             border-collapse: collapse;
             table-layout: fixed;
             width: 100%;
           }
           th {
-            background: #e8f5e9;
-            color: #1B5E20;
+            background: #FAF0EB;
+            color: #F26F21;
             font-size: 9px;
             text-align: left;
           }

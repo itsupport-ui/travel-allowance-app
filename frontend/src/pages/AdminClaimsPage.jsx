@@ -7,7 +7,7 @@ import PageState from "../components/ui/PageState"
 import Pagination from "../components/ui/Pagination"
 import StatusBadge from "../components/ui/StatusBadge"
 import { getAdminClaimReview } from "../services/adminOperationsService"
-import { approveClaim, rejectClaim } from "../services/claimService"
+import { approveClaim, rejectClaim, requestClaimChanges } from "../services/claimService"
 import { getErrorMessage } from "../services/http"
 
 const money = new Intl.NumberFormat("en-IN", {
@@ -19,7 +19,7 @@ function AdminClaimsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const initialStatus = searchParams.get("status")
   const [filters, setFilters] = useState({
-    status: ["pending", "approved", "rejected", "all"].includes(initialStatus)
+    status: ["pending", "approved", "rejected", "changes_requested", "all"].includes(initialStatus)
       ? initialStatus
       : "pending",
     search: "",
@@ -86,10 +86,18 @@ function AdminClaimsPage() {
       const token = localStorage.getItem("token")
       if (decision.action === "approve") {
         await approveClaim(decision.claim.id, token)
+      } else if (decision.action === "changes") {
+        await requestClaimChanges(decision.claim.id, token, rejectionReason.trim())
       } else {
         await rejectClaim(decision.claim.id, token, rejectionReason.trim())
       }
-      toast.success(`Claim ${decision.action}d`)
+      toast.success(
+        decision.action === "approve"
+          ? "Claim approved"
+          : decision.action === "changes"
+            ? "Changes requested"
+            : "Claim rejected"
+      )
       setDecision(null)
       setRejectionReason("")
       loadClaims()
@@ -143,6 +151,7 @@ function AdminClaimsPage() {
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
+              <option value="changes_requested">Changes Requested</option>
               <option value="all">All statuses</option>
             </select>
             <input
@@ -229,6 +238,16 @@ function AdminClaimsPage() {
                         type="button"
                         onClick={() => {
                           setRejectionReason("")
+                          setDecision({ action: "changes", claim })
+                        }}
+                        className="rounded-md bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-700"
+                      >
+                        Changes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRejectionReason("")
                           setDecision({ action: "reject", claim })
                         }}
                         className="rounded-md bg-rose-700 px-3 py-2 text-xs font-bold text-white hover:bg-rose-800"
@@ -255,17 +274,33 @@ function AdminClaimsPage() {
 
       <ConfirmDialog
         open={Boolean(decision)}
-        title={`${decision?.action === "approve" ? "Approve" : "Reject"} claim?`}
+        title={
+          decision?.action === "approve"
+            ? "Approve claim?"
+            : decision?.action === "changes"
+              ? "Request correction?"
+              : "Reject claim permanently?"
+        }
         message={
           decision
-            ? `Claim #${decision.claim.id} for ${money.format(decision.claim.grand_total)} will be ${decision.action}d.`
+            ? decision.action === "approve"
+              ? `Claim #${decision.claim.id} for ${money.format(decision.claim.grand_total)} will be approved.`
+              : decision.action === "changes"
+                ? "The therapist will see this reason and can correct and resubmit the same claim."
+                : "This is final for this claim date. The therapist cannot resubmit — use this only for invalid or non-payable claims."
             : ""
         }
-        confirmLabel={decision?.action === "approve" ? "Approve claim" : "Reject claim"}
-        destructive={decision?.action === "reject"}
+        confirmLabel={
+          decision?.action === "approve"
+            ? "Approve claim"
+            : decision?.action === "changes"
+              ? "Request correction"
+              : "Reject permanently"
+        }
+        destructive={decision?.action === "reject" || decision?.action === "changes"}
         busy={saving}
         confirmDisabled={
-          decision?.action === "reject" && !rejectionReason.trim()
+          decision?.action !== "approve" && !rejectionReason.trim()
         }
         onClose={() => {
           setDecision(null)
@@ -273,9 +308,11 @@ function AdminClaimsPage() {
         }}
         onConfirm={applyDecision}
       >
-        {decision?.action === "reject" && (
+        {decision?.action !== "approve" && (
           <label className="mt-4 block text-sm font-semibold text-slate-700">
-            What must the therapist correct?
+            {decision?.action === "changes"
+              ? "What must the therapist correct?"
+              : "Why is this claim being rejected?"}
             <textarea
               autoFocus
               required

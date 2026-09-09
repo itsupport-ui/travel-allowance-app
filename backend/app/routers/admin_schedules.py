@@ -124,7 +124,7 @@ def review_schedules(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=50),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_role(["admin"])),
+    _current_user: User = Depends(require_role(["admin", "clinical_head"])),
 ):
     if view not in VIEWS:
         raise HTTPException(status_code=400, detail="Invalid schedule view.")
@@ -375,7 +375,7 @@ def review_schedules(
 @router.get("/form-options", response_model=AdminScheduleFormOptions)
 def get_form_options(
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_role(["admin"])),
+    _current_user: User = Depends(require_role(["admin", "clinical_head"])),
 ):
     today = india_now().date()
     today_counts = (
@@ -482,7 +482,7 @@ def get_therapist_availability(
     expected_end_time: time = Query(),
     exclude_schedule_id: int | None = Query(default=None, ge=1),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_role(["admin"])),
+    _current_user: User = Depends(require_role(["admin", "clinical_head"])),
 ):
     if expected_end_time <= start_time:
         raise HTTPException(
@@ -556,7 +556,7 @@ def cancel_schedule(
     schedule_id: int,
     scope: Literal["this", "future", "series"] = Query(default="this"),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_role(["admin"])),
+    _current_user: User = Depends(require_role(["admin", "clinical_head"])),
 ):
     schedule = (
         db.query(TreatmentSchedule)

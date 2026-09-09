@@ -8,6 +8,7 @@ const statusStyles = {
   high: "bg-rose-50 text-rose-700 ring-rose-600/20",
   urgent: "bg-rose-50 text-rose-700 ring-rose-600/20",
   rejected: "bg-rose-50 text-rose-700 ring-rose-600/20",
+  changes_requested: "bg-amber-50 text-amber-700 ring-amber-600/20",
   cancelled: "bg-slate-100 text-slate-600 ring-slate-500/20",
   canceled: "bg-slate-100 text-slate-600 ring-slate-500/20",
   missed: "bg-slate-100 text-slate-600 ring-slate-500/20",

@@ -39,16 +39,18 @@ TREATMENT_SCHEDULE_STATUS_TRANSITIONS: dict[str, set[str]] = {
 }
 
 DOCTOR_CLAIM_STATUS_TRANSITIONS: dict[str, set[str]] = {
-    "pending": {"approved", "rejected"},
+    "pending": {"approved", "rejected", "changes_requested"},
     "approved": set(),
     "rejected": set(),
+    "changes_requested": set(),
     "submitted": {"pending"},
 }
 
 THERAPIST_CLAIM_STATUS_TRANSITIONS: dict[str, set[str]] = {
-    "pending": {"approved", "rejected"},
+    "pending": {"approved", "rejected", "changes_requested"},
     "approved": set(),
     "rejected": set(),
+    "changes_requested": set(),
 }
 
 LOCKED_CLAIM_PLAN_STATUSES: set[str] = {"approved", "rejected"}

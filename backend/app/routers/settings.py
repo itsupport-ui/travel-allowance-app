@@ -19,7 +19,7 @@ from app.services.location_policy_service import (
 )
 from app.services.reimbursement_policy_service import money
 from app.services.domain_audit_service import record_domain_audit_event
-from app.utils.auth import get_current_user, require_role
+from app.utils.auth import get_current_user, require_permission, require_role
 from app.utils.timezone import india_now
 
 
@@ -235,7 +235,7 @@ def get_current_location_policy(
 def get_location_policy_history(
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_role(["admin"])),
+    _current_user: User = Depends(require_permission("settings.operational.manage")),
 ):
     policies = list_location_policies(db)[:limit]
     db.commit()
@@ -249,7 +249,7 @@ def get_location_policy_history(
 def update_location_policy(
     request: LocationPolicyUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin"])),
+    current_user: User = Depends(require_permission("settings.operational.manage")),
 ):
     today = india_now().date()
     effective_from = request.effective_from or today

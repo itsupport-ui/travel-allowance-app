@@ -5,7 +5,7 @@ from app.database import get_db
 from app.models.doctor import Doctor
 from app.models.user import User
 from app.schemas.doctor import DoctorCreate, DoctorResponse, DoctorUpdate
-from app.utils.auth import hash_password, require_role
+from app.utils.auth import hash_password, require_permission
 from app.services.domain_audit_service import record_domain_audit_event
 from app.services.staff_deactivation_service import (
     consume_staff_deactivation_override,
@@ -59,7 +59,7 @@ def validate_doctor_user(
 def create_doctor(
     doctor: DoctorCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin"]))
+    current_user: User = Depends(require_permission("staff.manage"))
 ):
     normalized_name = doctor.name.strip()
     existing_doctor = (
@@ -121,7 +121,7 @@ def create_doctor(
 def get_doctors(
     db: Session = Depends(get_db),
     current_user: User = Depends(
-        require_role(["admin", "therapist"])
+        require_permission("doctors.directory.view")
     )
 ):
     doctors = db.query(Doctor).filter(Doctor.active.is_(True)).all()
@@ -134,7 +134,7 @@ def get_doctors(
 )
 def get_managed_doctors(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin"])),
+    current_user: User = Depends(require_permission("staff.manage")),
 ):
     return db.query(Doctor).order_by(Doctor.name.asc()).all()
 
@@ -146,7 +146,7 @@ def get_managed_doctors(
 def get_doctor(
     doctor_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin"])),
+    current_user: User = Depends(require_permission("staff.manage")),
 ):
     doctor = db.query(Doctor).filter(Doctor.id == doctor_id).first()
     if doctor is None:
@@ -162,7 +162,7 @@ def update_doctor(
     doctor_id: int,
     payload: DoctorUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin"])),
+    current_user: User = Depends(require_permission("staff.manage")),
 ):
     doctor = db.query(Doctor).filter(Doctor.id == doctor_id).first()
     if doctor is None:

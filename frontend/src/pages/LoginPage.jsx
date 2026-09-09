@@ -25,12 +25,14 @@ function LoginPage() {
         JSON.stringify(user.permissions || [])
       )
 
-      if (user.role === "admin") {
+      if (user.role === "admin" || user.role === "clinical_head") {
         navigate("/admin")
       } else if (user.role === "therapist") {
         navigate("/therapist")
       } else if (user.role === "doctor") {
         navigate("/doctor")
+      } else if (user.role === "telecaller") {
+        navigate("/telecaller")
       }
 
       toast.success("Login successful 🚀")
@@ -48,10 +50,12 @@ function LoginPage() {
         
         {/* Header Branding */}
         <div className="text-center mb-6 sm:mb-8">
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-blue-600 tracking-tight">
-            Therapist Travel App
-          </h1>
-          <p className="text-xs sm:text-sm text-gray-400 mt-2 font-medium">
+          <img
+            src="/logo-mark.png"
+            alt="Ayurghar"
+            className="h-16 sm:h-20 w-auto mx-auto"
+          />
+          <p className="text-xs sm:text-sm text-gray-400 mt-3 font-medium">
             Login to access your dashboard
           </p>
         </div>
@@ -80,7 +84,7 @@ function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="name@example.com"
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm sm:text-base bg-gray-50/50 focus:bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200"
+              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm sm:text-base bg-gray-50/50 focus:bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#f26f21]/20 focus:border-[#f26f21] transition-all duration-200"
             />
           </div>
 
@@ -95,7 +99,7 @@ function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm sm:text-base bg-gray-50/50 focus:bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200"
+              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm sm:text-base bg-gray-50/50 focus:bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#f26f21]/20 focus:border-[#f26f21] transition-all duration-200"
             />
           </div>
 
@@ -103,7 +107,7 @@ function LoginPage() {
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 active:scale-[0.99] font-semibold text-sm sm:text-base transition-all duration-150 shadow-md shadow-blue-500/10 hover:shadow-blue-500/20"
+              className="w-full bg-[#f26f21] text-white py-3 rounded-xl hover:bg-[#d9611c] active:scale-[0.99] font-semibold text-sm sm:text-base transition-all duration-150 shadow-md shadow-orange-500/10 hover:shadow-orange-500/20"
             >
               Sign In
             </button>

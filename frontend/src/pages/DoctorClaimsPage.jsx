@@ -105,6 +105,7 @@ function StatusBadge({ value }) {
     pending: "border-blue-200 bg-blue-50 text-blue-700",
     approved: "border-emerald-200 bg-emerald-50 text-emerald-700",
     rejected: "border-rose-200 bg-rose-50 text-rose-700",
+    changes_requested: "border-amber-200 bg-amber-50 text-amber-700",
     ready: "border-emerald-200 bg-emerald-50 text-emerald-700",
     blocked: "border-amber-200 bg-amber-50 text-amber-700",
     already_submitted: "border-blue-200 bg-blue-50 text-blue-700",

@@ -18,7 +18,7 @@ import {
   getAdminDashboardSummary,
 } from "../../src/services/adminDashboardService";
 import type { AdminDashboardSummary } from "../../src/types/adminDashboard";
-import { clearAuthSession } from "../../src/utils/storage";
+import { clearAuthSession, getStoredRole } from "../../src/utils/storage";
 
 const PRIMARY = colors.primary;
 
@@ -121,6 +121,19 @@ export default function AdminDashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void getStoredRole().then((role) => {
+        if (active) setIsAdmin(role === "admin");
+      });
+      return () => {
+        active = false;
+      };
+    }, [])
+  );
 
   const loadSummary = useCallback(
     async (isRefresh = false): Promise<void> => {
@@ -178,12 +191,17 @@ export default function AdminDashboardScreen() {
       >
         <View style={styles.headerRow}>
           <View style={styles.headerContent}>
-            <Text style={styles.eyebrow}>Administration</Text>
+            <Text style={styles.eyebrow}>
+              {isAdmin ? "Administration" : "Clinical Operations"}
+            </Text>
             <Text style={styles.title}>Dashboard</Text>
             <Text style={styles.subtitle}>
-              Clinical operations and claims overview
+              {isAdmin
+                ? "Clinical operations and claims overview"
+                : "Clinical operations overview"}
             </Text>
           </View>
+          {isAdmin && (
           <TouchableOpacity
             accessibilityHint="Opens rate settings and account controls"
             accessibilityLabel="Open admin settings"
@@ -199,6 +217,7 @@ export default function AdminDashboardScreen() {
               size={22}
             />
           </TouchableOpacity>
+          )}
         </View>
 
         {loading ? (

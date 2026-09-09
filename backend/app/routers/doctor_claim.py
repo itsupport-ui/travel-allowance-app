@@ -50,6 +50,7 @@ ADMIN_HISTORY_STATUSES = {
     "pending",
     "approved",
     "rejected",
+    "changes_requested",
     "submitted",
 }
 
@@ -509,6 +510,16 @@ def approve_doctor_claim(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Doctor claim not found",
             )
+        owning_doctor = (
+            db.query(Doctor)
+            .filter(Doctor.id == claim.doctor_id)
+            .first()
+        )
+        if owning_doctor is not None and owning_doctor.user_id == current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You cannot approve a claim you submitted.",
+            )
         validate_status_transition(
             entity="Doctor claim status",
             current_status=claim.status,
@@ -576,6 +587,16 @@ def reject_doctor_claim(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Doctor claim not found",
             )
+        owning_doctor = (
+            db.query(Doctor)
+            .filter(Doctor.id == claim.doctor_id)
+            .first()
+        )
+        if owning_doctor is not None and owning_doctor.user_id == current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You cannot reject a claim you submitted.",
+            )
         validate_status_transition(
             entity="Doctor claim status",
             current_status=claim.status,
@@ -607,11 +628,11 @@ def reject_doctor_claim(
             domain="financial",
             entity_type="doctor_claim",
             entity_id=claim.id,
-            action="changes_requested",
+            action="rejected",
             business_date=claim.claim_date,
             from_state=prior_status,
             to_state="rejected",
-            reason_code="review_changes_requested",
+            reason_code="terminal_rejection",
             reason=reject_data.rejection_reason,
             related_entity_type="doctor",
             related_entity_id=claim.doctor_id,
@@ -633,4 +654,98 @@ def reject_doctor_claim(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to reject doctor claim",
+        ) from error
+
+
+@router.put(
+    "/{claim_id}/request-changes",
+    response_model=DoctorClaimResponse,
+)
+def request_doctor_claim_changes(
+    claim_id: int,
+    reject_data: DoctorClaimRejectRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_permission("claims.reject")
+    ),
+):
+    try:
+        claim = (
+            db.query(DoctorClaim)
+            .filter(DoctorClaim.id == claim_id)
+            .with_for_update()
+            .first()
+        )
+        if claim is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Doctor claim not found",
+            )
+        owning_doctor = (
+            db.query(Doctor)
+            .filter(Doctor.id == claim.doctor_id)
+            .first()
+        )
+        if owning_doctor is not None and owning_doctor.user_id == current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You cannot request changes on a claim you submitted.",
+            )
+        validate_status_transition(
+            entity="Doctor claim status",
+            current_status=claim.status,
+            next_status="changes_requested",
+            transitions=DOCTOR_CLAIM_STATUS_TRANSITIONS,
+        )
+
+        prior_status = claim.status
+        expenses = (
+            db.query(DoctorExpense)
+            .filter(DoctorExpense.claim_id == claim.id)
+            .with_for_update()
+            .all()
+        )
+        for expense in expenses:
+            expense.status = "draft"
+            expense.claim_id = None
+
+        claim.status = "changes_requested"
+        claim.approved_at = None
+        claim.approved_by = None
+        claim.rejection_reason = (
+            reject_data.rejection_reason.strip()
+        )
+        record_domain_audit_event(
+            db,
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            domain="financial",
+            entity_type="doctor_claim",
+            entity_id=claim.id,
+            action="changes_requested",
+            business_date=claim.claim_date,
+            from_state=prior_status,
+            to_state="changes_requested",
+            reason_code="review_changes_requested",
+            reason=reject_data.rejection_reason,
+            related_entity_type="doctor",
+            related_entity_id=claim.doctor_id,
+            details={
+                "revision": int(claim.revision or 1),
+                "released_record_count": len(expenses),
+            },
+        )
+
+        db.flush()
+        db.refresh(claim)
+        db.commit()
+        return claim
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to request changes on doctor claim",
         ) from error

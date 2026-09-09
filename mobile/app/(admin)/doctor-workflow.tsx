@@ -1,6 +1,7 @@
 import { colors, radius, shadows, spacing, typography } from "@/src/theme";
 import { Ionicons } from "@expo/vector-icons";
-import { router, type Href } from "expo-router";
+import { router, useFocusEffect, type Href } from "expo-router";
+import { useCallback, useState } from "react";
 import {
   ScrollView,
   StyleSheet,
@@ -10,7 +11,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const workflowActions: {
+import { getStoredRole } from "../../src/utils/storage";
+
+const allWorkflowActions: {
+  adminOnly?: boolean;
   description: string;
   icon: keyof typeof Ionicons.glyphMap;
   route: Href;
@@ -29,6 +33,7 @@ const workflowActions: {
     title: "Treatment Plans",
   },
   {
+    adminOnly: true,
     description: "Review doctor expense claims and proof files.",
     icon: "receipt-outline",
     route: "/(admin)/doctor-workflow-claims" as Href,
@@ -37,6 +42,24 @@ const workflowActions: {
 ];
 
 export default function AdminDoctorWorkflowScreen() {
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void getStoredRole().then((role) => {
+        if (active) setIsAdmin(role === "admin");
+      });
+      return () => {
+        active = false;
+      };
+    }, [])
+  );
+
+  const workflowActions = allWorkflowActions.filter(
+    (action) => !action.adminOnly || isAdmin
+  );
+
   return (
     <SafeAreaView edges={["top"]} style={styles.safeArea}>
       <ScrollView
@@ -46,8 +69,9 @@ export default function AdminDoctorWorkflowScreen() {
         <Text style={styles.eyebrow}>Administration</Text>
         <Text style={styles.title}>Doctor Workflow</Text>
         <Text style={styles.subtitle}>
-          Manage doctor consultations, treatment plan approvals, and doctor
-          expense claims.
+          {isAdmin
+            ? "Manage doctor consultations, treatment plan approvals, and doctor expense claims."
+            : "Manage doctor consultations and treatment plan approvals."}
         </Text>
 
         <View style={styles.workflowList}>

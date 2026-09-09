@@ -326,7 +326,7 @@ class ThreePatientDayFlowTests(unittest.TestCase):
         self.assertEqual(self.db.query(Claim).count(), 0)
         self.assertIsNone(self.db.get(TravelEntry, travel_entry.id).claim_id)
 
-    def test_rejected_claim_releases_travel_and_can_be_resubmitted(self):
+    def test_claim_sent_back_for_changes_releases_travel_and_can_be_resubmitted(self):
         travel_entry = TravelEntry(
             therapist_id=self.therapist.id,
             travel_date=india_now().date(),
@@ -352,11 +352,11 @@ class ThreePatientDayFlowTests(unittest.TestCase):
 
         self.use_user(self.admin)
         rejected = self.client.put(
-            f"/claims/{claim_id}/reject",
+            f"/claims/{claim_id}/request-changes",
             json={"rejection_reason": "Please attach corrected evidence"},
         )
         self.assertEqual(rejected.status_code, 200, rejected.text)
-        self.assertEqual(rejected.json()["status"], "rejected")
+        self.assertEqual(rejected.json()["status"], "changes_requested")
         self.assertEqual(
             rejected.json()["rejection_reason"],
             "Please attach corrected evidence",
@@ -375,6 +375,43 @@ class ThreePatientDayFlowTests(unittest.TestCase):
         self.db.refresh(travel_entry)
         self.assertEqual(travel_entry.claim_id, claim_id)
         self.assertEqual(travel_entry.status, "submitted")
+
+    def test_terminally_rejected_claim_is_not_auto_resubmittable(self):
+        travel_entry = TravelEntry(
+            therapist_id=self.therapist.id,
+            travel_date=india_now().date(),
+            from_address="Origin",
+            to_address="Destination",
+            total_km=2.5,
+            per_km_rate=8.0,
+            travel_fare=20.0,
+            patient_visited=True,
+            patient_name="Patient",
+            transport_mode="vehicle",
+            status="draft",
+        )
+        self.db.add(travel_entry)
+        self.db.commit()
+
+        self.use_user(self.therapist)
+        submitted = self.client.post("/claims/submit")
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        claim_id = submitted.json()["id"]
+
+        self.use_user(self.admin)
+        rejected = self.client.put(
+            f"/claims/{claim_id}/reject",
+            json={"rejection_reason": "Not a payable trip"},
+        )
+        self.assertEqual(rejected.status_code, 200, rejected.text)
+        self.assertEqual(rejected.json()["status"], "rejected")
+
+        self.use_user(self.therapist)
+        blocked_resubmit = self.client.post("/claims/submit")
+        self.assertEqual(blocked_resubmit.status_code, 409, blocked_resubmit.text)
+        self.db.refresh(travel_entry)
+        self.assertEqual(travel_entry.status, "draft")
+        self.assertIsNone(travel_entry.claim_id)
 
 
 if __name__ == "__main__":

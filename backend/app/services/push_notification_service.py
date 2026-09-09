@@ -222,10 +222,15 @@ def notify_claim_status(
     status: str,
 ) -> int:
     normalized_status = status.lower()
+    display_phrase = (
+        "sent back for changes"
+        if normalized_status == "changes_requested"
+        else normalized_status
+    )
     return send_user_notification(
         user_id,
-        title=f"Claim {normalized_status.title()}",
-        body=f"Your travel claim has been {normalized_status}.",
+        title=f"Claim {display_phrase.title()}",
+        body=f"Your travel claim has been {display_phrase}.",
         data={
             "type": f"claim_{normalized_status}",
             "claim_id": claim_id,

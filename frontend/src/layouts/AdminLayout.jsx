@@ -15,6 +15,7 @@ import {
   FaUsers,
   FaHistory,
   FaTasks,
+  FaUserShield,
 } from "react-icons/fa";
 import {
   hasAnyPermission,
@@ -35,7 +36,15 @@ function AdminLayout({ children }) {
   const canViewSchedules =
     hasPermission("dashboards.view") ||
     hasPermission("schedules.create");
-  const canManageUsers = role === "admin";
+  const canManageUsers = hasPermission("staff.manage");
+  const isAdmin = role === "admin";
+  const workspaceLabels = {
+    admin: ["Admin Panel", "Admin Console"],
+    clinical_head: ["Clinical Operations", "Clinical Ops"],
+    telecaller: ["Telecaller Workspace", "Telecaller"],
+  };
+  const [panelTitle, consoleTitle] =
+    workspaceLabels[role] || ["Admin Panel", "Admin Console"];
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -60,7 +69,7 @@ function AdminLayout({ children }) {
       
       {/* Mobile Sticky Top Header Bar Layer */}
       <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between z-30 shadow-sm">
-        <h1 className="text-lg font-bold text-white tracking-tight">Admin Console</h1>
+        <h1 className="text-lg font-bold text-white tracking-tight">{consoleTitle}</h1>
         <button
           type="button"
           onClick={() => setSidebarOpen(true)}
@@ -91,8 +100,8 @@ function AdminLayout({ children }) {
         {/* Sidebar Header Brand Identity */}
         <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-800">
           <div className="flex items-center gap-2 pl-1">
-            <div className="w-2 h-4 bg-blue-500 rounded-sm"></div>
-            <h1 className="text-xl font-bold text-white tracking-tight">Admin Panel</h1>
+            <img src="/logo-icon-64.png" alt="" className="w-6 h-6" />
+            <h1 className="text-xl font-bold text-white tracking-tight">{panelTitle}</h1>
           </div>
           
           {/* Mobile Close Button Icon */}
@@ -188,12 +197,16 @@ function AdminLayout({ children }) {
             </Link>
           )}
 
-          {canManageUsers && (
+          {isAdmin && (
             <>
               <div className="pt-3 pb-1 pl-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Management</div>
 
               <Link to="/admin/settings" onClick={closeSidebar} className={getNavLinkClass("/admin/settings")}>
                 <FaCog className="text-base" /> Settings
+              </Link>
+
+              <Link to="/admin/operations-staff" onClick={closeSidebar} className={getNavLinkClass("/admin/operations-staff")}>
+                <FaUserShield className="text-base" /> Operations Staff
               </Link>
 
             </>

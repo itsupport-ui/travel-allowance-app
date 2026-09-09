@@ -16,6 +16,7 @@ import {
   getAdminDoctorClaimHistory,
   getDoctorClaim,
   rejectDoctorClaim,
+  requestDoctorClaimChanges,
 } from "../services/doctorClaimService"
 
 
@@ -114,6 +115,7 @@ function StatusBadge({ value }) {
     pending: "border-blue-200 bg-blue-50 text-blue-700",
     approved: "border-emerald-200 bg-emerald-50 text-emerald-700",
     rejected: "border-rose-200 bg-rose-50 text-rose-700",
+    changes_requested: "border-amber-200 bg-amber-50 text-amber-700",
   }
 
   return (
@@ -286,6 +288,12 @@ function AdminDoctorClaimsPage() {
     setModal("reject")
   }
 
+  const openChangesModal = (claim) => {
+    setSelectedClaim(claim)
+    setRejectionReason("")
+    setModal("changes")
+  }
+
   const submitRejection = async (event) => {
     event.preventDefault()
     if (!selectedClaim) return
@@ -305,6 +313,30 @@ function AdminDoctorClaimsPage() {
       toast.success("Doctor claim rejected")
     } catch (error) {
       toast.error(getErrorMessage(error, "Unable to reject claim"))
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const submitChangesRequest = async (event) => {
+    event.preventDefault()
+    if (!selectedClaim) return
+
+    try {
+      setActionId(`changes-${selectedClaim.id}`)
+      const token = localStorage.getItem("token")
+      await requestDoctorClaimChanges(
+        selectedClaim.id,
+        rejectionReason.trim(),
+        token
+      )
+      await loadClaims()
+      setModal(null)
+      setSelectedClaim(null)
+      setRejectionReason("")
+      toast.success("Changes requested")
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Unable to request changes"))
     } finally {
       setActionId(null)
     }
@@ -343,7 +375,7 @@ function AdminDoctorClaimsPage() {
         className={`flex flex-wrap gap-2 ${
           mobile
             ? claim.status === "pending"
-              ? "grid grid-cols-3"
+              ? "grid grid-cols-2"
               : "grid"
             : "justify-end"
         }`}
@@ -367,6 +399,13 @@ function AdminDoctorClaimsPage() {
             >
               <FaCheckCircle />
               {isApproving ? "Approving" : "Approve"}
+            </button>
+            <button
+              type="button"
+              onClick={() => openChangesModal(claim)}
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100"
+            >
+              Changes
             </button>
             <button
               type="button"
@@ -446,6 +485,7 @@ function AdminDoctorClaimsPage() {
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
+              <option value="changes_requested">Changes Requested</option>
               <option value="submitted">Submitted</option>
             </select>
             <select
@@ -738,6 +778,16 @@ function AdminDoctorClaimsPage() {
               </div>
             )}
 
+            {selectedClaim.status === "changes_requested" && (
+              <div className="rounded-xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800">
+                <p className="font-semibold">Changes requested</p>
+                <p className="mt-1">
+                  {selectedClaim.rejection_reason ||
+                    "No correction notes provided."}
+                </p>
+              </div>
+            )}
+
             <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4">
               <button
                 type="button"
@@ -757,6 +807,13 @@ function AdminDoctorClaimsPage() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => openChangesModal(selectedClaim)}
+                    className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-2.5 text-sm font-bold text-amber-700 transition hover:bg-amber-100"
+                  >
+                    Request Changes
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => approveClaim(selectedClaim)}
                     className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700"
                   >
@@ -772,7 +829,7 @@ function AdminDoctorClaimsPage() {
       {modal === "reject" && selectedClaim && (
         <Modal
           title="Reject doctor claim"
-          description={`Record the rejection reason for claim #${selectedClaim.id}.`}
+          description={`This is final for claim #${selectedClaim.id} — the doctor cannot resubmit it. Use this only for invalid or non-payable claims.`}
           onClose={closeModal}
         >
           <form onSubmit={submitRejection} className="space-y-4">
@@ -809,6 +866,52 @@ function AdminDoctorClaimsPage() {
                 {actionId === `reject-${selectedClaim.id}`
                   ? "Rejecting..."
                   : "Reject claim"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {modal === "changes" && selectedClaim && (
+        <Modal
+          title="Request changes"
+          description={`The doctor will see this note and can correct and resubmit claim #${selectedClaim.id}.`}
+          onClose={closeModal}
+        >
+          <form onSubmit={submitChangesRequest} className="space-y-4">
+            <div>
+              <label className={labelClass}>What must the doctor correct?</label>
+              <textarea
+                required
+                minLength="1"
+                rows="4"
+                value={rejectionReason}
+                onChange={(event) =>
+                  setRejectionReason(event.target.value)
+                }
+                className={`${inputClass} resize-none`}
+                placeholder="Give a specific, actionable reason"
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeModal}
+                className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={
+                  actionId === `changes-${selectedClaim.id}` ||
+                  !rejectionReason.trim()
+                }
+                className="rounded-xl bg-amber-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {actionId === `changes-${selectedClaim.id}`
+                  ? "Sending..."
+                  : "Request changes"}
               </button>
             </div>
           </form>

@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   StyleSheet,
   Text,
   TextInput,
@@ -115,11 +116,19 @@ export default function LoginScreen() {
     <SafeAreaView style={styles.container}>
       <FormScrollView contentContainerStyle={styles.content}>
         <View style={styles.brandBlock}>
-          <View style={styles.brandIcon}>
-            <Ionicons color={colors.surface} name="medical" size={30} />
-          </View>
-          <Text style={styles.eyebrow}>HOSPITAL MANAGEMENT SYSTEM</Text>
-          <Text style={styles.logo}>Travel Allowance</Text>
+          <Image
+            accessibilityIgnoresInvertColors
+            resizeMode="contain"
+            source={require("../../assets/images/logo-icon.png")}
+            style={styles.brandMark}
+          />
+          <Image
+            accessibilityIgnoresInvertColors
+            accessibilityLabel="Ayurghar"
+            resizeMode="contain"
+            source={require("../../assets/images/logo-wordmark.png")}
+            style={styles.brandWordmark}
+          />
           <Text style={styles.subtitle}>
             Secure access for your hospital care team
           </Text>
@@ -243,28 +252,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.xxxl,
   },
-  brandIcon: {
-    alignItems: "center",
-    backgroundColor: PRIMARY,
-    borderRadius: radius.largePanel,
+  brandMark: {
     height: 64,
-    justifyContent: "center",
-    marginBottom: spacing.xl,
+    marginBottom: spacing.md,
     width: 64,
   },
-  eyebrow: {
-    color: colors.primary,
-    fontSize: typography.size.caption,
-    fontWeight: typography.weight.extrabold,
-    letterSpacing: 1,
-    textAlign: "center",
-  },
-  logo: {
-    color: colors.textPrimary,
-    fontSize: typography.size.display,
-    fontWeight: typography.weight.extrabold,
-    marginTop: spacing.md,
-    textAlign: "center",
+  brandWordmark: {
+    height: 28,
+    width: 132,
   },
   subtitle: {
     color: colors.textMuted,

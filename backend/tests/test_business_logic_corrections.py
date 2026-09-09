@@ -99,7 +99,7 @@ class BusinessLogicCorrectionTests(unittest.TestCase):
         self.db.refresh(visit)
         return visit
 
-    def test_rejected_doctor_claim_can_be_resubmitted(self):
+    def test_doctor_claim_sent_back_for_changes_can_be_resubmitted(self):
         expense = DoctorExpense(
             doctor_id=self.doctor.id,
             expense_date=india_now().date(),
@@ -125,11 +125,16 @@ class BusinessLogicCorrectionTests(unittest.TestCase):
         self.assertEqual(self.db.query(DoctorClaim).count(), 1)
 
         self.use_user(self.admin)
-        rejected = self.client.put(
-            f"/doctor-claims/{claim_id}/reject",
+        changes_requested = self.client.put(
+            f"/doctor-claims/{claim_id}/request-changes",
             json={"rejection_reason": "Correct the expense evidence"},
         )
-        self.assertEqual(rejected.status_code, 200, rejected.text)
+        self.assertEqual(
+            changes_requested.status_code, 200, changes_requested.text
+        )
+        self.assertEqual(
+            changes_requested.json()["status"], "changes_requested"
+        )
         self.db.refresh(expense)
         self.assertEqual(expense.status, "draft")
         self.assertIsNone(expense.claim_id)
@@ -152,6 +157,39 @@ class BusinessLogicCorrectionTests(unittest.TestCase):
             ],
             ["submitted", "changes_requested", "resubmitted"],
         )
+
+    def test_terminally_rejected_doctor_claim_is_not_auto_resubmittable(self):
+        expense = DoctorExpense(
+            doctor_id=self.doctor.id,
+            expense_date=india_now().date(),
+            from_location="Clinic",
+            to_location="Patient",
+            transport_mode="car",
+            fare=125.0,
+            status="draft",
+        )
+        self.db.add(expense)
+        self.db.commit()
+
+        submitted = self.client.post("/doctor-claims/submit")
+        self.assertEqual(submitted.status_code, 201, submitted.text)
+        claim_id = submitted.json()["id"]
+
+        self.use_user(self.admin)
+        rejected = self.client.put(
+            f"/doctor-claims/{claim_id}/reject",
+            json={"rejection_reason": "Not a payable expense"},
+        )
+        self.assertEqual(rejected.status_code, 200, rejected.text)
+        self.assertEqual(rejected.json()["status"], "rejected")
+
+        self.use_user(self.doctor_user)
+        blocked_resubmit = self.client.post("/doctor-claims/submit")
+        self.assertEqual(blocked_resubmit.status_code, 409, blocked_resubmit.text)
+        self.assertEqual(self.db.query(DoctorClaim).count(), 1)
+        self.db.refresh(expense)
+        self.assertEqual(expense.status, "draft")
+        self.assertIsNone(expense.claim_id)
 
     def test_rejected_treatment_plan_can_be_corrected_and_resubmitted(self):
         visit = self.create_visit(status="treatment_plan_submitted")

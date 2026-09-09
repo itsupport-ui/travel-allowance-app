@@ -122,6 +122,20 @@ export const rejectDoctorClaim = async (
 }
 
 
+export const requestDoctorClaimChanges = async (
+  claimId,
+  rejectionReason,
+  token
+) => {
+  const response = await api.put(
+    `/doctor-claims/${claimId}/request-changes`,
+    { rejection_reason: rejectionReason },
+    authConfig(token)
+  )
+  return response.data
+}
+
+
 export const getDoctorsForClaims = async (token) => {
   const response = await api.get(
     "/doctors/",
