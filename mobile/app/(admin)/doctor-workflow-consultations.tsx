@@ -45,6 +45,7 @@ import type {
 } from "../../src/types/doctorWorkflow";
 import type { Doctor } from "../../src/types/doctor";
 import { getLocalIsoDate, nullableDoctorText } from "../../src/utils/doctorWorkflow";
+import { getStoredRole } from "../../src/utils/storage";
 
 type Panel = "create" | null;
 
@@ -93,6 +94,15 @@ const isTime = (value: string): boolean =>
 
 const normalize = (value: string | null | undefined): string =>
   value?.trim().toLowerCase() ?? "";
+
+const returnToWorkspace = async (): Promise<void> => {
+  const role = await getStoredRole();
+  router.replace(
+    role === "telecaller"
+      ? "/(admin)/profile"
+      : "/(admin)/doctor-workflow"
+  );
+};
 
 export default function AdminDoctorConsultationsScreen() {
   const queryClient = useQueryClient();
@@ -230,7 +240,7 @@ export default function AdminDoctorConsultationsScreen() {
     return (
       <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
         <DoctorBackHeader
-          onBack={() => router.replace("/(admin)/doctor-workflow")}
+          onBack={() => void returnToWorkspace()}
           title="Consultations"
         />
         <DoctorErrorState
@@ -247,7 +257,7 @@ export default function AdminDoctorConsultationsScreen() {
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
       <DoctorBackHeader
-        onBack={() => router.replace("/(admin)/doctor-workflow")}
+        onBack={() => void returnToWorkspace()}
         title="Consultations"
       />
       <FlatList
@@ -362,7 +372,7 @@ function ConsultationLoadingState() {
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
       <DoctorBackHeader
-        onBack={() => router.replace("/(admin)/doctor-workflow")}
+        onBack={() => void returnToWorkspace()}
         title="Consultations"
       />
       <ScrollView contentContainerStyle={styles.loadingContent}>

@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Href } from "expo-router";
 
 import type { UserRole } from "../types/auth";
+import { getHomeRoute } from "./authNavigation";
 import type {
   NotificationPayload,
   NotificationType,
@@ -82,6 +83,10 @@ export const getNotificationDestination = (
       return "/(doctor)/(tabs)";
     }
 
+    if (role === "telecaller" || role === "clinical_head") {
+      return getHomeRoute(role);
+    }
+
     return payload.scheduleId
       ? {
           pathname: "/schedule-details",
@@ -107,6 +112,10 @@ export const getNotificationDestination = (
         : "/(doctor)/(tabs)/claims";
     }
 
+    if (role === "telecaller" || role === "clinical_head") {
+      return getHomeRoute(role);
+    }
+
     return payload.claimId
       ? {
           pathname: "/claim-details",
@@ -115,11 +124,7 @@ export const getNotificationDestination = (
       : ("/therapist/claims" as Href);
   }
 
-  return role === "admin"
-    ? "/(admin)"
-    : role === "doctor"
-      ? "/(doctor)/(tabs)"
-      : ("/therapist" as Href);
+  return getHomeRoute(role);
 };
 
 export const queueNotificationPayload = async (

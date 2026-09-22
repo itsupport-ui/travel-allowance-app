@@ -74,7 +74,7 @@ function App() {
         <Route path="/admin/settings" element={<ProtectedRoute allowedRole="admin"><SettingsPage /></ProtectedRoute>} />
         <Route path="/admin/register" element={<ProtectedRoute allowedRole="admin"><RegisterUserPage /></ProtectedRoute>} />
         <Route path="/admin/operations-staff" element={<ProtectedRoute allowedRole="admin"><AdminOperationsStaffPage /></ProtectedRoute>} />
-        <Route path="/telecaller" element={<Navigate to="/admin/doctor-consultations" replace />} />
+        <Route path="/telecaller" element={<ProtectedRoute allowedRole="telecaller"><Navigate to="/admin/doctor-consultations" replace /></ProtectedRoute>} />
         <Route path="/admin/history" element={<Navigate to="/admin/claims?status=all" replace />} />
         <Route path="/admin/claim/:claimId" element={<ProtectedRoute allowedPermissions={["claims.view", "claims.approved.view"]}><AdminClaimDetailsPage /></ProtectedRoute>} />
         <Route path="/therapist/claim/:claimId" element={<ProtectedRoute allowedRole="therapist"><TherapistClaimDetailsPage /></ProtectedRoute>} />

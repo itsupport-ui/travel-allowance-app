@@ -7,14 +7,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { getHomeRoute } from "../../src/utils/authNavigation";
 import { clearAuthSession, getStoredRole, getToken } from "../../src/utils/storage";
+import type { UserRole } from "../../src/types/auth";
 
 const PRIMARY = colors.primary;
 const TAB_ICON_SIZE = 20;
 
 export default function AdminLayout() {
   const [authorized, setAuthorized] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [role, setRole] = useState<UserRole | null>(null);
   const insets = useSafeAreaInsets();
+  const isAdmin = role === "admin";
+  const isTelecaller = role === "telecaller";
 
   useEffect(() => {
     let active = true;
@@ -27,8 +30,12 @@ export default function AdminLayout() {
         if (!token) {
           await clearAuthSession();
           router.replace("/(auth)/login");
-        } else if (role === "admin" || role === "clinical_head") {
-          setIsAdmin(role === "admin");
+        } else if (
+          role === "admin" ||
+          role === "clinical_head" ||
+          role === "telecaller"
+        ) {
+          setRole(role);
           setAuthorized(true);
         } else if (role === "therapist") {
           router.replace(getHomeRoute(role));
@@ -74,6 +81,7 @@ export default function AdminLayout() {
         name="index"
         options={{
           title: "Dashboard",
+          href: isTelecaller ? null : undefined,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons color={color} name={focused ? "grid" : "grid-outline"} size={TAB_ICON_SIZE} />
           ),
@@ -84,6 +92,7 @@ export default function AdminLayout() {
         name="therapists"
         options={{
           title: "Staff",
+          href: isTelecaller ? null : undefined,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons color={color} name={focused ? "people" : "people-outline"} size={TAB_ICON_SIZE} />
           ),
@@ -94,6 +103,7 @@ export default function AdminLayout() {
         name="doctor-workflow"
         options={{
           title: "Doctor",
+          href: isTelecaller ? null : undefined,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons color={color} name={focused ? "medical" : "medical-outline"} size={TAB_ICON_SIZE} />
           ),
@@ -104,6 +114,7 @@ export default function AdminLayout() {
         name="schedules"
         options={{
           title: "Schedules",
+          href: isTelecaller ? null : undefined,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons color={color} name={focused ? "calendar" : "calendar-outline"} size={TAB_ICON_SIZE} />
           ),
@@ -125,6 +136,7 @@ export default function AdminLayout() {
         name="reports"
         options={{
           title: "Reports",
+          href: isTelecaller ? null : undefined,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons color={color} name={focused ? "bar-chart" : "bar-chart-outline"} size={TAB_ICON_SIZE} />
           ),
@@ -150,7 +162,20 @@ export default function AdminLayout() {
       <Tabs.Screen name="doctor-create" options={{ href: null }} />
       <Tabs.Screen name="doctor-edit" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-claims" options={{ href: null }} />
-      <Tabs.Screen name="doctor-workflow-consultations" options={{ href: null }} />
+      <Tabs.Screen
+        name="doctor-workflow-consultations"
+        options={{
+          href: isTelecaller ? undefined : null,
+          title: "Consultations",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              color={color}
+              name={focused ? "call" : "call-outline"}
+              size={TAB_ICON_SIZE}
+            />
+          ),
+        }}
+      />
       <Tabs.Screen name="doctor-workflow-consultation-details" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-consultation-lifecycle" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-treatment-plans" options={{ href: null }} />

@@ -9,6 +9,10 @@ export const getHomeRoute = (role: UserRole): AuthenticatedRoute => {
     return "/(admin)" as Href;
   }
 
+  if (role === "telecaller") {
+    return "/(admin)/doctor-workflow-consultations" as Href;
+  }
+
   if (role === "doctor") {
     return "/(doctor)/(tabs)" as Href;
   }
