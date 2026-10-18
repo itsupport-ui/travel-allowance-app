@@ -180,6 +180,7 @@ export interface TreatmentPlan {
   status: string;
   has_schedule?: boolean;
   schedule_count?: number;
+  similar_schedule_count?: number;
   created_at: string;
   updated_at: string | null;
   rejection_reason: string | null;
@@ -253,6 +254,7 @@ export interface DoctorExpense {
   expense_date: string;
   workday_id: number | null;
   visit_id: number | null;
+  task_id?: number | null;
   from_waypoint_id: number | null;
   to_waypoint_id: number | null;
   from_location: string;
@@ -298,6 +300,7 @@ export interface DoctorProofAsset {
 export interface SaveDoctorExpenseRequest {
   expense_date: string;
   visit_id: number | null;
+  task_id?: number | null;
   from_location?: string;
   to_location?: string;
   transport_mode: string;

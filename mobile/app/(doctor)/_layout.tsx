@@ -66,6 +66,9 @@ export default function DoctorLayout() {
       <Stack.Screen name="expense-form" />
       <Stack.Screen name="expense-details" />
       <Stack.Screen name="claim-details" />
+      <Stack.Screen name="schedule-create" />
+      <Stack.Screen name="tasks" />
+      <Stack.Screen name="task-details" />
     </Stack>
   );
 }

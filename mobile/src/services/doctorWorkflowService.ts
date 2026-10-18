@@ -509,6 +509,9 @@ const buildExpenseFormData = (
   if (request.visit_id !== null) {
     formData.append("visit_id", String(request.visit_id));
   }
+  if (request.task_id != null) {
+    formData.append("task_id", String(request.task_id));
+  }
   if (request.from_location) {
     formData.append("from_location", request.from_location);
   }

@@ -162,6 +162,9 @@ export default function AdminLayout() {
       <Tabs.Screen name="doctor-create" options={{ href: null }} />
       <Tabs.Screen name="doctor-edit" options={{ href: null }} />
       <Tabs.Screen name="doctor-workflow-claims" options={{ href: null }} />
+      <Tabs.Screen name="doctor-tasks" options={{ href: null }} />
+      <Tabs.Screen name="doctor-task-create" options={{ href: null }} />
+      <Tabs.Screen name="places" options={{ href: null }} />
       <Tabs.Screen
         name="doctor-workflow-consultations"
         options={{

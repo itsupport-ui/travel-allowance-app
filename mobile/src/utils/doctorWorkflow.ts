@@ -68,5 +68,11 @@ export const getLocalIsoDate = (): string => {
   return formatDateForApi(new Date());
 };
 
+// An expense is "manual" only when it came from neither a visit nor a task.
+export const isManualExpense = (expense: {
+  task_id?: number | null;
+  visit_id: number | null;
+}): boolean => expense.visit_id === null && (expense.task_id ?? null) === null;
+
 export const nullableDoctorText = (value: string): string | null =>
   value.trim() || null;

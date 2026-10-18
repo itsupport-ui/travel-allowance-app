@@ -29,6 +29,7 @@ import {
   formatDoctorCurrency,
   formatDoctorDate,
   formatDoctorLabel,
+  isManualExpense,
   parsePositiveId,
 } from "../../src/utils/doctorWorkflow";
 
@@ -45,7 +46,7 @@ export default function DoctorExpenseDetailsScreen() {
     [expenseId, expensesQuery.data]
   );
   const historyQuery = useQuery({
-    enabled: expense?.visit_id === null,
+    enabled: (expense !== null && expense !== undefined && isManualExpense(expense)),
     queryFn: () => getManualDoctorExpenseReviewHistory(expenseId as number),
     queryKey: ["doctor", "expenses", expenseId, "review-history"],
   });
@@ -87,7 +88,7 @@ export default function DoctorExpenseDetailsScreen() {
 
   const canEdit =
     expense.available_actions.includes("edit") ||
-    (expense.visit_id !== null &&
+    (!isManualExpense(expense) &&
       expense.status === "draft" &&
       expense.claim_id === null);
 
@@ -136,7 +137,7 @@ export default function DoctorExpenseDetailsScreen() {
           </View>
           <DoctorStatusBadge
             status={
-              expense.visit_id === null && expense.manual_review_status
+              isManualExpense(expense) && expense.manual_review_status
                 ? expense.manual_review_status
                 : expense.status
             }
@@ -163,7 +164,13 @@ export default function DoctorExpenseDetailsScreen() {
         <DetailSection icon="person-outline" title="Patient & visit">
           <DoctorDetailRow
             label="Linked visit"
-            value={expense.visit_id ? `Visit #${expense.visit_id}` : "Not linked"}
+            value={
+              expense.visit_id
+                ? `Visit #${expense.visit_id}`
+                : expense.task_id
+                  ? `Task #${expense.task_id}`
+                  : "Not linked"
+            }
           />
           <DoctorDetailRow
             label="Workday"
@@ -186,7 +193,7 @@ export default function DoctorExpenseDetailsScreen() {
             label="Category"
             value={formatDoctorLabel(expense.expense_category)}
           />
-          {expense.visit_id === null ? (
+          {isManualExpense(expense) ? (
             <>
               <DoctorDetailRow label="Manual reason" value={expense.manual_reason || "Not recorded"} />
               <DoctorDetailRow label="Revision" value={String(expense.manual_revision)} />
@@ -201,7 +208,7 @@ export default function DoctorExpenseDetailsScreen() {
         <DetailSection icon="time-outline" title="Timeline">
           <DoctorDetailRow label="Travel date" value={formatDoctorDate(expense.expense_date)} />
           <DoctorDetailRow label="Created" value={formatDoctorDate(expense.created_at)} />
-          {expense.visit_id === null ? (
+          {isManualExpense(expense) ? (
             historyQuery.isPending ? (
               <Text style={styles.historyState}>Loading review history...</Text>
             ) : historyQuery.error ? (

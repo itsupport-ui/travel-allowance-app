@@ -15,6 +15,7 @@ import { getStoredRole } from "../../src/utils/storage";
 
 const allWorkflowActions: {
   adminOnly?: boolean;
+  managerOnly?: boolean;
   description: string;
   icon: keyof typeof Ionicons.glyphMap;
   route: Href;
@@ -33,6 +34,13 @@ const allWorkflowActions: {
     title: "Treatment Plans",
   },
   {
+    description: "Assign clinic training, patient visits and other work to doctors.",
+    icon: "clipboard-outline",
+    managerOnly: true,
+    route: "/(admin)/doctor-tasks" as Href,
+    title: "Doctor Tasks",
+  },
+  {
     adminOnly: true,
     description: "Review doctor expense claims and proof files.",
     icon: "receipt-outline",
@@ -43,12 +51,16 @@ const allWorkflowActions: {
 
 export default function AdminDoctorWorkflowScreen() {
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isManager, setIsManager] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
       void getStoredRole().then((role) => {
-        if (active) setIsAdmin(role === "admin");
+        if (active) {
+          setIsAdmin(role === "admin");
+          setIsManager(role === "admin" || role === "clinical_head");
+        }
       });
       return () => {
         active = false;
@@ -57,7 +69,8 @@ export default function AdminDoctorWorkflowScreen() {
   );
 
   const workflowActions = allWorkflowActions.filter(
-    (action) => !action.adminOnly || isAdmin
+    (action) =>
+      (!action.adminOnly || isAdmin) && (!action.managerOnly || isManager)
   );
 
   return (

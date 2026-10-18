@@ -36,6 +36,20 @@ const workAreas: {
     route: "/(doctor)/(tabs)/treatment-plans",
     step: "3",
   },
+  {
+    description: "Clinic training, patient visits and other assigned work, with punch in and out.",
+    icon: "clipboard-outline",
+    label: "My tasks",
+    route: "/(doctor)/tasks",
+    step: "T",
+  },
+  {
+    description: "Book a therapist visit directly, without a consultation or plan.",
+    icon: "person-add-outline",
+    label: "Schedule therapist",
+    route: "/(doctor)/schedule-create",
+    step: "+",
+  },
 ];
 
 export default function DoctorWorkScreen() {

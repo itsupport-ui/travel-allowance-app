@@ -1,7 +1,10 @@
 import { api } from "../api/apiClient";
 
 export type LocationExceptionAction = "punch_in" | "punch_out";
-export type LocationExceptionTarget = "doctor_visit" | "therapist_schedule";
+export type LocationExceptionTarget =
+  | "doctor_task"
+  | "doctor_visit"
+  | "therapist_schedule";
 export type LocationExceptionStatus =
   | "approved"
   | "expired"
@@ -47,6 +50,15 @@ export const createLocationException = async (payload: {
   const response = await api.post<LocationExceptionRequest>(
     "/location-exceptions",
     payload
+  );
+  return response.data;
+};
+
+export const listMyLocationExceptions = async (): Promise<
+  LocationExceptionRequest[]
+> => {
+  const response = await api.get<LocationExceptionRequest[]>(
+    "/location-exceptions/mine"
   );
   return response.data;
 };

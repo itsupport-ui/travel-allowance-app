@@ -38,6 +38,12 @@
     "plugins": [
       "expo-router",
       [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow Travel Allowance to use your camera to capture proof of completed work."
+        }
+      ],
+      [
         "expo-location",
         {
           "locationWhenInUsePermission": "Allow Travel Allowance to use your location to start your workday."

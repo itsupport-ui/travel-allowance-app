@@ -30,6 +30,7 @@ import {
   getMyDoctorExpenses,
   updateDoctorExpense,
 } from "../../src/services/doctorWorkflowService";
+import { getTodayCompletedDoctorTasks } from "../../src/services/doctorTaskService";
 import { getApiErrorMessage } from "../../src/services/errorHandler";
 import type {
   DoctorProofAsset,
@@ -57,7 +58,7 @@ const transportModes = [
   { label: "Other", value: "other" },
 ] as const;
 type TransportMode = (typeof transportModes)[number]["value"] | "";
-type EntryMode = "manual" | "visit";
+type EntryMode = "manual" | "visit" | "task";
 const expenseCategories = [
   { label: "Mileage", value: "mileage" },
   { label: "Public transport", value: "public_transport" },
@@ -72,6 +73,7 @@ interface DoctorExpenseFormDraft {
   remarks: string;
   transportMode: TransportMode;
   visitId: number | null;
+  taskId?: number | null;
   entryMode: EntryMode;
   expenseCategory: ExpenseCategory;
   fromLocation: string;
@@ -89,7 +91,9 @@ const isDoctorExpenseFormDraft = (
     typeof draft.fare === "string" &&
     typeof draft.remarks === "string" &&
     (draft.visitId === null || typeof draft.visitId === "number") &&
-    (draft.entryMode === "visit" || draft.entryMode === "manual") &&
+    (draft.entryMode === "visit" ||
+      draft.entryMode === "task" ||
+      draft.entryMode === "manual") &&
     expenseCategories.some((category) => category.value === draft.expenseCategory) &&
     typeof draft.fromLocation === "string" &&
     typeof draft.toLocation === "string" &&
@@ -183,6 +187,7 @@ export default function DoctorExpenseFormScreen() {
   const [correctionReason, setCorrectionReason] = useState("");
   const [toLocation, setToLocation] = useState("");
   const [visitId, setVisitId] = useState<number | null>(null);
+  const [taskId, setTaskId] = useState<number | null>(null);
   const [transportMode, setTransportMode] =
     useState<TransportMode>("");
   const expensesQuery = useQuery({
@@ -193,6 +198,11 @@ export default function DoctorExpenseFormScreen() {
   const expense = editing
     ? expensesQuery.data?.find((item) => item.id === expenseId)
     : undefined;
+  // Manual means neither a visit nor a task supplied the route.
+  const isManualExpense =
+    expense !== undefined &&
+    expense.visit_id === null &&
+    (expense.task_id ?? null) === null;
   const visitOptionsQuery = useQuery({
     enabled: !editing && entryMode === "visit",
     queryFn: getTodayCompletedDoctorVisits,
@@ -211,6 +221,19 @@ export default function DoctorExpenseFormScreen() {
       null,
     [availableVisits, visitId]
   );
+  const taskOptionsQuery = useQuery({
+    enabled: !editing && entryMode === "task",
+    queryFn: getTodayCompletedDoctorTasks,
+    queryKey: ["doctor", "tasks", "completed-today"],
+  });
+  const availableTasks = useMemo(
+    () => taskOptionsQuery.data ?? [],
+    [taskOptionsQuery.data]
+  );
+  const noRouteOptions =
+    !editing &&
+    ((entryMode === "visit" && availableVisits.length === 0) ||
+      (entryMode === "task" && availableTasks.length === 0));
 
   useEffect(() => {
     if (editing) return;
@@ -264,6 +287,7 @@ export default function DoctorExpenseFormScreen() {
               setRemarks(stored.data.remarks);
               setTransportMode(stored.data.transportMode);
               setVisitId(stored.data.visitId);
+              setTaskId(stored.data.taskId ?? null);
               setDraftNotice("restored");
               setDraftReady(true);
             },
@@ -285,6 +309,7 @@ export default function DoctorExpenseFormScreen() {
     const timeout = setTimeout(() => {
       const hasDraftData =
         visitId !== null ||
+        taskId !== null ||
         entryMode === "manual" ||
         Boolean(transportMode) ||
         Boolean(fare.trim()) ||
@@ -306,6 +331,7 @@ export default function DoctorExpenseFormScreen() {
         remarks,
         transportMode,
         visitId,
+        taskId,
       })
         .then(() => setDraftNotice("saved"))
         .catch(() => setDraftNotice(null));
@@ -326,6 +352,7 @@ export default function DoctorExpenseFormScreen() {
     transportMode,
     toLocation,
     visitId,
+    taskId,
   ]);
 
   useEffect(() => {
@@ -358,7 +385,13 @@ export default function DoctorExpenseFormScreen() {
 
     initializedRef.current = true;
     setExpenseDate(expense.expense_date);
-    setEntryMode(expense.visit_id === null ? "manual" : "visit");
+    setEntryMode(
+      expense.visit_id !== null
+        ? "visit"
+        : (expense.task_id ?? null) !== null
+          ? "task"
+          : "manual"
+    );
     setExpenseCategory(
       expense.expense_category as ExpenseCategory
     );
@@ -368,6 +401,7 @@ export default function DoctorExpenseFormScreen() {
     setManualReason(expense.manual_reason ?? "");
     setToLocation(expense.to_location);
     setVisitId(expense.visit_id);
+    setTaskId(expense.task_id ?? null);
     setTransportMode(expense.transport_mode as TransportMode);
   }, [expense]);
 
@@ -378,35 +412,40 @@ export default function DoctorExpenseFormScreen() {
         expense_category: expenseCategory,
         fare: expenseCategory === "mileage" ? null : Number(fare),
         from_location:
-          (editing && expense?.visit_id === null) ||
+          (editing && isManualExpense) ||
           (!editing && entryMode === "manual")
             ? fromLocation.trim()
             : undefined,
         manual_reason:
-          (editing && expense?.visit_id === null) ||
+          (editing && isManualExpense) ||
           (!editing && entryMode === "manual")
             ? manualReason.trim()
             : undefined,
         correction_reason:
-          editing && expense?.visit_id === null
+          editing && isManualExpense
             ? correctionReason.trim()
             : undefined,
         proof_file: proofFile,
         remarks: remarks.trim(),
         to_location:
-          (editing && expense?.visit_id === null) ||
+          (editing && isManualExpense) ||
           (!editing && entryMode === "manual")
             ? toLocation.trim()
             : undefined,
         transport_mode: transportMode,
         version:
-          editing && expense?.visit_id === null
+          editing && isManualExpense
             ? expense.manual_review_version
             : undefined,
         visit_id: editing
           ? (expense?.visit_id ?? null)
           : entryMode === "visit"
             ? visitId
+            : null,
+        task_id: editing
+          ? (expense?.task_id ?? null)
+          : entryMode === "task"
+            ? taskId
             : null,
       };
 
@@ -441,11 +480,12 @@ export default function DoctorExpenseFormScreen() {
         queryClient.invalidateQueries({
           queryKey: queryKeys.doctor.claims.all,
         }),
+        queryClient.invalidateQueries({ queryKey: ["doctor", "tasks"] }),
       ]);
       Alert.alert(
         editing ? "Expense Updated" : "Expense Added",
         editing
-          ? expense?.visit_id === null
+          ? isManualExpense
             ? "The corrected expense was resubmitted for review."
             : "The draft expense was updated."
           : entryMode === "manual"
@@ -509,8 +549,12 @@ export default function DoctorExpenseFormScreen() {
       setFormError("Select a completed patient visit.");
       return;
     }
+    if (!editing && entryMode === "task" && taskId === null) {
+      setFormError("Select a completed task.");
+      return;
+    }
     if (
-      ((editing && expense?.visit_id === null) ||
+      ((editing && isManualExpense) ||
         (!editing && entryMode === "manual")) &&
       (!fromLocation.trim() || !toLocation.trim())
     ) {
@@ -526,7 +570,7 @@ export default function DoctorExpenseFormScreen() {
       return;
     }
     if (
-      ((editing && expense?.visit_id === null) ||
+      ((editing && isManualExpense) ||
         (!editing && entryMode === "manual")) &&
       manualReason.trim().length < 10
     ) {
@@ -543,7 +587,7 @@ export default function DoctorExpenseFormScreen() {
     }
     if (
       editing &&
-      expense?.visit_id === null &&
+      isManualExpense &&
       correctionReason.trim().length < 5
     ) {
       setFormError("Explain the correction in at least 5 characters.");
@@ -702,6 +746,7 @@ export default function DoctorExpenseFormScreen() {
                 onChange={(value) => {
                   setEntryMode(value);
                   setVisitId(null);
+                  setTaskId(null);
                   setFromLocation("");
                   setToLocation("");
                   setExpenseCategory("public_transport");
@@ -709,6 +754,7 @@ export default function DoctorExpenseFormScreen() {
                 }}
                 options={[
                   { label: "Completed visit", value: "visit" },
+                  { label: "Completed task", value: "task" },
                   { label: "Manual exception", value: "manual" },
                 ]}
                 value={entryMode}
@@ -787,9 +833,72 @@ export default function DoctorExpenseFormScreen() {
             </>
           ) : null}
 
+          {!editing && entryMode === "task" ? (
+            <>
+              <Text style={styles.sectionLabel}>Completed task *</Text>
+              {taskOptionsQuery.isPending ? (
+                <ActivityIndicator
+                  color={colors.primary}
+                  style={styles.optionLoader}
+                />
+              ) : availableTasks.length === 0 ? (
+                <View style={styles.noVisits}>
+                  <Text style={styles.noVisitsTitle}>
+                    No completed tasks available for today&apos;s expenses.
+                  </Text>
+                  <Text style={styles.noVisitsText}>
+                    Punch out of an assigned task before adding its travel
+                    expense.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.visitOptions}>
+                  {availableTasks.map((option) => {
+                    const selected = taskId === option.id;
+                    return (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        key={option.id}
+                        style={[
+                          styles.visitOption,
+                          selected && styles.selectedVisitOption,
+                        ]}
+                        onPress={() => {
+                          setTaskId(option.id);
+                          setFromLocation("Previous stop on your route");
+                          setToLocation(option.place_name ?? option.title);
+                          setFormError(null);
+                        }}
+                      >
+                        <View style={styles.visitOptionText}>
+                          <Text style={styles.visitPatient}>{option.title}</Text>
+                          <Text style={styles.visitMeta}>
+                            {option.place_name ?? "Assigned task"}
+                          </Text>
+                        </View>
+                        <Ionicons
+                          color={selected ? colors.primary : colors.textSubtle}
+                          name={
+                            selected
+                              ? "checkmark-circle"
+                              : "radio-button-off-outline"
+                          }
+                          size={22}
+                        />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+              {formError === "Select a completed task." ? (
+                <Text style={styles.choiceError}>{formError}</Text>
+              ) : null}
+            </>
+          ) : null}
+
           <DoctorField
             editable={
-              (editing && expense?.visit_id === null) ||
+              (editing && isManualExpense) ||
               (!editing && entryMode === "manual")
             }
             error={
@@ -803,7 +912,7 @@ export default function DoctorExpenseFormScreen() {
           />
           <DoctorField
             editable={
-              (editing && expense?.visit_id === null) ||
+              (editing && isManualExpense) ||
               (!editing && entryMode === "manual")
             }
             label="Travel to"
@@ -831,7 +940,7 @@ export default function DoctorExpenseFormScreen() {
             }}
             options={expenseCategories.filter(
               (category) =>
-                entryMode === "visit" || category.value !== "mileage"
+                entryMode !== "manual" || category.value !== "mileage"
             )}
             value={expenseCategory}
           />
@@ -935,7 +1044,7 @@ export default function DoctorExpenseFormScreen() {
             />
           ) : null}
 
-          {editing && expense?.visit_id === null ? (
+          {editing && isManualExpense ? (
             <DoctorField
               error={
                 formError === "Explain the correction in at least 5 characters."
@@ -962,11 +1071,11 @@ export default function DoctorExpenseFormScreen() {
 
           <View style={styles.notice}>
             <Text style={styles.noticeTitle}>
-              {entryMode === "visit" ? "Route verified" : "Manual exception review"}
+              {entryMode !== "manual" ? "Route verified" : "Manual exception review"}
             </Text>
             <Text style={styles.noticeText}>
-              {entryMode === "visit"
-                ? "Locations and distance come from attendance and patient visit GPS. Mileage is calculated by the server; actual-fare categories use the amount entered."
+              {entryMode !== "manual"
+                ? "Locations and distance come from attendance and visit or task GPS. Mileage is calculated by the server; actual-fare categories use the amount entered."
                 : "Typed routes are weaker evidence, so this expense cannot enter a claim until an administrator approves it."}
             </Text>
           </View>
@@ -976,16 +1085,16 @@ export default function DoctorExpenseFormScreen() {
             accessibilityState={{
               disabled:
                 mutation.isPending ||
-                (!editing && entryMode === "visit" && availableVisits.length === 0),
+                (noRouteOptions),
             }}
             disabled={
               mutation.isPending ||
-              (!editing && entryMode === "visit" && availableVisits.length === 0)
+              (noRouteOptions)
             }
             style={[
               styles.submitButton,
               (mutation.isPending ||
-                (!editing && entryMode === "visit" && availableVisits.length === 0)) &&
+                (noRouteOptions)) &&
                 styles.disabledButton,
             ]}
             onPress={submit}

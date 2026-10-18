@@ -254,11 +254,18 @@ export const getAdminScheduleReview = async (
   }
 };
 
+export type ScheduleScope = "admin" | "doctor";
+
+const scopePrefix = (scope: ScheduleScope): string =>
+  scope === "doctor" ? "/doctor-schedules" : "/admin-schedules";
+
 export const getAdminScheduleFormOptions =
-  async (): Promise<AdminScheduleFormOptions> => {
+  async (
+    scope: ScheduleScope = "admin"
+  ): Promise<AdminScheduleFormOptions> => {
     try {
       const response = await api.get<ApiFormOptions>(
-        "/admin-schedules/form-options",
+        `${scopePrefix(scope)}/form-options`,
         { headers: await getAuthHeaders() }
       );
       const patients: SchedulePatientOption[] =
@@ -284,6 +291,7 @@ export const getAdminScheduleFormOptions =
   };
 
 interface AvailabilityInput {
+  scope?: ScheduleScope;
   cadenceDays: number;
   endDate: Date | null;
   excludeScheduleId?: number;
@@ -300,7 +308,7 @@ export const getTherapistAvailability = async (
 ): Promise<TherapistAvailability> => {
   try {
     const response = await api.get<ApiAvailability>(
-      "/admin-schedules/therapist-availability",
+      `${scopePrefix(input.scope ?? "admin")}/therapist-availability`,
       {
         headers: await getAuthHeaders(),
         params: {

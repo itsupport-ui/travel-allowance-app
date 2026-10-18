@@ -30,6 +30,7 @@ import {
 } from "../../../src/components/doctor/DoctorWorkflowUi";
 import { MyClaimsReportActions } from "../../../src/components/reports/MyClaimsReportActions";
 import { queryKeys } from "../../../src/query/queryKeys";
+import { getDoctorTaskDaySummary } from "../../../src/services/doctorTaskService";
 import {
   getDoctorClaimReadiness,
   getMyDoctorClaims,
@@ -42,6 +43,7 @@ import {
   formatDoctorCurrency,
   formatDoctorDate,
   formatDoctorLabel,
+  isManualExpense,
 } from "../../../src/utils/doctorWorkflow";
 
 type ClaimsTab = "history" | "today";
@@ -63,6 +65,11 @@ export default function DoctorClaimsScreen() {
     queryFn: getMyDoctorClaims,
     queryKey: queryKeys.doctor.claims.mine,
   });
+  const taskSummaryQuery = useQuery({
+    queryFn: getDoctorTaskDaySummary,
+    queryKey: ["doctor", "tasks", "day-summary"],
+  });
+  const taskSummary = taskSummaryQuery.data;
   const readinessQuery = useQuery({
     queryFn: getDoctorClaimReadiness,
     queryKey: queryKeys.doctor.claims.readiness,
@@ -277,6 +284,56 @@ export default function DoctorClaimsScreen() {
         </View>
       </View>
 
+      {taskSummary && taskSummary.total > 0 ? (
+        <View style={styles.taskCard}>
+          <Text style={styles.taskTitle}>Today&apos;s tasks</Text>
+          <Text style={styles.taskCaption}>
+            {taskSummary.completed} of {taskSummary.total} completed
+          </Text>
+          {taskSummary.tasks.map((task) => (
+            <View key={task.id} style={styles.taskLine}>
+              <Ionicons
+                color={
+                  task.status === "completed"
+                    ? colors.primary
+                    : colors.textSubtle
+                }
+                name={
+                  task.status === "completed"
+                    ? "checkmark-circle"
+                    : "ellipse-outline"
+                }
+                size={18}
+              />
+              <Text numberOfLines={1} style={styles.taskLineText}>
+                {task.title}
+              </Text>
+              <Text style={styles.taskLineMeta}>
+                {formatDoctorLabel(task.status)}
+                {task.status === "completed" && !task.has_expense
+                  ? " · no expense"
+                  : ""}
+              </Text>
+            </View>
+          ))}
+          {taskSummary.unfinished > 0 ? (
+            <Text style={styles.taskWarning}>
+              {taskSummary.unfinished} task
+              {taskSummary.unfinished === 1 ? " is" : "s are"} not finished.
+              Punch out before ending the day.
+            </Text>
+          ) : null}
+          {taskSummary.completed_without_expense > 0 ? (
+            <Text style={styles.taskHint}>
+              {taskSummary.completed_without_expense} completed task
+              {taskSummary.completed_without_expense === 1 ? " has" : "s have"}{" "}
+              no travel expense yet. Add one if you travelled, then submit
+              your claim.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {todayClaim && todayClaim.status !== "rejected" ? (
         <View style={styles.infoCard}>
           <Text style={styles.infoText}>
@@ -393,7 +450,7 @@ export default function DoctorClaimsScreen() {
                 </Text>
                 <DoctorStatusBadge
                   status={
-                    expense.visit_id === null && expense.manual_review_status
+                    isManualExpense(expense) && expense.manual_review_status
                       ? expense.manual_review_status
                       : expense.status
                   }
@@ -544,6 +601,48 @@ const styles = StyleSheet.create({
     fontSize: typography.size.small,
     fontWeight: typography.weight.extrabold,
     marginBottom: spacing.xs,
+  },
+  taskCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.control,
+    marginTop: spacing.lgPlus,
+    padding: spacing.xl,
+  },
+  taskTitle: {
+    color: colors.textStrong,
+    fontSize: typography.size.body,
+    fontWeight: typography.weight.extrabold,
+  },
+  taskCaption: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    marginBottom: spacing.md,
+    marginTop: spacing.xs,
+  },
+  taskLine: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  taskLineText: {
+    color: colors.textPrimary,
+    flex: 1,
+    fontSize: typography.size.smallLarge,
+  },
+  taskLineMeta: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+  },
+  taskWarning: {
+    color: colors.danger,
+    fontSize: typography.size.small,
+    marginTop: spacing.md,
+  },
+  taskHint: {
+    color: colors.textMuted,
+    fontSize: typography.size.small,
+    marginTop: spacing.md,
   },
   summaryCard: {
     backgroundColor: colors.surface,

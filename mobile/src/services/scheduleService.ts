@@ -191,13 +191,20 @@ export const getScheduleById = async (
   );
 
 export const createSchedule = async (
-  request: CreateScheduleRequest
+  request: CreateScheduleRequest,
+  scope: "admin" | "doctor" = "admin"
 ): Promise<ScheduleResponse> =>
   executeRequest(
     async () =>
-      api.post<ScheduleResponse>("/schedule/create", request, {
-        headers: await getAuthHeaders(),
-      }),
+      api.post<ScheduleResponse>(
+        scope === "doctor"
+          ? "/doctor-schedules/create"
+          : "/schedule/create",
+        request,
+        {
+          headers: await getAuthHeaders(),
+        }
+      ),
     "Unable to create the schedule."
   );
 

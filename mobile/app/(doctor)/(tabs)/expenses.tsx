@@ -42,6 +42,7 @@ import {
   formatDoctorCurrency,
   formatDoctorDate,
   formatDoctorLabel,
+  isManualExpense,
 } from "../../../src/utils/doctorWorkflow";
 
 type ExpenseTab = "history" | "today";
@@ -90,6 +91,7 @@ export default function DoctorExpensesScreen() {
         expense.remarks ?? "",
         `expense ${expense.id}`,
         expense.visit_id ? `visit ${expense.visit_id}` : "",
+        expense.task_id ? `task ${expense.task_id}` : "",
       ].some((value) => value.toLowerCase().includes(normalizedSearch))
     );
   }, [activeTab, allExpenses, search, todayExpenses]);
@@ -154,7 +156,7 @@ export default function DoctorExpensesScreen() {
     await Promise.all([todayQuery.refetch(), allQuery.refetch()]);
   };
   const confirmDelete = (expense: DoctorExpense) => {
-    const manual = expense.visit_id === null;
+    const manual = isManualExpense(expense);
     Alert.alert(
       manual ? "Cancel Manual Expense" : "Delete Expense",
       `${manual ? "Cancel" : "Delete"} the ${formatDoctorCurrency(expense.fare)} expense from ${
@@ -265,7 +267,7 @@ export default function DoctorExpensesScreen() {
         visibleExpenses.map((expense) => {
           const canModify =
             expense.available_actions.includes("edit") ||
-            (expense.visit_id !== null &&
+            (!isManualExpense(expense) &&
               expense.status === "draft" &&
               expense.claim_id === null);
           const deleting =
@@ -294,7 +296,9 @@ export default function DoctorExpensesScreen() {
                   <Text style={styles.from}>
                     {expense.visit_id
                       ? `Visit #${expense.visit_id}`
-                      : `Expense #${expense.id}`}
+                      : expense.task_id
+                        ? `Task #${expense.task_id}`
+                        : `Expense #${expense.id}`}
                   </Text>
                   <Text numberOfLines={1} style={styles.to}>
                     {expense.from_location} to {expense.to_location}
@@ -302,7 +306,7 @@ export default function DoctorExpensesScreen() {
                 </View>
                 <DoctorStatusBadge
                   status={
-                    expense.visit_id === null && expense.manual_review_status
+                    isManualExpense(expense) && expense.manual_review_status
                       ? expense.manual_review_status
                       : expense.status
                   }
@@ -333,7 +337,7 @@ export default function DoctorExpensesScreen() {
               {expense.remarks ? (
                 <Text style={styles.remarks}>{expense.remarks}</Text>
               ) : null}
-              {expense.visit_id === null ? (
+              {isManualExpense(expense) ? (
                 <View style={styles.reviewCard}>
                   <Text style={styles.reviewTitle}>
                     {formatDoctorLabel(expense.expense_category)} · Revision {expense.manual_revision}
@@ -414,16 +418,16 @@ export default function DoctorExpensesScreen() {
                     ) : (
                       <Ionicons
                         color={colors.danger}
-                        name={expense.visit_id === null ? "close-circle-outline" : "trash-outline"}
+                        name={isManualExpense(expense) ? "close-circle-outline" : "trash-outline"}
                         size={18}
                       />
                     )}
                     <Text style={styles.deleteText}>
                       {deleting
-                        ? expense.visit_id === null
+                        ? isManualExpense(expense)
                           ? "Cancelling..."
                           : "Deleting..."
-                        : expense.visit_id === null
+                        : isManualExpense(expense)
                           ? "Cancel"
                           : "Delete"}
                     </Text>

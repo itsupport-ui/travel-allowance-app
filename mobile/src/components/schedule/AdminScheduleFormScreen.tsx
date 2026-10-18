@@ -67,6 +67,7 @@ import { clearAuthSession } from "../../utils/storage";
 interface AdminScheduleFormScreenProps {
   mode: "create" | "edit";
   reschedule?: boolean;
+  role?: "admin" | "doctor";
   scheduleId?: number;
 }
 
@@ -260,6 +261,7 @@ const AvailabilitySummary = ({
 export function AdminScheduleFormScreen({
   mode,
   reschedule = false,
+  role = "admin",
   scheduleId,
 }: AdminScheduleFormScreenProps) {
   const { width } = useWindowDimensions();
@@ -304,12 +306,17 @@ export function AdminScheduleFormScreen({
     setLoadError(null);
     try {
       const [formOptions, schedule] = await Promise.all([
-        getAdminScheduleFormOptions(),
+        getAdminScheduleFormOptions(role),
         mode === "edit" && scheduleId
           ? getScheduleById(scheduleId)
           : Promise.resolve(null),
       ]);
       setOptions(formOptions);
+      // A doctor can only schedule as themselves, so preselect that doctor.
+      if (role === "doctor" && formOptions.doctors.length === 1) {
+        const onlyDoctorId = formOptions.doctors[0].id;
+        setForm((current) => ({ ...current, doctorId: onlyDoctorId }));
+      }
       if (schedule) {
         const nextForm = scheduleResponseToForm(schedule);
         setForm(nextForm);
@@ -324,7 +331,7 @@ export function AdminScheduleFormScreen({
     } finally {
       setLoading(false);
     }
-  }, [handleSessionExpiry, mode, scheduleId]);
+  }, [handleSessionExpiry, mode, role, scheduleId]);
 
   useEffect(() => {
     void loadData();
@@ -367,6 +374,7 @@ export function AdminScheduleFormScreen({
       try {
         setAvailability(
           await getTherapistAvailability({
+            scope: role,
             cadenceDays: form.cadenceDays,
             endDate: form.endDate,
             excludeScheduleId:
@@ -399,6 +407,7 @@ export function AdminScheduleFormScreen({
     form.treatmentDate,
     handleSessionExpiry,
     mode,
+    role,
     scheduleId,
   ]);
 
@@ -519,7 +528,7 @@ export function AdminScheduleFormScreen({
       if (mode === "create") {
         const request = buildCreateScheduleRequest(form);
         if (!request) return;
-        saved = await createSchedule(request);
+        saved = await createSchedule(request, role);
       } else {
         const request = buildUpdateScheduleRequest(form);
         if (!request || !scheduleId) return;
@@ -528,7 +537,17 @@ export function AdminScheduleFormScreen({
       Alert.alert(
         mode === "create" ? "Schedule Created" : "Schedule Updated",
         `${saved.patient_name}'s appointment has been saved.`,
-        [{ onPress: () => router.replace("/(admin)/schedules"), text: "OK" }],
+        [
+          {
+            onPress: () =>
+              router.replace(
+                role === "doctor"
+                  ? "/(doctor)/(tabs)/work"
+                  : "/(admin)/schedules"
+              ),
+            text: "OK",
+          },
+        ],
         { cancelable: false }
       );
     } catch (error) {
@@ -541,6 +560,7 @@ export function AdminScheduleFormScreen({
   }, [
     availability,
     form,
+    role,
     handleSessionExpiry,
     mode,
     originalForm,
