@@ -453,6 +453,7 @@ def get_exception_rows(
                 .join(Doctor, Doctor.id == DoctorExpense.doctor_id)
                 .filter(
                     DoctorExpense.visit_id.is_(None),
+                    DoctorExpense.task_id.is_(None),
                     or_(
                         DoctorExpense.manual_review_status.in_(
                             ["pending", "changes_requested"]

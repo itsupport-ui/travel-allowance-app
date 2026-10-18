@@ -67,6 +67,9 @@ class TreatmentPlanResponse(BaseModel):
     status: str
     has_schedule: bool = False
     schedule_count: int = 0
+    # Upcoming therapist schedules for the same patient name that were booked
+    # directly (not from a plan). Shown before generating plan schedules.
+    similar_schedule_count: int = 0
     created_at: datetime
     updated_at: datetime | None = None
     rejection_reason: str | None = None

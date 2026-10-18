@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.doctor import Doctor
 from app.models.doctor_consultation import DoctorConsultation
+from app.models.doctor_task import DoctorTask
 from app.models.doctor_visit import DoctorVisit
 from app.models.treatment_plan import TreatmentPlan
 from app.models.treatment_schedule import TreatmentSchedule
@@ -280,6 +281,47 @@ def get_clinical_activity_rows(
             for plan, staff_name, visit_date in plans
         )
 
+        # Patient-visit tasks are already listed as "Doctor visit" rows.
+        task_query = (
+            db.query(DoctorTask, Doctor.name)
+            .join(Doctor, Doctor.id == DoctorTask.doctor_id)
+            .filter(DoctorTask.task_type != "patient_visit")
+        )
+        if from_date is not None:
+            task_query = task_query.filter(DoctorTask.scheduled_date >= from_date)
+        if to_date is not None:
+            task_query = task_query.filter(DoctorTask.scheduled_date <= to_date)
+        if doctor_id is not None:
+            task_query = task_query.filter(DoctorTask.doctor_id == doctor_id)
+        if status != "all":
+            stored_status = "assigned" if status == "scheduled" else status
+            if stored_status in {"assigned", "in_progress", "completed", "cancelled"}:
+                task_query = task_query.filter(DoctorTask.status == stored_status)
+            else:
+                task_query = task_query.filter(False)
+        tasks = (
+            task_query.order_by(DoctorTask.scheduled_date.desc(), DoctorTask.id.desc())
+            .limit(row_limit + 1)
+            .all()
+        )
+        rows.extend(
+            [
+                "Doctor",
+                staff_name,
+                "Doctor task",
+                task.id,
+                task.scheduled_date,
+                "scheduled" if task.status == "assigned" else task.status,
+                "",
+                (task.duration_seconds or 0) // 60 if task.duration_seconds else "",
+                task.task_type.replace("_", " "),
+                task.place_id or "",
+                "Proof submitted" if task.proof_file else "No proof",
+                task.created_at,
+            ]
+            for task, staff_name in tasks
+        )
+
     rows.sort(
         key=lambda row: (str(row[4]), str(row[0]), str(row[2]), int(row[3])),
         reverse=True,
@@ -297,6 +339,7 @@ def summarize_clinical_activity(
         "doctor_visits": activity_types.count("Doctor visit"),
         "treatment_plans": activity_types.count("Treatment plan"),
         "treatment_sessions": activity_types.count("Treatment session"),
+        "doctor_tasks": activity_types.count("Doctor task"),
         "completed_activities": statuses.count("completed"),
         "in_progress_activities": statuses.count("in_progress"),
         "missed_activities": statuses.count("missed"),

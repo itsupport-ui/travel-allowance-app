@@ -19,8 +19,12 @@ class LocationExceptionRequest(Base):
     __tablename__ = "location_exception_requests"
     __table_args__ = (
         CheckConstraint(
-            "(schedule_id IS NOT NULL AND doctor_visit_id IS NULL) OR "
-            "(schedule_id IS NULL AND doctor_visit_id IS NOT NULL)",
+            "(schedule_id IS NOT NULL AND doctor_visit_id IS NULL "
+            "AND doctor_task_id IS NULL) OR "
+            "(schedule_id IS NULL AND doctor_visit_id IS NOT NULL "
+            "AND doctor_task_id IS NULL) OR "
+            "(schedule_id IS NULL AND doctor_visit_id IS NULL "
+            "AND doctor_task_id IS NOT NULL)",
             name="ck_location_exception_exactly_one_target",
         ),
         UniqueConstraint(
@@ -46,6 +50,12 @@ class LocationExceptionRequest(Base):
     doctor_visit_id = Column(
         Integer,
         ForeignKey("doctor_visits.id"),
+        nullable=True,
+        index=True,
+    )
+    doctor_task_id = Column(
+        Integer,
+        ForeignKey("doctor_tasks.id"),
         nullable=True,
         index=True,
     )

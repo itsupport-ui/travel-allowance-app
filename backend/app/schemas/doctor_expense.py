@@ -12,6 +12,7 @@ class DoctorExpenseCreate(BaseModel):
     from_location: str | None = None
     to_location: str | None = None
     visit_id: int | None = None
+    task_id: int | None = None
     transport_mode: str
     fare: float | None = Field(default=None, gt=0)
     remarks: str | None = None
@@ -28,6 +29,7 @@ class DoctorExpenseResponse(BaseModel):
     expense_date: date
     workday_id: int | None = None
     visit_id: int | None = None
+    task_id: int | None = None
     from_waypoint_id: int | None = None
     to_waypoint_id: int | None = None
     from_location: str

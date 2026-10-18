@@ -118,6 +118,8 @@ def target_values(
 ) -> tuple[str, int]:
     if exception.schedule_id is not None:
         return "therapist_schedule", exception.schedule_id
+    if exception.doctor_task_id is not None:
+        return "doctor_task", int(exception.doctor_task_id)
     return "doctor_visit", int(exception.doctor_visit_id)
 
 

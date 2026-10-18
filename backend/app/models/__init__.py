@@ -5,11 +5,13 @@ from app.models.doctor_consultation import DoctorConsultation
 from app.models.doctor_consultation_event import DoctorConsultationEvent
 from app.models.domain_audit_event import DomainAuditEvent
 from app.models.doctor_expense import DoctorExpense
+from app.models.doctor_task import DoctorTask
 from app.models.doctor_visit import DoctorVisit
 from app.models.doctor_travel_waypoint import DoctorTravelWaypoint
 from app.models.doctor_workday import DoctorWorkDay
 from app.models.location_exception_request import LocationExceptionRequest
 from app.models.location_policy import LocationPolicy
+from app.models.place import Place
 from app.models.operational_follow_up import OperationalFollowUp
 from app.models.manual_travel_review_event import ManualTravelReviewEvent
 from app.models.manual_doctor_expense_review_event import (

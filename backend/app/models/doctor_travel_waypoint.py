@@ -46,6 +46,12 @@ class DoctorTravelWaypoint(Base):
         nullable=True,
         index=True,
     )
+    task_id = Column(
+        Integer,
+        ForeignKey("doctor_tasks.id"),
+        nullable=True,
+        index=True,
+    )
     waypoint_type = Column(String, nullable=False)
     sequence_number = Column(Integer, nullable=False)
     address = Column(String, nullable=True)

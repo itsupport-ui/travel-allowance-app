@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.doctor_task import DoctorTask
 from app.models.doctor_visit import DoctorVisit
 from app.models.location_exception_request import LocationExceptionRequest
 from app.models.therapist_workday import TherapistWorkDay
@@ -57,6 +58,56 @@ def _occurs_today(schedule: TreatmentSchedule) -> bool:
         and schedule.end_date
         and schedule.start_date <= today <= schedule.end_date
     )
+
+
+def _doctor_task_coordinates(
+    db: Session,
+    current_user: User,
+    payload: LocationExceptionCreate,
+    today,
+) -> tuple[float | None, float | None]:
+    doctor = get_current_doctor(db, current_user)
+    task = (
+        db.query(DoctorTask)
+        .filter(
+            DoctorTask.id == payload.target_id,
+            DoctorTask.doctor_id == doctor.id,
+        )
+        .first()
+    )
+    if task is None or task.place is None:
+        raise HTTPException(status_code=404, detail="Doctor task not found.")
+    if get_doctor_workday(db, doctor.id, today, active_only=True) is None:
+        raise DomainHTTPException(
+            status_code=400,
+            code="WORKDAY_NOT_ACTIVE",
+            message="Start your workday before requesting an exception.",
+            recoverable=True,
+            suggested_action="start_workday",
+        )
+    if task.scheduled_date != today or task.status not in {
+        "assigned",
+        "in_progress",
+    }:
+        raise DomainHTTPException(
+            status_code=409,
+            code="TASK_NOT_EXCEPTION_ELIGIBLE",
+            message="This task is not eligible for a location exception today.",
+            recoverable=False,
+            suggested_action="view_task_status",
+        )
+    expected_session = (
+        "NOT_STARTED" if payload.action == "punch_in" else "IN_PROGRESS"
+    )
+    if task.session_status != expected_session:
+        raise DomainHTTPException(
+            status_code=409,
+            code="SESSION_NOT_EXCEPTION_ELIGIBLE",
+            message=f"The task is not ready for {payload.action.replace('_', ' ')}.",
+            recoverable=True,
+            suggested_action="refresh_task",
+        )
+    return task.place.latitude, task.place.longitude
 
 
 def _target_coordinates_and_validate_state(
@@ -117,6 +168,9 @@ def _target_coordinates_and_validate_state(
                 suggested_action="refresh_treatment_session",
             )
         return schedule.patient_latitude, schedule.patient_longitude
+
+    if payload.target_type == "doctor_task":
+        return _doctor_task_coordinates(db, current_user, payload, today)
 
     if payload.target_type != "doctor_visit":
         raise HTTPException(status_code=403, detail="Access denied.")
@@ -237,6 +291,12 @@ def request_location_exception(
         current_user=current_user,
         payload=payload,
     )
+    geofence_radius_m = policy.geofence_radius_m
+    if payload.target_type == "doctor_task":
+        task_place = (
+            db.query(DoctorTask).filter(DoctorTask.id == payload.target_id).first()
+        ).place
+        geofence_radius_m = task_place.radius_m or geofence_radius_m
     try:
         validate_action_location_evidence(
             device_timestamp=payload.device_timestamp,
@@ -249,7 +309,7 @@ def request_location_exception(
             arrival_longitude=payload.longitude,
             patient_latitude=patient_latitude,
             patient_longitude=patient_longitude,
-            radius_km=policy.geofence_radius_m / 1000,
+            radius_km=geofence_radius_m / 1000,
         )
     except ValueError:
         pass
@@ -291,6 +351,9 @@ def request_location_exception(
         doctor_visit_id=(
             payload.target_id if payload.target_type == "doctor_visit" else None
         ),
+        doctor_task_id=(
+            payload.target_id if payload.target_type == "doctor_task" else None
+        ),
         action=payload.action,
         business_date=india_now().date(),
         reason=payload.reason.strip(),
@@ -299,7 +362,7 @@ def request_location_exception(
         gps_accuracy_m=payload.gps_accuracy_m,
         device_timestamp=captured_at,
         distance_km=distance_km,
-        geofence_radius_m=policy.geofence_radius_m,
+        geofence_radius_m=geofence_radius_m,
         evidence_quality=evidence_quality(
             payload.gps_accuracy_m,
             accuracy_threshold_m=policy.gps_accuracy_threshold_m,

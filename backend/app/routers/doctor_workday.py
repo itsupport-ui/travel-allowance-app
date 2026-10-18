@@ -10,6 +10,7 @@ from app.config import (
 )
 from app.database import get_db
 from app.models.doctor_expense import DoctorExpense
+from app.models.doctor_task import DoctorTask
 from app.models.doctor_travel_waypoint import DoctorTravelWaypoint
 from app.models.doctor_visit import DoctorVisit
 from app.models.doctor_workday import DoctorWorkDay
@@ -87,6 +88,17 @@ def get_today_doctor_workday(
         if workday.is_active
         else None
     )
+    active_task = (
+        db.query(DoctorTask.id)
+        .filter(
+            DoctorTask.doctor_id == doctor.id,
+            DoctorTask.task_type != "patient_visit",
+            DoctorTask.session_status == "IN_PROGRESS",
+        )
+        .first()
+        if workday.is_active
+        else None
+    )
     available_actions: list[str] = []
     blocking_reasons: list[str] = []
     next_action = None
@@ -94,6 +106,10 @@ def get_today_doctor_workday(
         available_actions = ["resume_visit"]
         blocking_reasons = ["ACTIVE_VISIT_BLOCKS_WORKDAY_END"]
         next_action = "punch_out_active_visit"
+    elif workday.is_active and active_task is not None:
+        available_actions = ["resume_task"]
+        blocking_reasons = ["ACTIVE_TASK_BLOCKS_WORKDAY_END"]
+        next_action = "punch_out_active_task"
     elif workday.is_active:
         available_actions = ["view_visits"]
         next_action = "view_visits"
@@ -318,6 +334,25 @@ def end_doctor_workday(
             recoverable=True,
             suggested_action="punch_out_active_visit",
             blocking_fields=["active_visit_id"],
+        )
+
+    active_task = (
+        db.query(DoctorTask.id)
+        .filter(
+            DoctorTask.doctor_id == doctor.id,
+            DoctorTask.task_type != "patient_visit",
+            DoctorTask.session_status == "IN_PROGRESS",
+        )
+        .first()
+    )
+    if active_task is not None:
+        raise DomainHTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="ACTIVE_TASK_BLOCKS_WORKDAY_END",
+            message="Punch out from the active task before ending the workday.",
+            recoverable=True,
+            suggested_action="punch_out_active_task",
+            blocking_fields=["active_task_id"],
         )
 
     visits = db.query(DoctorVisit).filter(

@@ -5,13 +5,15 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func
+from sqlalchemy.orm import Session, object_session, selectinload
 
 from app.database import get_db
 from app.models.doctor import Doctor
 from app.models.doctor_visit import DoctorVisit
 from app.models.treatment_plan import TreatmentPlan
 from app.models.treatment_schedule import TreatmentSchedule
+from app.utils.timezone import india_now
 from app.models.treatment_schedule_series import TreatmentScheduleSeries
 from app.services.schedule_conflict_service import find_schedule_conflicts
 from app.services.schedule_location_service import resolve_patient_coordinates
@@ -59,6 +61,30 @@ def _treatment_plan_query(db: Session):
     )
 
 
+def _similar_direct_schedule_count(plan: TreatmentPlan) -> int:
+    """Count upcoming non-plan schedules booked for the same patient name."""
+    db = object_session(plan)
+    if db is None or not plan.patient_name:
+        return 0
+    schedule_date = func.coalesce(
+        TreatmentSchedule.occurrence_date,
+        TreatmentSchedule.treatment_date,
+        TreatmentSchedule.start_date,
+    )
+    return (
+        db.query(func.count(TreatmentSchedule.id))
+        .filter(
+            TreatmentSchedule.treatment_plan_id.is_(None),
+            TreatmentSchedule.status == "scheduled",
+            func.lower(TreatmentSchedule.patient_name)
+            == plan.patient_name.strip().lower(),
+            schedule_date >= india_now().date(),
+        )
+        .scalar()
+        or 0
+    )
+
+
 def _treatment_plan_response(
     plan: TreatmentPlan,
     *,
@@ -95,11 +121,20 @@ def _treatment_plan_response(
             blockers = ["AWAITING_DOCTOR_CORRECTION"]
             next_action = "wait_for_resubmission"
 
+    similar_schedule_count = 0
+    if (
+        actor_role == "admin"
+        and plan.status == "approved"
+        and not has_schedule
+    ):
+        similar_schedule_count = _similar_direct_schedule_count(plan)
+
     return TreatmentPlanResponse.model_validate(plan).model_copy(
         update={
             "available_actions": actions,
             "blocking_reasons": blockers,
             "next_action": next_action,
+            "similar_schedule_count": similar_schedule_count,
         }
     )
 

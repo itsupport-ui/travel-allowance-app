@@ -4,7 +4,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-LocationExceptionTarget = Literal["therapist_schedule", "doctor_visit"]
+LocationExceptionTarget = Literal[
+    "therapist_schedule",
+    "doctor_visit",
+    "doctor_task",
+]
 LocationExceptionAction = Literal["punch_in", "punch_out"]
 LocationExceptionStatus = Literal[
     "pending",

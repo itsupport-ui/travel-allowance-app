@@ -40,6 +40,14 @@ class DoctorExpense(Base):
         unique=True,
         index=True,
     )
+    # Set instead of visit_id when the travel was for an assigned doctor task.
+    task_id = Column(
+        Integer,
+        ForeignKey("doctor_tasks.id"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
     from_waypoint_id = Column(
         Integer,
         ForeignKey("doctor_travel_waypoints.id"),
@@ -124,3 +132,8 @@ class DoctorExpense(Base):
         "DoctorClaim",
         back_populates="expenses",
     )
+
+    @property
+    def is_route_based(self) -> bool:
+        """True for expenses derived from a recorded visit or task route."""
+        return self.visit_id is not None or self.task_id is not None

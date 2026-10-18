@@ -25,6 +25,8 @@ from app.routers import (
     dashboard,
     doctor_claim,
     doctor_consultation,
+    doctor_schedules,
+    doctor_tasks,
     domain_audit,
     doctor_expense,
     doctor_visit_sessions,
@@ -35,6 +37,7 @@ from app.routers import (
     workday_exceptions,
     notifications,
     operational_follow_ups,
+    places,
     reports,
     settings,
     staff_overrides,
@@ -112,6 +115,9 @@ app.include_router(admin_reports.router)
 app.include_router(admin_schedules.router)
 app.include_router(doctor_claim.router)
 app.include_router(doctor_consultation.router)
+app.include_router(doctor_schedules.router)
+app.include_router(doctor_tasks.router)
+app.include_router(places.router)
 app.include_router(domain_audit.router)
 app.include_router(doctor_expense.router)
 app.include_router(doctor_workday.router)

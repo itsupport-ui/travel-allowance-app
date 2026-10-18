@@ -123,7 +123,7 @@ async def get_doctor_visit(
     
     visit_id: int, 
     db: Session = Depends(get_db), 
-    current_user: User = Depends(require_role(["doctor", "admin"]))):
+    current_user: User = Depends(require_role(["doctor", "admin", "clinical_head"]))):
     """
     Get a specific doctor visit by ID.
     """

@@ -96,6 +96,12 @@ class TreatmentSchedule(Base):
         index=True,
     )
     occurrence_date = Column(Date, nullable=True, index=True)
+    # Provenance for schedules created outside the plan flow. NULL means
+    # legacy / admin-created; "direct" marks a doctor-created schedule.
+    # Deliberately not a ForeignKey: a second FK to users would make the
+    # existing TreatmentSchedule/User joins ambiguous.
+    created_by_id = Column(Integer, nullable=True)
+    source = Column(String, nullable=True)
     series = relationship(
         "TreatmentScheduleSeries",
         back_populates="occurrences",

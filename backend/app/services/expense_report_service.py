@@ -170,11 +170,17 @@ def get_expense_export_rows(
                 ),
                 float(expense.fare or 0),
                 expense.claim_id,
-                "Visit route" if expense.visit_id is not None else "Manual",
+                (
+                    "Visit route"
+                    if expense.visit_id is not None
+                    else "Task route"
+                    if expense.task_id is not None
+                    else "Manual"
+                ),
                 expense.expense_category.replace("_", " ").title(),
                 (
                     expense.manual_review_status or "legacy"
-                    if expense.visit_id is None
+                    if not expense.is_route_based
                     else "not_required"
                 ),
                 "Yes" if expense.proof_file else "No",

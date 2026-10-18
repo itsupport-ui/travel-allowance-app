@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.doctor_task import DoctorTask
 from app.models.doctor_visit import DoctorVisit
 from app.models.doctor_expense import DoctorExpense
 from app.models.doctor_travel_waypoint import DoctorTravelWaypoint
@@ -463,6 +464,25 @@ def punch_in_doctor_visit(
             recoverable=True,
             suggested_action="punch_out_active_visit",
             blocking_fields=["active_visit_id"],
+        )
+    active_task = (
+        db.query(DoctorTask.id)
+        .filter(
+            DoctorTask.doctor_id == doctor.id,
+            DoctorTask.task_type != "patient_visit",
+            DoctorTask.session_status == "IN_PROGRESS",
+        )
+        .first()
+    )
+    if active_task is not None:
+        raise DomainHTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="ANOTHER_WORK_IS_ACTIVE",
+            message=(
+                "Punch out from your active task before starting a visit."
+            ),
+            recoverable=True,
+            suggested_action="punch_out_active_work",
         )
 
     exception_used = None

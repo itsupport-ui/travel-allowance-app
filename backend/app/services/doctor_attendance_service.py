@@ -100,7 +100,20 @@ def append_doctor_waypoint(
     address: str | None,
     recorded_at: datetime,
     visit_id: int | None = None,
+    task_id: int | None = None,
 ) -> DoctorTravelWaypoint:
+    if task_id is not None:
+        existing_task_stop = (
+            db.query(DoctorTravelWaypoint)
+            .filter(
+                DoctorTravelWaypoint.workday_id == workday_id,
+                DoctorTravelWaypoint.task_id == task_id,
+            )
+            .first()
+        )
+        if existing_task_stop is not None:
+            return existing_task_stop
+
     if visit_id is not None:
         existing = (
             db.query(DoctorTravelWaypoint)
@@ -140,6 +153,7 @@ def append_doctor_waypoint(
         doctor_id=doctor_id,
         workday_id=workday_id,
         visit_id=visit_id,
+        task_id=task_id,
         waypoint_type=waypoint_type,
         sequence_number=next_sequence,
         address=address,

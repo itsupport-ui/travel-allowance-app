@@ -23,6 +23,7 @@ from app.models.manual_doctor_expense_review_event import (
     ManualDoctorExpenseReviewEvent,
 )
 from app.models.doctor_travel_waypoint import DoctorTravelWaypoint
+from app.models.doctor_task import DoctorTask
 from app.models.doctor_visit import DoctorVisit
 from app.models.doctor_workday import DoctorWorkDay
 from app.models.user import User
@@ -102,7 +103,7 @@ def _manual_actions(
     *,
     admin_view: bool,
 ) -> list[str]:
-    if expense.visit_id is not None or expense.status == "cancelled":
+    if expense.is_route_based or expense.status == "cancelled":
         return []
     if admin_view and expense.manual_review_status == "pending":
         return ["approve", "request_changes"]
@@ -247,6 +248,7 @@ def create_doctor_expense(
     from_location: str | None = Form(None),
     to_location: str | None = Form(None),
     visit_id: int | None = Form(None),
+    task_id: int | None = Form(None),
     transport_mode: str = Form(...),
     fare: float | None = Form(None, gt=0),
     remarks: str | None = Form(None),
@@ -262,6 +264,7 @@ def create_doctor_expense(
         from_location=from_location,
         to_location=to_location,
         visit_id=visit_id,
+        task_id=task_id,
         transport_mode=transport_mode,
         fare=None if fare is None else money(fare),
         remarks=remarks,
@@ -269,6 +272,12 @@ def create_doctor_expense(
         manual_reason=manual_reason,
     )
     saved_proof_path = None
+    if visit_id is not None and task_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Choose either a visit or a task for this expense.",
+        )
+    is_route_expense = visit_id is not None or task_id is not None
 
     try:
         route_values = {}
@@ -288,37 +297,70 @@ def create_doctor_expense(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="A positive actual fare is required for this category.",
             )
-        if expense_data.visit_id is not None:
+        if is_route_expense:
             today = india_now().date()
-            visit = (
-                db.query(DoctorVisit)
-                .filter(
-                    DoctorVisit.id == expense_data.visit_id,
-                    DoctorVisit.doctor_id == doctor.id,
-                    DoctorVisit.visit_date == today,
-                    DoctorVisit.status.in_(
-                        ["visited", "treatment_plan_submitted"]
-                    ),
-                    DoctorVisit.session_status == "COMPLETED",
+            if expense_data.visit_id is not None:
+                visit = (
+                    db.query(DoctorVisit)
+                    .filter(
+                        DoctorVisit.id == expense_data.visit_id,
+                        DoctorVisit.doctor_id == doctor.id,
+                        DoctorVisit.visit_date == today,
+                        DoctorVisit.status.in_(
+                            ["visited", "treatment_plan_submitted"]
+                        ),
+                        DoctorVisit.session_status == "COMPLETED",
+                    )
+                    .first()
                 )
-                .first()
-            )
-            if visit is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        "Select a completed patient visit from today."
-                    ),
+                if visit is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            "Select a completed patient visit from today."
+                        ),
+                    )
+                existing_expense = (
+                    db.query(DoctorExpense.id)
+                    .filter(DoctorExpense.visit_id == visit.id)
+                    .first()
                 )
-            existing_expense = (
-                db.query(DoctorExpense.id)
-                .filter(DoctorExpense.visit_id == visit.id)
-                .first()
-            )
+                stop_label = "visit"
+                stop_columns = {"visit_id": visit.id}
+                stop_waypoint_column = DoctorTravelWaypoint.visit_id
+                stop_id = visit.id
+                fallback_address = visit.patient_address
+            else:
+                task = (
+                    db.query(DoctorTask)
+                    .filter(
+                        DoctorTask.id == expense_data.task_id,
+                        DoctorTask.doctor_id == doctor.id,
+                        DoctorTask.task_type != "patient_visit",
+                        DoctorTask.scheduled_date == today,
+                        DoctorTask.status == "completed",
+                    )
+                    .first()
+                )
+                if task is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Select a completed task from today.",
+                    )
+                existing_expense = (
+                    db.query(DoctorExpense.id)
+                    .filter(DoctorExpense.task_id == task.id)
+                    .first()
+                )
+                stop_label = "task"
+                stop_columns = {"task_id": task.id}
+                stop_waypoint_column = DoctorTravelWaypoint.task_id
+                stop_id = task.id
+                fallback_address = task.place.address if task.place else None
             if existing_expense is not None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="An expense already exists for this visit.",
+                    detail=f"An expense already exists for this {stop_label}.",
                 )
             workday = (
                 db.query(DoctorWorkDay)
@@ -337,14 +379,14 @@ def create_doctor_expense(
                 db.query(DoctorTravelWaypoint)
                 .filter(
                     DoctorTravelWaypoint.workday_id == workday.id,
-                    DoctorTravelWaypoint.visit_id == visit.id,
+                    stop_waypoint_column == stop_id,
                 )
                 .first()
             )
             if destination is None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Travel route was not recorded for this visit.",
+                    detail=f"Travel route was not recorded for this {stop_label}.",
                 )
             origin = previous_waypoint(db, destination)
             if origin is None:
@@ -362,12 +404,12 @@ def create_doctor_expense(
             route_values = {
                 "expense_date": today,
                 "workday_id": workday.id,
-                "visit_id": visit.id,
+                **stop_columns,
                 "from_waypoint_id": origin.id,
                 "to_waypoint_id": destination.id,
                 "from_location": origin.address or "Starting location",
                 "to_location": (
-                    destination.address or visit.patient_address
+                    destination.address or fallback_address or "Destination"
                 ),
                 "from_latitude": origin.latitude,
                 "from_longitude": origin.longitude,
@@ -418,7 +460,7 @@ def create_doctor_expense(
             amount=final_fare,
             threshold=receipt_threshold_applied,
             expense_category=selected_category,
-            is_manual=expense_data.visit_id is None,
+            is_manual=not is_route_expense,
         )
         if receipt_required and proof_file is None:
             raise HTTPException(
@@ -460,11 +502,11 @@ def create_doctor_expense(
             expense_category=selected_category,
             manual_reason=(
                 (expense_data.manual_reason or "").strip()
-                if expense_data.visit_id is None
+                if not is_route_expense
                 else None
             ),
             manual_review_status=(
-                "pending" if expense_data.visit_id is None else None
+                "pending" if not is_route_expense else None
             ),
             policy_id=policy_id,
             rate_applied=rate_applied,
@@ -484,7 +526,7 @@ def create_doctor_expense(
 
         db.add(expense)
         db.flush()
-        if expense.visit_id is None:
+        if not expense.is_route_based:
             _add_manual_event(
                 db,
                 expense=expense,
@@ -547,7 +589,7 @@ def update_doctor_expense(
             doctor.id,
             expense_id,
         )
-        is_manual = expense.visit_id is None
+        is_manual = not expense.is_route_based
         selected_category = _validate_category(
             expense_category or expense.expense_category
         )
@@ -735,7 +777,7 @@ def delete_doctor_expense(
         if expense.proof_file:
             proof_path = Path(expense.proof_file)
 
-        if expense.visit_id is None:
+        if not expense.is_route_based:
             previous_status = expense.manual_review_status
             expense.status = "cancelled"
             expense.manual_review_status = "cancelled"
@@ -790,7 +832,10 @@ def list_manual_doctor_expenses_for_review(
     query = (
         db.query(DoctorExpense, Doctor.name)
         .join(Doctor, Doctor.id == DoctorExpense.doctor_id)
-        .filter(DoctorExpense.visit_id.is_(None))
+        .filter(
+            DoctorExpense.visit_id.is_(None),
+            DoctorExpense.task_id.is_(None),
+        )
     )
     if normalized_status != "all":
         query = query.filter(
@@ -823,7 +868,7 @@ def decide_manual_doctor_expense(
         .with_for_update()
         .first()
     )
-    if expense is None or expense.visit_id is not None:
+    if expense is None or expense.is_route_based:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Manual doctor expense not found",
@@ -913,7 +958,7 @@ def get_manual_doctor_expense_review_history(
         .filter(DoctorExpense.id == expense_id)
         .first()
     )
-    if expense is None or expense.visit_id is not None:
+    if expense is None or expense.is_route_based:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Manual doctor expense not found",

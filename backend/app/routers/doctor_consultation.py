@@ -1141,7 +1141,7 @@ def create_visit_from_doctor_consultation(
     visit_data: DoctorConsultationVisitCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(
-        require_permission("doctor_visits.create")
+        require_permission("consultations.schedule_visit")
     ),
 ):
     try:

@@ -381,13 +381,13 @@ def build_doctor_claim_readiness(
     pending_records = [
         record
         for record in draft_records
-        if record.visit_id is None
+        if not record.is_route_based
         and record.manual_review_status in {"pending", "changes_requested"}
     ]
     eligible_records = [
         record
         for record in draft_records
-        if record.visit_id is not None
+        if record.is_route_based
         or record.manual_review_status in {None, "approved"}
     ]
     readiness = DoctorClaimReadiness(

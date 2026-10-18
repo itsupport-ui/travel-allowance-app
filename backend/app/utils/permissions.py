@@ -17,6 +17,8 @@ ROLE_PERMISSIONS = {
         "treatment_plans.create",
         "doctor_expenses.manage",
         "doctor_claims.submit",
+        "schedules.create_own",
+        "doctor_tasks.own",
     },
     "therapist": {
         "schedules.own",
@@ -51,6 +53,8 @@ ROLE_PERMISSIONS = {
         "consultations.manage",
         "doctor_visits.manage",
         "settings.operational.manage",
+        "doctor_tasks.assign",
+        "places.manage",
     },
 }
 
@@ -58,9 +62,13 @@ ROLE_PERMISSIONS = {
 PERMISSION_IMPLICATIONS = {
     "consultations.manage": {
         "consultations.create",
+        "consultations.schedule_visit",
     },
     "doctor_visits.manage": {
         "doctor_visits.create",
+    },
+    "doctor_visits.create": {
+        "consultations.schedule_visit",
     },
     "claims.approve": {
         "claims.view",
