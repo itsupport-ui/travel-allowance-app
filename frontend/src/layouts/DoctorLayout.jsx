@@ -46,6 +46,18 @@ const navigationItems = [
     permission: "treatment_plans.create",
   },
   {
+    path: "/doctor/tasks",
+    label: "My Tasks",
+    icon: FaCalendarCheck,
+    permission: "doctor_tasks.own",
+  },
+  {
+    path: "/doctor/schedule/create",
+    label: "Schedule Therapist",
+    icon: FaCalendarCheck,
+    permission: "schedules.create_own",
+  },
+  {
     path: "/doctor/expenses",
     label: "Expenses",
     icon: FaReceipt,

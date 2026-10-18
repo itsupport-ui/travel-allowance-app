@@ -22,6 +22,7 @@ import {
   updateDoctorExpense,
 } from "../services/doctorExpenseService"
 import { getTodayCompletedDoctorVisits } from "../services/doctorVisitService"
+import { getTodayCompletedDoctorTasks } from "../services/doctorTaskService"
 
 
 const inputClass =
@@ -40,6 +41,12 @@ const getLocalDate = () => {
 }
 
 
+// An expense is "route based" when a visit or a task supplied its route;
+// everything else is a manual exception that needs administrator review.
+const isRouteExpense = (expense) =>
+  Boolean(expense) && (expense.visit_id != null || expense.task_id != null)
+
+
 const createInitialForm = () => ({
   expense_date: getLocalDate(),
   from_location: "",
@@ -48,6 +55,7 @@ const createInitialForm = () => ({
   fare: "",
   remarks: "",
   visit_id: "",
+  task_id: "",
   entry_mode: "visit",
   expense_category: "public_transport",
   manual_reason: "",
@@ -123,7 +131,7 @@ function Modal({ title, description, onClose, children }) {
 
 function StatusBadge({ expense }) {
   const normalized =
-    expense.visit_id == null && expense.manual_review_status
+    !isRouteExpense(expense) && expense.manual_review_status
       ? expense.manual_review_status
       : expense.status || "draft"
   const colorMap = {
@@ -209,6 +217,7 @@ function DoctorExpensesPage() {
   const [proofFile, setProofFile] = useState(null)
   const [visitOptions, setVisitOptions] = useState([])
   const [visitSearch, setVisitSearch] = useState("")
+  const [taskOptions, setTaskOptions] = useState([])
 
   const loadExpenses = async () => {
     const token = localStorage.getItem("token")
@@ -220,6 +229,7 @@ function DoctorExpensesPage() {
     setAllExpenses(allData || [])
     const options = await getTodayCompletedDoctorVisits(token)
     setVisitOptions(options || [])
+    setTaskOptions((await getTodayCompletedDoctorTasks().catch(() => [])) || [])
   }
 
   useEffect(() => {
@@ -229,11 +239,13 @@ function DoctorExpensesPage() {
       getTodayDoctorExpenses(token),
       getMyDoctorExpenses(token),
       getTodayCompletedDoctorVisits(token),
+      getTodayCompletedDoctorTasks().catch(() => []),
     ])
-      .then(([todayData, allData, options]) => {
+      .then(([todayData, allData, options, tasks]) => {
         setTodayExpenses(todayData || [])
         setAllExpenses(allData || [])
         setVisitOptions(options || [])
+        setTaskOptions(tasks || [])
       })
       .catch((error) => {
         toast.error(
@@ -306,7 +318,12 @@ function DoctorExpensesPage() {
       fare: String(expense.fare),
       remarks: expense.remarks || "",
       visit_id: expense.visit_id ? String(expense.visit_id) : "",
-      entry_mode: expense.visit_id ? "visit" : "manual",
+      task_id: expense.task_id ? String(expense.task_id) : "",
+      entry_mode: expense.visit_id
+        ? "visit"
+        : expense.task_id
+          ? "task"
+          : "manual",
       expense_category: expense.expense_category || "public_transport",
       manual_reason: expense.manual_reason || "",
       correction_reason: "",
@@ -328,11 +345,24 @@ function DoctorExpensesPage() {
       }))
       return
     }
+    if (event.target.name === "task_id") {
+      const option = taskOptions.find(
+        (item) => String(item.id) === event.target.value
+      )
+      setExpenseForm((current) => ({
+        ...current,
+        task_id: event.target.value,
+        from_location: option ? "Previous stop on your route" : "",
+        to_location: option ? option.place_name || option.title : "",
+      }))
+      return
+    }
     if (event.target.name === "entry_mode") {
       setExpenseForm((current) => ({
         ...current,
         entry_mode: event.target.value,
         visit_id: "",
+        task_id: "",
         from_location: "",
         to_location: "",
         expense_category: "public_transport",
@@ -374,15 +404,16 @@ function DoctorExpensesPage() {
         visit_id: expenseForm.visit_id
           ? Number(expenseForm.visit_id)
           : null,
+        task_id: expenseForm.task_id ? Number(expenseForm.task_id) : null,
         expense_category: expenseForm.expense_category,
         manual_reason: expenseForm.manual_reason.trim(),
       }
-      if (payload.visit_id != null) {
+      if (payload.visit_id != null || payload.task_id != null) {
         delete payload.from_location
         delete payload.to_location
         delete payload.manual_reason
       }
-      if (isEditing && selectedExpense?.visit_id == null) {
+      if (isEditing && !isRouteExpense(selectedExpense)) {
         payload.correction_reason = expenseForm.correction_reason.trim()
         payload.version = selectedExpense.manual_review_version
       }
@@ -416,7 +447,7 @@ function DoctorExpensesPage() {
   }
 
   const removeExpense = async (expense) => {
-    const isManual = expense.visit_id == null
+    const isManual = !isRouteExpense(expense)
     const shouldDelete = window.confirm(
       `${isManual ? "Cancel" : "Delete"} the ${formatCurrency(expense.fare)} expense from ${expense.from_location} to ${expense.to_location}?`
     )
@@ -450,7 +481,7 @@ function DoctorExpensesPage() {
 
   const renderActions = (expense, mobile = false) => {
     const canModify = expense.available_actions?.includes("edit") || (
-      expense.visit_id != null &&
+      isRouteExpense(expense) &&
       expense.status === "draft" &&
       expense.claim_id == null
     )
@@ -494,10 +525,10 @@ function DoctorExpensesPage() {
         >
           <FaTrash />
           {isDeleting
-            ? expense.visit_id == null
+            ? !isRouteExpense(expense)
               ? "Cancelling..."
               : "Deleting..."
-            : expense.visit_id == null
+            : !isRouteExpense(expense)
               ? "Cancel"
               : "Delete"}
         </button>
@@ -638,7 +669,7 @@ function DoctorExpensesPage() {
                     </dd>
                   </div>
                 </dl>
-                {expense.visit_id == null && (
+                {!isRouteExpense(expense) && (
                   <div className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-900">
                     <p><span className="font-bold">Manual reason:</span> {expense.manual_reason}</p>
                     {expense.manual_review_reason && (
@@ -758,6 +789,7 @@ function DoctorExpensesPage() {
                   className={inputClass}
                 >
                   <option value="visit">Completed patient visit</option>
+                  <option value="task">Completed task</option>
                   <option value="manual">Manual exception</option>
                 </select>
                 {expenseForm.entry_mode === "manual" && (
@@ -776,12 +808,40 @@ function DoctorExpensesPage() {
                 value={expenseForm.expense_date}
                 onChange={handleFormChange}
                 readOnly={
-                  expenseForm.entry_mode === "visit" ||
-                  selectedExpense?.visit_id != null
+                  expenseForm.entry_mode !== "manual" ||
+                  isRouteExpense(selectedExpense)
                 }
                 className={inputClass}
               />
             </div>
+
+            {!selectedExpense && expenseForm.entry_mode === "task" && (
+              <div className="space-y-2">
+                <label className={labelClass}>Completed task</label>
+                {taskOptions.length === 0 ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                    No completed tasks available for today&apos;s expenses.
+                    Punch out of an assigned task first.
+                  </div>
+                ) : (
+                  <select
+                    required
+                    name="task_id"
+                    value={expenseForm.task_id}
+                    onChange={handleFormChange}
+                    className={inputClass}
+                  >
+                    <option value="">Select completed task</option>
+                    {taskOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.title}
+                        {option.place_name ? ` · ${option.place_name}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
 
             {!selectedExpense && expenseForm.entry_mode === "visit" && (
               <div className="space-y-2">
@@ -837,8 +897,8 @@ function DoctorExpensesPage() {
                   value={expenseForm.from_location}
                   onChange={handleFormChange}
                   readOnly={
-                    expenseForm.entry_mode === "visit" ||
-                    selectedExpense?.visit_id != null
+                    expenseForm.entry_mode !== "manual" ||
+                    isRouteExpense(selectedExpense)
                   }
                   className={inputClass}
                 />
@@ -851,8 +911,8 @@ function DoctorExpensesPage() {
                   value={expenseForm.to_location}
                   onChange={handleFormChange}
                   readOnly={
-                    expenseForm.entry_mode === "visit" ||
-                    selectedExpense?.visit_id != null
+                    expenseForm.entry_mode !== "manual" ||
+                    isRouteExpense(selectedExpense)
                   }
                   className={inputClass}
                 />

@@ -28,6 +28,7 @@ function AdminLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const role = localStorage.getItem("role");
   const canManageDoctorWorkflow = hasAnyPermission([
+    "doctor_tasks.assign",
     "consultations.manage",
     "treatment_plans.approve",
     "claims.view",
@@ -166,6 +167,12 @@ function AdminLayout({ children }) {
           {hasPermission("consultations.manage") && (
             <Link to="/admin/doctor-consultations" onClick={closeSidebar} className={getNavLinkClass("/admin/doctor-consultations")}>
               <FaPhoneAlt className="text-base" /> Consultations
+            </Link>
+          )}
+
+          {hasPermission("doctor_tasks.assign") && (
+            <Link to="/admin/doctor-tasks" onClick={closeSidebar} className={getNavLinkClass("/admin/doctor-tasks")}>
+              <FaTasks className="text-base" /> Doctor Tasks
             </Link>
           )}
 

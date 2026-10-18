@@ -16,6 +16,15 @@ export const requestLocationException = async (payload, token) => {
 }
 
 
+export const getMyLocationExceptions = async () => {
+  const response = await api.get(
+    "/location-exceptions/mine",
+    authConfig(localStorage.getItem("token")),
+  )
+  return response.data
+}
+
+
 export const getLocationExceptions = async (status, token) => {
   const response = await api.get("/location-exceptions", {
     ...authConfig(token),

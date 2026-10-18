@@ -1,4 +1,6 @@
 import LoginPage from "./pages/LoginPage"
+import DoctorTasksPage from "./pages/DoctorTasksPage"
+import AdminDoctorTasksPage from "./pages/AdminDoctorTasksPage"
 import { Navigate, Route, Routes, BrowserRouter } from "react-router-dom"
 
 import AdminDashboard from "./pages/AdminDashboard"
@@ -82,6 +84,9 @@ function App() {
         <Route path="/today-schedule" element={<ProtectedRoute allowedRole="therapist"><Navigate to="/therapist/schedules?view=today" replace /></ProtectedRoute>} />
         <Route path="/upcoming-schedule" element={<ProtectedRoute allowedRole="therapist"><Navigate to="/therapist/schedules?view=upcoming" replace /></ProtectedRoute>} />
         <Route path="/admin/schedule/today" element={<Navigate to="/admin/schedules?view=today" replace />} />
+        <Route path="/doctor/tasks" element={<ProtectedRoute allowedPermission="doctor_tasks.own"><DoctorTasksPage /></ProtectedRoute>} />
+        <Route path="/admin/doctor-tasks" element={<ProtectedRoute allowedPermission="doctor_tasks.assign"><AdminDoctorTasksPage /></ProtectedRoute>} />
+        <Route path="/doctor/schedule/create" element={<ProtectedRoute allowedPermission="schedules.create_own"><AdminCreateSchedulePage mode="doctor" /></ProtectedRoute>} />
         <Route path="/admin/schedule/create" element={<ProtectedRoute allowedPermission="schedules.create"><AdminCreateSchedulePage /></ProtectedRoute>} />
         <Route path="/admin/schedule/:id" element={<ProtectedRoute allowedRoles={["admin", "clinical_head"]}><AdminScheduleDetailsPage /></ProtectedRoute>} />
         <Route path="/admin/schedule/edit/:id" element={<ProtectedRoute allowedRoles={["admin", "clinical_head"]}><AdminEditSchedulePage /></ProtectedRoute>} />

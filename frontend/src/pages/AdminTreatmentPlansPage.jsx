@@ -705,6 +705,14 @@ function AdminTreatmentPlansPage() {
           onClose={closeModal}
         >
           <form onSubmit={submitSchedule} className="space-y-4">
+            {selectedPlan.similar_schedule_count > 0 && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900" role="alert">
+                {selectedPlan.similar_schedule_count} upcoming therapist visit
+                {selectedPlan.similar_schedule_count === 1 ? " is" : "s are"} already
+                booked for {selectedPlan.patient_name} outside this plan. Check the
+                schedule list to avoid duplicate sessions.
+              </p>
+            )}
             <div>
               <label className={labelClass}>Therapist</label>
               <select

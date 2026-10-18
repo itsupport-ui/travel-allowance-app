@@ -1,3 +1,4 @@
+import { getDoctorTaskDaySummary } from "../services/doctorTaskService"
 import { useEffect, useMemo, useState } from "react"
 import toast from "react-hot-toast"
 import {
@@ -131,18 +132,21 @@ function DoctorClaimsPage() {
   const [actionId, setActionId] = useState(null)
   const [selectedClaim, setSelectedClaim] = useState(null)
   const [readiness, setReadiness] = useState(null)
+  const [taskSummary, setTaskSummary] = useState(null)
   const [loadError, setLoadError] = useState("")
 
   const loadClaimsPage = async () => {
     const token = localStorage.getItem("token")
-    const [expenseData, claimData, previewData] = await Promise.all([
+    const [expenseData, claimData, previewData, summaryData] = await Promise.all([
       getTodayDoctorExpenses(token),
       getMyDoctorClaims(token),
       getDoctorClaimPreview(token),
+      getDoctorTaskDaySummary().catch(() => null),
     ])
     setTodayExpenses(expenseData || [])
     setClaims(claimData || [])
     setReadiness(previewData)
+    setTaskSummary(summaryData)
     setLoadError("")
   }
 
@@ -153,11 +157,13 @@ function DoctorClaimsPage() {
       getTodayDoctorExpenses(token),
       getMyDoctorClaims(token),
       getDoctorClaimPreview(token),
+      getDoctorTaskDaySummary().catch(() => null),
     ])
-      .then(([expenseData, claimData, previewData]) => {
+      .then(([expenseData, claimData, previewData, summaryData]) => {
         setTodayExpenses(expenseData || [])
         setClaims(claimData || [])
         setReadiness(previewData)
+        setTaskSummary(summaryData)
         setLoadError("")
       })
       .catch((error) => {
@@ -299,6 +305,38 @@ function DoctorClaimsPage() {
             </p>
           ))}
         </div>
+
+        {taskSummary && taskSummary.total > 0 && (
+          <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm" data-testid="doctor-task-summary">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-slate-900">Today&apos;s tasks</h2>
+              <span className="text-xs font-semibold text-slate-500">
+                {taskSummary.completed} of {taskSummary.total} completed
+              </span>
+            </div>
+            <ul className="mt-3 divide-y divide-slate-100 text-sm">
+              {taskSummary.tasks.map((task) => (
+                <li key={task.id} className="flex items-center justify-between gap-3 py-2">
+                  <span className="truncate text-slate-800">{task.title}</span>
+                  <span className="shrink-0 text-xs text-slate-500">
+                    {task.status.replaceAll("_", " ")}
+                    {task.status === "completed" && !task.has_expense && " · no expense"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {taskSummary.unfinished > 0 && (
+              <p className="mt-3 text-xs font-medium text-rose-700">
+                {taskSummary.unfinished} task{taskSummary.unfinished === 1 ? " is" : "s are"} not finished. Punch out before ending the day.
+              </p>
+            )}
+            {taskSummary.completed_without_expense > 0 && (
+              <p className="mt-2 text-xs text-slate-500">
+                {taskSummary.completed_without_expense} completed task{taskSummary.completed_without_expense === 1 ? " has" : "s have"} no travel expense yet. Add one if you travelled, then submit your claim.
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="rounded-2xl border border-blue-100 bg-white p-4 shadow-sm">
@@ -443,7 +481,7 @@ function DoctorClaimsPage() {
                         <td className="px-4 py-4">
                           <StatusBadge
                             value={
-                              expense.visit_id == null && expense.manual_review_status
+                              expense.visit_id == null && expense.task_id == null && expense.manual_review_status
                                 ? expense.manual_review_status
                                 : expense.status
                             }

@@ -26,6 +26,31 @@ export const getTherapistAvailability = async (params) => {
   return response.data
 }
 
+export const getDoctorScheduleFormOptions = async () => {
+  const response = await api.get(
+    "/doctor-schedules/form-options",
+    authConfig(),
+  )
+  return response.data
+}
+
+export const getDoctorTherapistAvailability = async (params) => {
+  const response = await api.get(
+    "/doctor-schedules/therapist-availability",
+    authConfig(params),
+  )
+  return response.data
+}
+
+export const createDoctorSchedule = async (payload) => {
+  const response = await api.post(
+    "/doctor-schedules/create",
+    payload,
+    authConfig(),
+  )
+  return response.data
+}
+
 export const cancelAdminSchedule = async (scheduleId, scope = "this") => {
   const response = await api.put(
     `/admin-schedules/${scheduleId}/cancel`,

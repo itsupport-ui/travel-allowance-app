@@ -2,8 +2,12 @@ import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import toast from "react-hot-toast"
 import AdminLayout from "../layouts/AdminLayout"
+import DoctorLayout from "../layouts/DoctorLayout"
 import StatusBadge from "../components/ui/StatusBadge"
 import {
+  createDoctorSchedule,
+  getDoctorScheduleFormOptions,
+  getDoctorTherapistAvailability,
   getScheduleFormOptions,
   getTherapistAvailability,
 } from "../services/adminOperationsService"
@@ -50,7 +54,11 @@ function Section({ title, description, children }) {
   )
 }
 
-function AdminCreateSchedulePage() {
+function AdminCreateSchedulePage({ mode = "admin" }) {
+  const isDoctorMode = mode === "doctor"
+  const Layout = isDoctorMode ? DoctorLayout : AdminLayout
+  const loadFormOptions = isDoctorMode ? getDoctorScheduleFormOptions : getScheduleFormOptions
+  const loadAvailability = isDoctorMode ? getDoctorTherapistAvailability : getTherapistAvailability
   const navigate = useNavigate()
   const [form, setForm] = useState(initialForm)
   const [options, setOptions] = useState({ patients: [], doctors: [], therapists: [] })
@@ -64,8 +72,14 @@ function AdminCreateSchedulePage() {
   )
 
   useEffect(() => {
-    getScheduleFormOptions()
-      .then(setOptions)
+    loadFormOptions()
+      .then((loaded) => {
+        setOptions(loaded)
+        // A doctor can only schedule as themselves, so preselect that doctor.
+        if (isDoctorMode && loaded.doctors?.length === 1) {
+          setForm((current) => ({ ...current, doctor_id: String(loaded.doctors[0].id) }))
+        }
+      })
       .catch((error) => toast.error(getErrorMessage(error, "Failed to load form options")))
       .finally(() => setLoadingOptions(false))
   }, [])
@@ -100,7 +114,7 @@ function AdminCreateSchedulePage() {
       setCheckingAvailability(true)
       try {
         setAvailability(
-          await getTherapistAvailability({
+          await loadAvailability({
             therapist_id: form.therapist_id,
             schedule_type: form.schedule_type,
             treatment_date:
@@ -204,7 +218,10 @@ function AdminCreateSchedulePage() {
 
     setSaving(true)
     try {
-      await createSchedule(
+      const submit = isDoctorMode
+        ? (payload) => createDoctorSchedule(payload)
+        : (payload) => createSchedule(payload, localStorage.getItem("token"))
+      await submit(
         {
           ...form,
           patient_reference_id: form.patient_reference_id.trim() || null,
@@ -225,11 +242,10 @@ function AdminCreateSchedulePage() {
               ? Number(form.cadence_days)
               : 1,
         },
-        localStorage.getItem("token"),
       )
       toast.success("Schedule created successfully")
       setForm(initialForm)
-      navigate("/admin/schedules?view=today")
+      navigate(isDoctorMode ? "/doctor" : "/admin/schedules?view=today")
     } catch (error) {
       toast.error(getErrorMessage(error, "Failed to create schedule"))
     } finally {
@@ -238,7 +254,7 @@ function AdminCreateSchedulePage() {
   }
 
   return (
-    <AdminLayout>
+    <Layout>
       <div className="mx-auto w-full max-w-5xl">
         <header className="mb-5">
           <h1 className="text-2xl font-black text-slate-900">Create Schedule</h1>
@@ -426,7 +442,7 @@ function AdminCreateSchedulePage() {
           </div>
         </form>
       </div>
-    </AdminLayout>
+    </Layout>
   )
 }
 
