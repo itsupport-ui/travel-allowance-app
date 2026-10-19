@@ -40,7 +40,12 @@ def upgrade() -> None:
             "updated_at",
             sa.DateTime(timezone=True),
             nullable=True,
-            server_default=sa.func.now(),
+            # SQLite cannot add a column with a non-constant default; the
+            # backfill below fills existing rows there, and migration 0027
+            # sets the default on databases that support altering it.
+            server_default=(
+                None if bind.dialect.name == "sqlite" else sa.func.now()
+            ),
         ),
     )
     for column in columns:
