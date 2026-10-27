@@ -20,7 +20,9 @@ jobs:
       JWT_SECRET_KEY: retention-job-not-used
       GOOGLE_MAPS_API_KEY: retention-job-not-used
       CORS_ORIGINS: https://retention-job.invalid
-      UPLOAD_ROOT: ${{ runner.temp }}/travel-allowance-uploads
+      # The `runner` context is not available in job-level `env`, so use a
+      # fixed path. The cleanup job only needs the setting to be present.
+      UPLOAD_ROOT: /tmp/travel-allowance-uploads
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
