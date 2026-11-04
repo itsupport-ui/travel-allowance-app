@@ -28,6 +28,9 @@ from app.routers import (
     doctor_schedules,
     doctor_tasks,
     domain_audit,
+    freelance_visits,
+    freelancers,
+    public_visits,
     doctor_expense,
     doctor_visit_sessions,
     doctor_workday,
@@ -118,6 +121,9 @@ app.include_router(doctor_consultation.router)
 app.include_router(doctor_schedules.router)
 app.include_router(doctor_tasks.router)
 app.include_router(places.router)
+app.include_router(freelancers.router)
+app.include_router(freelance_visits.router)
+app.include_router(public_visits.router)
 app.include_router(domain_audit.router)
 app.include_router(doctor_expense.router)
 app.include_router(doctor_workday.router)

@@ -2,6 +2,8 @@ const statusStyles = {
   approved: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
   completed: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
   active: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+  paid: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+  assigned: "bg-blue-50 text-blue-700 ring-blue-600/20",
   in_progress: "bg-blue-50 text-blue-700 ring-blue-600/20",
   scheduled: "bg-blue-50 text-blue-700 ring-blue-600/20",
   pending: "bg-amber-50 text-amber-700 ring-amber-600/20",

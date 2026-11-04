@@ -16,6 +16,7 @@ import {
   FaHistory,
   FaTasks,
   FaUserShield,
+  FaUserClock,
 } from "react-icons/fa";
 import {
   hasAnyPermission,
@@ -157,6 +158,12 @@ function AdminLayout({ children }) {
           {hasPermission("follow_ups.manage") && (
             <Link to="/admin/follow-ups" onClick={closeSidebar} className={getNavLinkClass("/admin/follow-ups")}>
               <FaTasks className="text-base" /> Follow-ups
+            </Link>
+          )}
+
+          {hasPermission("freelance_visits.assign") && (
+            <Link to="/admin/freelance-visits" onClick={closeSidebar} className={getNavLinkClass("/admin/freelance-visits")}>
+              <FaUserClock className="text-base" /> Freelance Visits
             </Link>
           )}
 

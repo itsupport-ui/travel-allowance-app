@@ -58,7 +58,9 @@ CORS_ORIGINS = tuple(
 )
 UPLOAD_ROOT = Path(_required_env("UPLOAD_ROOT")).expanduser().resolve()
 AUTO_CREATE_SCHEMA = _optional_bool_env("AUTO_CREATE_SCHEMA", default=False)
-WORKDAY_END_TIME = _optional_time_env("WORKDAY_END_TIME", "18:00")
+PUBLIC_WEB_BASE_URL = os.getenv("PUBLIC_WEB_BASE_URL", "").strip().rstrip("/")
+FREELANCE_LINK_GRACE_DAYS = _optional_int_env("FREELANCE_LINK_GRACE_DAYS", 1)
+WORKDAY_END_TIME =_optional_time_env("WORKDAY_END_TIME", "18:00")
 WORKDAY_AUTO_LOGOUT_ENABLED = _optional_bool_env(
     "WORKDAY_AUTO_LOGOUT_ENABLED",
     default=False,

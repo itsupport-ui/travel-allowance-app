@@ -55,6 +55,8 @@ ROLE_PERMISSIONS = {
         "settings.operational.manage",
         "doctor_tasks.assign",
         "places.manage",
+        "freelancers.manage",
+        "freelance_visits.assign",
     },
 }
 

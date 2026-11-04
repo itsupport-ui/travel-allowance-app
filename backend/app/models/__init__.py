@@ -9,6 +9,8 @@ from app.models.doctor_task import DoctorTask
 from app.models.doctor_visit import DoctorVisit
 from app.models.doctor_travel_waypoint import DoctorTravelWaypoint
 from app.models.doctor_workday import DoctorWorkDay
+from app.models.freelance_therapist import FreelanceTherapist
+from app.models.freelance_visit import FreelanceVisit
 from app.models.location_exception_request import LocationExceptionRequest
 from app.models.location_policy import LocationPolicy
 from app.models.place import Place
