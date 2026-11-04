@@ -31,7 +31,7 @@ NEW_CHECK = (
 )
 
 
-def upgrade() -> None:
+def _create_places() -> None:
     op.create_table(
         "places",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -62,6 +62,8 @@ def upgrade() -> None:
     )
     op.create_index("ix_places_id", "places", ["id"])
 
+
+def _create_doctor_tasks() -> None:
     op.create_table(
         "doctor_tasks",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -127,6 +129,15 @@ def upgrade() -> None:
         ["scheduled_date"],
     )
     op.create_index("ix_doctor_tasks_status", "doctor_tasks", ["status"])
+
+
+def upgrade() -> None:
+    # Deployments that ran with AUTO_CREATE_SCHEMA already have these tables.
+    existing = set(sa.inspect(op.get_bind()).get_table_names())
+    if "places" not in existing:
+        _create_places()
+    if "doctor_tasks" not in existing:
+        _create_doctor_tasks()
 
     with op.batch_alter_table("doctor_travel_waypoints") as batch:
         batch.add_column(sa.Column("task_id", sa.Integer(), nullable=True))
