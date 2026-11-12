@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { FormScrollView } from "../../src/components/layout/FormScrollView";
+import { NavigateButton } from "../../src/components/NavigateButton";
 import {
   DoctorBackHeader,
   DoctorDetailRow,
@@ -456,6 +457,11 @@ export default function DoctorVisitDetailsScreen() {
 
             <View style={styles.detailCard}>
               <DoctorDetailRow label="Address" value={visit.patient_address} />
+              <NavigateButton
+                address={visit.patient_address}
+                latitude={visit.patient_latitude}
+                longitude={visit.patient_longitude}
+              />
               <DoctorDetailRow
                 label="Visit date"
                 value={formatDoctorDate(visit.visit_date)}

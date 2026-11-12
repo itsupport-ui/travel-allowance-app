@@ -27,6 +27,7 @@ import {
 } from "react-native-safe-area-context";
 
 import { FormScrollView } from "../src/components/layout/FormScrollView";
+import { NavigateButton } from "../src/components/NavigateButton";
 import { ScheduleListSkeleton } from "../src/components/skeletons/ScreenSkeletons";
 import { queryKeys } from "../src/query/queryKeys";
 import { getApiErrorMessage } from "../src/services/errorHandler";
@@ -783,6 +784,11 @@ export default function ScheduleDetailsScreen() {
               <DetailRow
                 label="Address"
                 value={schedule.patient_address}
+              />
+              <NavigateButton
+                address={schedule.patient_address}
+                latitude={schedule.patient_latitude}
+                longitude={schedule.patient_longitude}
               />
             </Section>
 
