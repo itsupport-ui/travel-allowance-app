@@ -33,6 +33,42 @@ const formatDate = (value) =>
       }).format(new Date(`${value}T00:00:00`))
     : "—"
 
+const formatPunchTime = (value) =>
+  value
+    ? new Date(value).toLocaleString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : null
+
+function PunchCell({ label, time, latitude, longitude }) {
+  const formattedTime = formatPunchTime(time)
+  if (!formattedTime) return <p className="text-xs text-slate-400">{label} not recorded</p>
+  const hasCoordinates = typeof latitude === "number" && typeof longitude === "number"
+  return (
+    <p className="text-xs text-slate-600">
+      {label} {formattedTime}
+      {hasCoordinates ? (
+        <>
+          {" · "}
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-bold text-blue-700 hover:text-blue-900"
+          >
+            Map
+          </a>
+        </>
+      ) : (
+        <span className="font-semibold text-amber-700"> · GPS not captured</span>
+      )}
+    </p>
+  )
+}
+
 const askReference = (prompt) => {
   const reference = window.prompt(prompt)
   if (reference === null) return null
@@ -312,6 +348,20 @@ function FreelancePayoutsSection({ onChanged }) {
                           {visit.payment_reference && (
                             <p className="mt-1 text-[11px] text-slate-500">Ref {visit.payment_reference}</p>
                           )}
+                          <div className="mt-1 space-y-0.5">
+                            <PunchCell
+                              label="In"
+                              time={visit.punch_in_time}
+                              latitude={visit.punch_in_latitude}
+                              longitude={visit.punch_in_longitude}
+                            />
+                            <PunchCell
+                              label="Out"
+                              time={visit.punch_out_time}
+                              latitude={visit.punch_out_latitude}
+                              longitude={visit.punch_out_longitude}
+                            />
+                          </div>
                         </td>
                         <td className="space-x-3 px-4 py-3 text-right">
                           {visit.has_proof && (

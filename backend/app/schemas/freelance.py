@@ -84,7 +84,11 @@ class FreelanceVisitResponse(BaseModel):
     fee_amount: Decimal
     status: str
     punch_in_time: datetime | None
+    punch_in_latitude: float | None
+    punch_in_longitude: float | None
     punch_out_time: datetime | None
+    punch_out_latitude: float | None
+    punch_out_longitude: float | None
     duration_seconds: int | None
     location_unverified: bool
     unverified_reason: str | None
