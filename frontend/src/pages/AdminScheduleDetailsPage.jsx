@@ -20,6 +20,43 @@ function Detail({ label, value, wide = false }) {
   )
 }
 
+const formatPunchTime = (value) =>
+  value
+    ? new Date(value).toLocaleString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : null
+
+function PunchDetail({ label, time, latitude, longitude }) {
+  const formattedTime = formatPunchTime(time)
+  const hasCoordinates = typeof latitude === "number" && typeof longitude === "number"
+
+  return (
+    <div className="border-b border-slate-100 py-3">
+      <p className="text-[10px] font-bold uppercase text-slate-400">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-slate-800">
+        {formattedTime || "Not recorded"}
+      </p>
+      {hasCoordinates && (
+        <a
+          href={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 inline-block text-xs font-bold text-blue-700 hover:text-blue-900"
+        >
+          View location on map
+        </a>
+      )}
+      {formattedTime && !hasCoordinates && (
+        <p className="mt-1 text-xs font-semibold text-amber-700">GPS not captured</p>
+      )}
+    </div>
+  )
+}
+
 function AdminScheduleDetailsPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -114,6 +151,24 @@ function AdminScheduleDetailsPage() {
                   <Detail label="Treatment" value={schedule.treatment_name} />
                   <Detail label="Medicines" value={schedule.medicines} />
                   <Detail label="Patient address" value={schedule.patient_address} wide />
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">
+                <h2 className="text-sm font-black text-slate-900">Punch In / Punch Out</h2>
+                <div className="mt-2 grid md:grid-cols-2 md:gap-x-5">
+                  <PunchDetail
+                    label="Punch in"
+                    time={schedule.punch_in_time}
+                    latitude={schedule.punch_in_latitude}
+                    longitude={schedule.punch_in_longitude}
+                  />
+                  <PunchDetail
+                    label="Punch out"
+                    time={schedule.punch_out_time}
+                    latitude={schedule.punch_out_latitude}
+                    longitude={schedule.punch_out_longitude}
+                  />
                 </div>
               </section>
 
