@@ -31,6 +31,8 @@ export interface CreateScheduleRequest {
   visit_type: ScheduleVisitType;
   medicines?: string | null;
   patient_address: string;
+  patient_latitude?: number | null;
+  patient_longitude?: number | null;
   schedule_type: ScheduleType;
   treatment_date?: string | null;
   start_date?: string | null;

@@ -102,6 +102,37 @@ class DoctorSchedulesApiTests(unittest.TestCase):
         self.assertEqual(schedule.source, "direct")
         self.assertIsNone(schedule.treatment_plan_id)
 
+    def test_picked_address_pin_is_stored_without_geocoding(self):
+        with patch(
+            "app.routers.treatment_schedule.resolve_patient_coordinates",
+        ) as geocode, patch(
+            "app.routers.treatment_schedule.notify_schedule_assigned"
+        ):
+            response = self.client.post(
+                "/doctor-schedules/create",
+                json=self.payload(patient_latitude=13.0850, patient_longitude=80.2101),
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        geocode.assert_not_called()
+        schedule = self.db.query(TreatmentSchedule).one()
+        self.assertAlmostEqual(schedule.patient_latitude, 13.0850)
+        self.assertAlmostEqual(schedule.patient_longitude, 80.2101)
+
+    def test_typed_address_without_pin_is_still_geocoded(self):
+        with patch(
+            "app.routers.treatment_schedule.resolve_patient_coordinates",
+            return_value=(13.1, 80.2),
+        ) as geocode, patch(
+            "app.routers.treatment_schedule.notify_schedule_assigned"
+        ):
+            response = self.client.post(
+                "/doctor-schedules/create", json=self.payload()
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        geocode.assert_called_once_with("Anna Nagar, Chennai")
+
     def test_recurring_schedule_stamps_every_occurrence(self):
         start = date.today() + timedelta(days=1)
         response = self.create(

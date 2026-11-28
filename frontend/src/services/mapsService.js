@@ -21,3 +21,19 @@ export const reverseGeocode = async ( latitude, longitude, token ) => {
     );
     return response.data;
 };
+
+export const getAddressSuggestions = async (query, sessionToken) => {
+    const response = await api.get("/maps/autocomplete", {
+        params: { q: query, session_token: sessionToken },
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+    });
+    return response.data?.suggestions || [];
+};
+
+export const getPlaceLocation = async (placeId, sessionToken) => {
+    const response = await api.get("/maps/place", {
+        params: { place_id: placeId, session_token: sessionToken },
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+    });
+    return response.data;
+};

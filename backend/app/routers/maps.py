@@ -1,11 +1,14 @@
 from fastapi import (
     APIRouter,
     Depends,
-    HTTPException
+    HTTPException,
+    Query,
 )
 from app.services.maps_service import (
     MapsServiceError,
+    autocomplete_places,
     calculate_distance_km,
+    get_place_location,
     reverse_geocode_address,
 )
 from app.utils.auth import get_current_user
@@ -56,3 +59,27 @@ def reverse_geocode(
         )
 
     return {"address": address}
+
+
+@router.get("/autocomplete")
+def address_autocomplete(
+    q: str = Query(min_length=3, max_length=200),
+    session_token: str | None = Query(default=None, max_length=100),
+):
+    """Suggestions while typing an address, like Google Maps or a cab app."""
+    try:
+        return {"suggestions": autocomplete_places(q.strip(), session_token)}
+    except MapsServiceError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@router.get("/place")
+def place_location(
+    place_id: str = Query(min_length=3, max_length=300, pattern=r"^[A-Za-z0-9_-]+$"),
+    session_token: str | None = Query(default=None, max_length=100),
+):
+    """Exact coordinates of the address the user picked from suggestions."""
+    try:
+        return get_place_location(place_id, session_token)
+    except MapsServiceError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error

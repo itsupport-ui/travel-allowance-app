@@ -125,6 +125,17 @@ def _is_travel_schedule_unique_violation(error: IntegrityError) -> bool:
         )
     )
 
+def _patient_coordinates(
+    address: str,
+    latitude: float | None,
+    longitude: float | None,
+) -> tuple[float, float]:
+    """Exact pin picked from address suggestions, else geocode the text."""
+    if has_valid_coordinates(latitude, longitude):
+        return float(latitude), float(longitude)
+    return resolve_patient_coordinates(address)
+
+
 @router.post(
     "/create",
     response_model=
@@ -264,8 +275,10 @@ def create_schedule(
             )
 
     try:
-        patient_latitude, patient_longitude = resolve_patient_coordinates(
-            treatment_schedule.patient_address
+        patient_latitude, patient_longitude = _patient_coordinates(
+            treatment_schedule.patient_address,
+            treatment_schedule.patient_latitude,
+            treatment_schedule.patient_longitude,
         )
 
         schedule = TreatmentSchedule(
@@ -1615,10 +1628,17 @@ def update_schedule(
         schedule.patient_longitude,
     )
 
+    picked_coordinates = has_valid_coordinates(
+        payload.patient_latitude,
+        payload.patient_longitude,
+    )
+
     try:
-        if address_changed or coordinates_missing:
-            patient_latitude, patient_longitude = (
-                resolve_patient_coordinates(payload.patient_address)
+        if picked_coordinates or address_changed or coordinates_missing:
+            patient_latitude, patient_longitude = _patient_coordinates(
+                payload.patient_address,
+                payload.patient_latitude,
+                payload.patient_longitude,
             )
         else:
             patient_latitude = schedule.patient_latitude

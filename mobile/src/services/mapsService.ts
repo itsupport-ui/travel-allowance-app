@@ -143,3 +143,50 @@ export const calculateDistance = async (
     throw getMapsError(error, "Unable to calculate the route distance.");
   }
 };
+
+export interface AddressSuggestion {
+  place_id: string;
+  description: string;
+  main_text: string;
+  secondary_text: string;
+}
+
+export interface PlaceLocation {
+  place_id: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+}
+
+/** Google-style address suggestions while typing. */
+export const getAddressSuggestions = async (
+  query: string,
+  sessionToken: string
+): Promise<AddressSuggestion[]> => {
+  const response = await api.get<{ suggestions: AddressSuggestion[] }>(
+    "/maps/autocomplete",
+    {
+      headers: await getAuthHeaders(),
+      params: { q: query, session_token: sessionToken },
+      timeout: 8_000,
+    }
+  );
+  return response.data.suggestions ?? [];
+};
+
+/** Exact address and map pin of a picked suggestion. */
+export const getPlaceLocation = async (
+  placeId: string,
+  sessionToken: string
+): Promise<PlaceLocation> => {
+  try {
+    const response = await api.get<PlaceLocation>("/maps/place", {
+      headers: await getAuthHeaders(),
+      params: { place_id: placeId, session_token: sessionToken },
+      timeout: 8_000,
+    });
+    return response.data;
+  } catch (error) {
+    throw getMapsError(error, "Unable to load the selected address.");
+  }
+};

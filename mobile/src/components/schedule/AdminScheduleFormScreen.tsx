@@ -22,6 +22,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { FormScrollView } from "../layout/FormScrollView";
+import { AddressAutocompleteField } from "./AddressAutocompleteField";
 import {
   DateTimeField,
   FormTextField,
@@ -456,6 +457,8 @@ export function AdminScheduleFormScreen({
       setForm((current) => ({
         ...current,
         patientAddress: entry.patient.address,
+        patientLatitude: null,
+        patientLongitude: null,
         patientName: entry.patient.name,
         patientPhone: entry.patient.phone ?? "",
         patientReferenceId: entry.patient.referenceId ?? "",
@@ -697,30 +700,24 @@ export function AdminScheduleFormScreen({
               />
             </View>
           </View>
-          <FormTextField
-            accessibilityLabel="Patient address"
+          <AddressAutocompleteField
             error={errors.patientAddress}
-            icon="location-outline"
-            label="Patient Address"
-            maxLength={500}
-            multiline
-            onChangeText={(value) =>
-              updateField("patientAddress", value)
-            }
-            placeholder="Complete visit address"
-            required
+            latitude={form.patientLatitude}
+            longitude={form.patientLongitude}
+            onChange={({ address, latitude, longitude }) => {
+              setForm((current) => ({
+                ...current,
+                patientAddress: address,
+                patientLatitude: latitude,
+                patientLongitude: longitude,
+              }));
+              setErrors((current) => ({
+                ...current,
+                patientAddress: undefined,
+              }));
+            }}
             value={form.patientAddress}
           />
-          <View style={styles.infoRow}>
-            <Ionicons
-              color={colors.blue}
-              name="map-outline"
-              size={17}
-            />
-            <Text style={styles.infoText}>
-              The address is verified and geocoded when the schedule is saved.
-            </Text>
-          </View>
         </FormSection>
 
         <FormSection

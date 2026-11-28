@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import toast from "react-hot-toast"
 
+import AddressAutocomplete from "../components/ui/AddressAutocomplete"
 import AdminLayout from "../layouts/AdminLayout"
 
 import {
@@ -32,6 +33,8 @@ function AdminEditSchedulePage() {
     visit_type: "home_visit",
     medicines: "",
     patient_address: "",
+    patient_latitude: null,
+    patient_longitude: null,
     schedule_type: "one_time",
     treatment_date: "",
     start_date: "",
@@ -68,6 +71,9 @@ function AdminEditSchedulePage() {
           visit_type: schedule.visit_type || "home_visit",
           medicines: schedule.medicines || "",
           patient_address: schedule.patient_address || "",
+          // Not prefilled: only a fresh pick from suggestions resets the pin.
+          patient_latitude: null,
+          patient_longitude: null,
           schedule_type: schedule.schedule_type || "one_time",
           treatment_date: schedule.treatment_date || "",
           start_date: schedule.start_date || "",
@@ -318,14 +324,23 @@ function AdminEditSchedulePage() {
           {/* Group 4: Target Execution Routing Address */}
           <div>
             <label className={labelClasses}>Patient Execution Address</label>
-            <textarea
-              name="patient_address"
+<AddressAutocomplete
               value={formData.patient_address}
-              onChange={handleChange}
+              latitude={formData.patient_latitude}
+              longitude={formData.patient_longitude}
+              onChange={({ address, latitude, longitude }) =>
+                setFormData((current) => ({
+                  ...current,
+                  patient_address: address,
+                  patient_latitude: latitude,
+                  patient_longitude: longitude,
+                }))
+              }
               className={`${inputClasses} resize-none`}
-              rows="2"
-              placeholder="Patient Destination Address"
-            ></textarea>
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              If the therapist cannot punch in at this patient&apos;s home, retype the address and pick it from the suggestions to fix the map pin.
+            </p>
           </div>
 
           <hr className="border-gray-100 my-2" />

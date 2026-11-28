@@ -14,12 +14,15 @@ import {
 import { createSchedule } from "../services/scheduleService"
 import { getErrorMessage } from "../services/http"
 import { isEndAfterStart, isValidPhone } from "../utils/validation"
+import AddressAutocomplete from "../components/ui/AddressAutocomplete"
 
 const initialForm = {
   patient_name: "",
   patient_reference_id: "",
   patient_phone: "",
   patient_address: "",
+  patient_latitude: null,
+  patient_longitude: null,
   treatment_name: "",
   medicines: "",
   visit_type: "home_visit",
@@ -167,6 +170,8 @@ function AdminCreateSchedulePage({ mode = "admin" }) {
             patient_reference_id: patient.reference_id || "",
             patient_phone: patient.phone || "",
             patient_address: patient.address || "",
+            patient_latitude: null,
+            patient_longitude: null,
           }
         : {}),
     }))
@@ -292,7 +297,21 @@ function AdminCreateSchedulePage({ mode = "admin" }) {
               </label>
               <label className={`${labelClass} md:col-span-2`}>
                 Patient address
-                <textarea rows="2" value={form.patient_address} onChange={(event) => change("patient_address", event.target.value)} className={inputClass} required />
+                <AddressAutocomplete
+                  value={form.patient_address}
+                  latitude={form.patient_latitude}
+                  longitude={form.patient_longitude}
+                  onChange={({ address, latitude, longitude }) =>
+                    setForm((current) => ({
+                      ...current,
+                      patient_address: address,
+                      patient_latitude: latitude,
+                      patient_longitude: longitude,
+                    }))
+                  }
+                  className={inputClass}
+                  required
+                />
               </label>
             </div>
           </Section>

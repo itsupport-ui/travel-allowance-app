@@ -15,6 +15,9 @@ export interface ScheduleFormState {
   medicines: string;
   outTime: Date | null;
   patientAddress: string;
+  /** Exact pin from a picked address suggestion; null = geocode the text. */
+  patientLatitude: number | null;
+  patientLongitude: number | null;
   patientName: string;
   patientPhone: string;
   patientReferenceId: string;

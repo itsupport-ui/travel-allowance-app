@@ -162,15 +162,123 @@ def geocode_address(address: str) -> tuple[float, float] | None:
     try:
         response = requests.get(
             url,
-            params={"address": address, "key": GOOGLE_MAPS_API_KEY},
+            params={
+                "address": address,
+                "key": GOOGLE_MAPS_API_KEY,
+                "region": "in",
+            },
             timeout=10,
         )
         data = response.json()
         result = data.get("results", [None])[0]
         location = result["geometry"]["location"]
+        location_type = result["geometry"].get("location_type")
+        if location_type in {"APPROXIMATE", "GEOMETRIC_CENTER"}:
+            # Typical for house addresses: Google only matched the area, so
+            # the pin can be km away from the door. Picking the address from
+            # the autocomplete list avoids this.
+            logger.info(
+                "Geocoded address only to %s precision.", location_type
+            )
         return float(location["lat"]), float(location["lng"])
     except Exception:
         return None
+
+
+PLACES_BASE_URL = "https://places.googleapis.com/v1"
+
+
+def autocomplete_places(query: str, session_token: str | None = None) -> list[dict]:
+    """Address suggestions as the user types (Google Places API, New)."""
+    if not GOOGLE_MAPS_API_KEY:
+        raise MapsServiceError("Maps service is not configured.")
+
+    body = {
+        "input": query,
+        "includedRegionCodes": ["in"],
+        "languageCode": "en",
+    }
+    if session_token:
+        body["sessionToken"] = session_token
+
+    try:
+        response = requests.post(
+            f"{PLACES_BASE_URL}/places:autocomplete",
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+            },
+            json=body,
+            timeout=8,
+        )
+    except requests.RequestException as error:
+        logger.warning("Places autocomplete failed: %s", type(error).__name__)
+        raise MapsServiceError("Address suggestions are unavailable.") from error
+
+    if not response.ok:
+        logger.warning("Places autocomplete returned HTTP %s.", response.status_code)
+        raise MapsServiceError("Address suggestions are unavailable.")
+
+    suggestions = []
+    for item in (response.json() or {}).get("suggestions", []):
+        prediction = item.get("placePrediction") if isinstance(item, dict) else None
+        if not prediction or not prediction.get("placeId"):
+            continue
+        structured = prediction.get("structuredFormat") or {}
+        suggestions.append(
+            {
+                "place_id": prediction["placeId"],
+                "description": (prediction.get("text") or {}).get("text", ""),
+                "main_text": (structured.get("mainText") or {}).get("text", ""),
+                "secondary_text": (structured.get("secondaryText") or {}).get("text", ""),
+            }
+        )
+    return suggestions
+
+
+def get_place_location(place_id: str, session_token: str | None = None) -> dict:
+    """Exact address and coordinates of a place picked from autocomplete."""
+    if not GOOGLE_MAPS_API_KEY:
+        raise MapsServiceError("Maps service is not configured.")
+
+    params = {"sessionToken": session_token} if session_token else None
+    try:
+        response = requests.get(
+            f"{PLACES_BASE_URL}/places/{place_id}",
+            headers={
+                "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+                "X-Goog-FieldMask": "id,displayName,formattedAddress,location",
+            },
+            params=params,
+            timeout=8,
+        )
+    except requests.RequestException as error:
+        logger.warning("Place details failed: %s", type(error).__name__)
+        raise MapsServiceError("Unable to load the selected address.") from error
+
+    if not response.ok:
+        logger.warning("Place details returned HTTP %s.", response.status_code)
+        raise MapsServiceError("Unable to load the selected address.")
+
+    data = response.json() or {}
+    location = data.get("location") or {}
+    latitude = location.get("latitude")
+    longitude = location.get("longitude")
+    if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+        raise MapsServiceError("The selected address has no map location.")
+
+    name = (data.get("displayName") or {}).get("text") or ""
+    formatted = data.get("formattedAddress") or ""
+    address = formatted
+    if name and not formatted.lower().startswith(name.lower()):
+        address = f"{name}, {formatted}" if formatted else name
+
+    return {
+        "place_id": data.get("id") or place_id,
+        "address": address,
+        "latitude": float(latitude),
+        "longitude": float(longitude),
+    }
 
 
 def reverse_geocode_address(latitude: float, longitude: float) -> str | None:

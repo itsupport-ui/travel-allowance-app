@@ -17,6 +17,12 @@ class TreatmentScheduleCreate(BaseModel):
 
     patient_address: str
 
+    # Set when the address was picked from autocomplete: the exact pin.
+    # Without it the typed text is geocoded, which is often only
+    # area-level for house addresses.
+    patient_latitude: float | None = Field(default=None, ge=-90, le=90)
+    patient_longitude: float | None = Field(default=None, ge=-180, le=180)
+
     schedule_type: str
 
     treatment_date: date | None = None
@@ -140,6 +146,12 @@ class TreatmentScheduleUpdate(BaseModel):
     medicines: str | None = None
 
     patient_address: str
+
+    # Set when the address was picked from autocomplete: the exact pin.
+    # Without it the typed text is geocoded, which is often only
+    # area-level for house addresses.
+    patient_latitude: float | None = Field(default=None, ge=-90, le=90)
+    patient_longitude: float | None = Field(default=None, ge=-180, le=180)
 
     schedule_type: str
 

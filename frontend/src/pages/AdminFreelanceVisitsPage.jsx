@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import toast from "react-hot-toast"
 
 import AdminLayout from "../layouts/AdminLayout"
+import AddressAutocomplete from "../components/ui/AddressAutocomplete"
 import FreelancePayoutsSection from "../components/FreelancePayoutsSection"
 import { hasPermission } from "../utils/permissions"
 import PageState from "../components/ui/PageState"
@@ -160,6 +161,8 @@ const emptyVisitForm = () => ({
   patient_name: "",
   patient_phone: "",
   patient_address: "",
+  patient_latitude: null,
+  patient_longitude: null,
   treatment_name: "",
   visit_date: today(),
   start_time: "",
@@ -201,6 +204,8 @@ function AssignForm({ freelancers, onAssigned, onFreelancerAdded }) {
         patient_name: form.patient_name.trim(),
         patient_phone: form.patient_phone.trim() || null,
         patient_address: form.patient_address.trim(),
+        patient_latitude: form.patient_latitude,
+        patient_longitude: form.patient_longitude,
         treatment_name: form.treatment_name.trim(),
         visit_date: form.visit_date,
         start_time: form.start_time ? `${form.start_time}:00` : null,
@@ -263,8 +268,24 @@ function AssignForm({ freelancers, onAssigned, onFreelancerAdded }) {
           <input value={form.patient_phone} onChange={change("patient_phone")} inputMode="tel" maxLength={20} className={`${inputClass} mt-1`} />
         </label>
         <label className={`${labelClass} md:col-span-2`}>
-          Patient address (located on the map automatically)
-          <textarea rows={2} value={form.patient_address} onChange={change("patient_address")} minLength={5} required className={`${inputClass} mt-1`} />
+          Patient address
+          <div className="mt-1">
+            <AddressAutocomplete
+              value={form.patient_address}
+              latitude={form.patient_latitude}
+              longitude={form.patient_longitude}
+              onChange={({ address, latitude, longitude }) =>
+                setForm((current) => ({
+                  ...current,
+                  patient_address: address,
+                  patient_latitude: latitude,
+                  patient_longitude: longitude,
+                }))
+              }
+              required
+              className={inputClass}
+            />
+          </div>
         </label>
         <label className={`${labelClass} md:col-span-2`}>
           Treatment
